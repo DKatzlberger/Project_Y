@@ -75,4 +75,120 @@ extract_results <- function(limmaFit){
   limmaRes
 }
 
+visual_validation <- function(meta, 
+  signal, 
+  mean_stats, 
+  contrast_stats, 
+  goi,
+  data_output_column){
+  # To visually validate the output of stats. models.
+  # meta: Meta data. 
+  # signal: Signal of the molecular data.
+  # mean_stats: Results from means model.
+  # contrast_stats: Results from comparison.
+  # goi: Genes to validate.
 
+  mean_stats <- 
+    mean_stats |> 
+    as_tibble() |> 
+    group_by(coef) |> 
+    filter(Gene %in% goi) 
+
+  contrast_stats <- 
+    contrast_stats |> 
+    as_tibble() |> 
+    group_by(coef) |> 
+    filter(Gene %in% goi) 
+  
+  signal <- 
+    signal |> 
+    as_tibble(rownames = 'Gene') |> 
+    filter(Gene %in% goi) |> 
+    as.data.frame() |> 
+    column_to_rownames('Gene') |> 
+    t() |> 
+    as_tibble(rownames = 'sampleId') 
+  
+  mean_signal <- 
+    meta |> 
+    as_tibble(rownames = 'sampleId') |> 
+    select(all_of(data_output_column), sampleId) |> 
+    merge(signal, by = 'sampleId') |> 
+    group_by(c(data_output_column)) |> 
+    summarise(across(where(is.numeric), mean)) |> 
+    pivot_longer(cols = !all_of(data_output_column),
+                 values_to = 'E',
+                 names_to = 'Gene')
+  
+  # Plot stats. results
+  contrast_stats_plot <- ggplot(
+    contrast_stats,
+    aes(
+      x = coef,
+      y = Gene,
+      color = logFC,
+      size = pmin(5, -log10(adj.P.Val))
+    )
+  ) +
+       geom_point() +
+       scale_color_gradient2(
+        low="blue",
+        high="red"
+  ) +
+  ggtitle('Results of comparison') +
+  ylab('Gene') +
+  xlab('Data output column') +
+  theme(axis.text.x = element_text(angle = 90))
+
+    mean_stats_plot <- ggplot(
+    mean_stats,
+    aes(
+      x = coef,
+      y = Gene,
+      color = logFC,
+      size = pmin(5, -log10(adj.P.Val))
+    )
+  ) +
+       geom_point() +
+       scale_color_gradient2(
+        low="blue",
+        high="red"
+  ) +
+  ggtitle('Results of means model') +
+  ylab('Gene') +
+  xlab('Data output column') +
+  theme(axis.text.x = element_text(angle = 90))
+
+  # Plot mean signal
+  mean_signal_plot <- ggplot(
+    mean_signal,
+    aes(
+      x = data_output_column,
+      y = Gene,
+      fill = E
+    )
+  ) +
+  geom_tile() +
+  scale_fill_gradient2(
+        low="blue",
+        high="red"
+  ) +
+  ggtitle('Mean signal in the data') +
+  ylab('Gene') +
+  xlab('Data output column') +
+  theme(axis.text.x = element_text(angle = 90))
+
+  # Patchwork
+  validation_plot <- contrast_stats_plot + mean_stats_plot + mean_signal_plot
+  validation_plot
+}
+
+is_yml_file <- function(file_path) {
+  # Check if the file exists and if the file has a .yml extension
+  if (!file.exists(file_path)) {
+    stop('Error: The file does not exist.')
+  }
+  if (tolower(tools::file_ext(file_path)) != 'yml') {
+    stop('Error: The file is not a YML file.')
+  }
+}

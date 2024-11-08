@@ -6,9 +6,14 @@ suppressPackageStartupMessages(
   library(data.table)
   library(yaml)
   library(anndata)
+  # Python
+  library(reticulate)
+  # Specify reticulate env
+  use_condaenv('/opt/conda/envs/ancestry/bin/python')
   # Statistics library
   library(edgeR)
   # Visualization
+  library(patchwork)
   library(httpgd)
   }
 )
@@ -16,30 +21,19 @@ suppressPackageStartupMessages(
 # Custom functions
 source('r_utils.R')
 
-# Give permission to execute
-# TODO - Q.Wolfgang: Is there a way to give the script execution permission?
-system('chmod 777 dge_workflow.R')
-
 # Here starts the script
 print('Envoking R.')
-print('Starting differential gene expression analysis.')
-
-# Load the data (In not anndata format)
-# meta <- fread('data/downloads/tcga_csv/tcga_studies_meta_intersection_adjusted_withnewcolumns.csv')[,-1]
-# data <- fread('data/downloads/tcga_csv/seqV2_merged_RSEM.csv')[,-1]
-
-# Meta data needs to be modified to replace all ' ' with '_'
-# charvars <- sapply(meta, is.character)
-# meta[,
-#      (names(meta)[charvars]) := lapply(.SD, gsub, pat="[: ]", rep="_"),
-#      .SDcols=charvars
-# ]
-
 # Load the settings (They are a command line input)
 args = commandArgs(trailingOnly = TRUE)
-
-# TODO - Check that it is a yaml file
+# Check that it is a yaml file and exists
+is_yml_file(args[1])
 setup <- yaml.load_file(args[1])
+
+
+# Data loading for debugging
+setup <- yaml.load_file('/home/people/dkatzlberger/Project_Y/dev_settings.yml')
+
+print('Start differential gene expression analysis.')
 
 # Load data
 adata <- read_h5ad(setup$data_path)
@@ -64,8 +58,10 @@ train_design <- create_design(setup$classification$output_column, meta = train_d
 test_design <- create_design(setup$classification$output_column, meta = test_data$obs)
 inf_design <- create_design(setup$classification$output_column, meta = inf_data$obs)
 
+
 # Create contrast matrix (Only needs to be created once)
 contrast_matrix <- create_contrast(colnames(train_design))
+print(contrast_matrix)
 
 # Filter genes by expression (Use the train sets)
 keeper_genes <- filterByExpr(t(train_data$X), train_design)
@@ -78,7 +74,6 @@ inf_filtered <- inf_data[, keeper_genes]
 write_yaml(train_filtered$var_names, file.path(setup$output_directory, 'Features.yml'))
 
 # Assertion: Check array
-## Q.Wolfgang: How to check 3 list are equal ----
 # Same genes in all sets
 stopifnot(all(train_data$var_names == test_data$var_names))
 # Dimensions
@@ -134,84 +129,58 @@ fwrite(inf_contrast_res, file.path(setup$output_directory, 'Contrast_inf.csv'))
 
 # Visualization
 # Check if logFC of models align with signal in the data
-# TODO - check means model
-# TODO - check contrast
+if(setup$visual_val){
+# Get genes for validation
+top <- train_mean_res |> 
+  slice_max(logFC, n = 5) |> 
+  pull(Gene) |> 
+  unique()
+  
+low <- train_mean_res |> 
+  slice_min(logFC, n = 5) |> 
+  pull(Gene) |> 
+  unique()
 
+goi <- c(top, low)
 
+# Validation of the training 
+t <- visual_validation(
+  meta = train_data$obs,
+  signal = train_norm$E,
+  mean_stats = train_mean_res,
+  contrast_stats = train_contrast_res,
+  goi = goi,
+  data_output_column = setup$classification$output_column
+)
 
+i <- visual_validation(
+  meta = inf_data$obs,
+  signal = inf_norm$E,
+  mean_stats = inf_mean_res,
+  contrast_stats = inf_contrast_res,
+  goi = goi,
+  data_output_column = setup$classification$output_column
+)
 
+# Save the pictures
+  ggsave(file.path(setup$output_directory, 'Validation_stats_train.pdf'), plot = t, height = 6, width = 12)
+  ggsave(file.path(setup$output_directory, 'Validation_stats_inf.pdf'), plot = i, height = 6, width = 12)
+}
 
+# Print statement to switch back to python script
 print('Switching back to Python.')
 
-# Create output directory
-# make.dir(setup$output_directory, overwrite = setup$overwrite)
-
-# Define training and inferred ancestry
-# eur_meta <- meta[consensus_ancestry == setup$classification$train_ancestry, ]
-# inf_meta <- meta[consensus_ancestry == setup$classification$infer_ancestry, ]
-# eur_data <- adata[adata$obs['genetic_ancestry'] == setup$classification$train_ancestry]
-# inf_data <- adata[adata$obs['genetic_ancestry'] == setup$classification$inf_ancestry]
-
-# Define classification 
-## eval(as.name(...)) was used to have input from setup file
-# eur_meta <- eur_meta[eval(as.name(setup$classification$output_column)) 
-                     # %in% setup$classification$comparison, ]
-# inf_meta <- inf_meta[eval(as.name(setup$classification$output_column)) 
-                     # %in% setup$classification$comparison, ]
+# x <- function(s){
+# train_contrast_res |> 
+#   select(c(all_of(s), Gene)) |> 
+#   group_by(c(s)) |> 
+#   pivot_longer(
+#     cols = !c(s),
+#     names_to = 'name',
+#     values_to = 'Gene'
+#   )
+# }
 
 
-# Assertion: Check for enough samples per class
-# stopifnot(all(eur_meta[, .N, by = cancer_type_detailed] > 25))
-
-# Set the seed
-# set.seed(setup$seed)
-
-
-# Normalization: in R use edgeR (filter by low expression) and voom
-# Switch to tibble (Convenience)
-# eur_meta <- as_tibble(eur_meta) |> 
-# column_to_rownames(var = 'sampleId')
-# inf_meta <- as_tibble(inf_meta) |> 
-#  column_to_rownames('sampleId')
-# Transpose sample id = columns, genes = index (for DGE workflow)
-# data <- as_tibble(data) |> 
-#   column_to_rownames(var = 'sampleId') |> 
-#   t() 
-# Filter data based on sample id 
-# counts <- data[, rownames(eur_meta)]
-
-# Assertion: Check arrays
-# Dimensions
-# stopifnot(dim(counts)[2] == dim(eur_meta)[1])
-# Order
-# stopifnot(all(colnames(counts) == row.names(eur_meta[colnames(counts), ])))
-
-# Create the design matrix and contrast matrix
-# Design
-# design <- model.matrix(~0 + eval(as.name(setup$classification$output_column)), eur_meta) 
-# Rename the columns 
-# repl_str <- 'eval(as.name(setup$classification$output_column))'
-# colnames(design) <- gsub(repl_str, '', colnames(design), fixed=TRUE)
-
-# Contrast
-# Compare the average of one condition to the average of all other
-# OVR
-# contrast.matrix <- create_contrast(colnames(design))
-
-# Filter genes by expression
-# filtered_genes <- filterByExpr(counts, design)
-# filtered_counts <- counts[filtered_genes, ]
-
-# Assertion: Check arrays
-# Dimensions
-# stopifnot(table(filtered_genes)[2] == dim(filtered_counts)[1])
-# Order
-# stopifnot(all(colnames(filtered_counts) == row.names(eur_meta[colnames(filtered_counts), ])))
-
-# Normalization
-# norm_counts <- voom(filtered_counts, design, plot = TRUE)
-
-
-
-
+# x('coef')
 

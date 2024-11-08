@@ -1,5 +1,9 @@
+# Ignore yaml files for now
 *.yaml
 *.yml
-.Rproj.user
+# Ingore my R settings
+.Rprofile
+# Ignore big input files
 *.h5ad
+# Output
 /TESTING/

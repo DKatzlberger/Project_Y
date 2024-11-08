@@ -1,3 +1,4 @@
+# Standard libraries
 import numpy as np
 import pandas as pd
 import yaml
@@ -7,11 +8,13 @@ import time
 from pathlib import Path
 from datetime import datetime
 import psutil
+import subprocess
 
 # Object that contains settings and methods
 class Setup(dict):
     def __init__(self, config_file):
         
+        # TODO - Maybe combination of default and custom settings outsource
         # Open the default config file
         try:
             default_config = yaml.safe_load(Path('default_settings.yml').read_text())
@@ -31,11 +34,11 @@ class Setup(dict):
         final_config['id'] = uuid.uuid4().hex.upper()[:10]
         final_config['date'] = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
 
-        # Print statement to inform user about their anaysis
+        # Print statement to inform user about their analysis
         print(f'New analysis with id: {final_config['id']}; created: {final_config['date']}')
 
         # Check required settings
-        required_settings = ['classification', 'data_path', 'output_directory']
+        required_settings = ['classification', 'data_path', 'output_directory', 'seed']
         for i in required_settings:
             assert i in final_config, f'No {i} defined but required'     
         
@@ -44,7 +47,8 @@ class Setup(dict):
         for i in required_settings:
              assert i in final_config['classification'], f'No {i} in classification but required'
 
-        # Check for classification
+
+        # TODO - Check for multiclass
         # if len(final_config['classification']['comparison']) > 2:
         #     final_config['classification'].set      
 
@@ -84,6 +88,43 @@ class Setup(dict):
                 time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()) + 
                 "\n")
 
+class RScriptRunner():
+    # Path to executible Rscript
+    def __init__(self, r_path):
+        self.r_execute = r_path
+    
+    def _make_executable(self, script_path):
+
+        # Check if the script is not already executable
+        if not os.access(script_path, os.X_OK):
+            try:
+                # Make the R script executable
+                subprocess.run(['chmod', '+x', script_path], check=True)
+                print(f'Permissions updated: {script_path} is now executable.')
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(f'Failed to set executable permission for {script_path}: {e}')
+
+    def run_script(self, script_path, args=None):
+
+         # Ensure the script is executable
+        self._make_executable(script_path)
+
+        if args is not None and not isinstance(args, list):
+            raise TypeError("Arguments must be provided as a list.")
+        
+        # Add the Rscript, script_path and arguments to the run command
+        command = [self.r_execute, script_path]
+        if args:
+            command.extend(args)
+
+        # Run subprocess
+        subprocess.run(command)
+    
+    def check_rversion(self):
+        # Check R version
+        subprocess.run([self.r_execute, "--version"])
+
+
 # Functions to normalize data
 def normalize_log(X, e=0.01):
     """
@@ -111,21 +152,17 @@ def normalize(func, X):
     return normalized_data
 
 # Function to create integer vector from categotical column
-def create_y(data, output_column):
+def encode_y(data, dictionary):
     """
     Creates vector with class labels; additionally returns mapping dictionary.
-    output_column: Name of the column to transform.
+    data: The data to encode.
+    dictionary: Dictionary with mappings.
     """
-    # Create dictionary to map categorical values to integers
-    dictionary = {}
-    for i, j in enumerate(data.obs[output_column].unique()):
-        dictionary.update({j: i})
     # Map categorical values to integers
-    y = data.obs[output_column].map(dictionary)
+    y = data.map(dictionary)
     y = np.array(y)
-    # Reverse dictionary for later use
-    inv_dictionary = {v: k for k, v in dictionary.items()}
-    return y, inv_dictionary
+    return y
+
 
 def stratified_subset(data, proportion, output_column, seed): 
     """

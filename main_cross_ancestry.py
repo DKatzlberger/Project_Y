@@ -1,6 +1,5 @@
 # Standard libraries
 import yaml
-import uuid
 import pandas as pd
 import numpy as np
 import anndata
@@ -21,10 +20,14 @@ import seaborn as sns
 # Custom functions
 from py_utils import *
 
+# TODO - Make settings command line input
+# Command line input
+commandline_input = 'dev_settings.yml'
+
 # Here starts the script   
 
 # Settings
-setup = Setup('dev_settings.yml')
+setup = Setup(commandline_input)
 with open(setup.out('Settings.yml'), 'w') as f:
     yaml.dump(setup.final_config, f)
 setup.log('Settings done')
@@ -37,6 +40,11 @@ data = anndata.read_h5ad(setup.data_path)
 assert_str = 'Features not unique.'
 assert data.var.index.shape[0] == len(set(data.var.index)), assert_str
 
+# Check that class lables are in the data
+required_labels = setup.classification['comparison']
+for i in required_labels:
+    assert data.obs[setup.classification['output_column']].str.contains(i).any(), f"No '{i}' in data output column, choose different comparison in settings."
+
 # Define training and inferred ancestry
 setup.log('Define ancestries')
 eur_data = data[data.obs.genetic_ancestry == setup.classification['train_ancestry']]
@@ -47,6 +55,7 @@ inf_data = data[data.obs.genetic_ancestry == setup.classification['infer_ancestr
 
 # Define classification task 
 setup.log('Define classification')
+# Check that classification
 eur_data = (eur_data[eur_data.obs[setup.classification['output_column']]
                      .isin(setup.classification['comparison'])]
                      )
@@ -102,13 +111,12 @@ save_str = f'Obs_inf.yml'
 with open(setup.out(save_str), 'w') as f:
     yaml.dump(inf_idx.to_list(), f)
 
+# RUN R define R to run
+R = RScriptRunner('/usr/bin/Rscript')
 # Statistical analysis (DGE)
 setup.log('DGE')
-r_input = os.path.join(setup.output_directory, 'Settings.yml')
-r_execute = '/usr/bin/Rscript'
-path2script = os.path.join(os.getcwd(), 'dge_workflow.R')
-# Calling R script to do analysis
-subprocess.run([r_execute, path2script, r_input])
+R.run_script(script_path=os.path.join(os.getcwd(), 'dge_workflow.R'),
+             args=[os.path.join(os.getcwd(), commandline_input)])
 
 # Subset features that are used in DGE
 p = os.path.join(setup.output_directory, 'Features.yml')
@@ -119,14 +127,23 @@ test_data = test_data[:, dge_features]
 inf_data = inf_data[:, dge_features]
 
 # Machine learning
-print('Starting machine learning.')
 setup.log('Sklearn data')
+
+# Encoding for the output column
+encoder = {}
+for i, j in enumerate(sorted(train_data.obs[setup.classification['output_column']].unique())):
+    encoder.update({j: i})
+inv_encoder = {v: k for k, v in encoder.items()}
+
 # Transform anndata to np.array
 train_X = np.array(train_data.X)
-train_y, _ = create_y(train_data, setup.classification['output_column'])
+train_y = encode_y(train_data.obs[setup.classification['output_column']], encoder)
 
 test_X = np.array(test_data.X)
-test_y, _ = create_y(test_data, setup.classification['output_column']) 
+test_y = encode_y(test_data.obs[setup.classification['output_column']], encoder)
+
+inf_X = np.array(inf_data.X)
+inf_y = encode_y(inf_data.obs[setup.classification['output_column']], encoder)
 
 # Assertion: Check arrays
 # Labels
@@ -136,6 +153,8 @@ assert np.unique(train_y).shape[0] >= 2, assert_str
 assert_str = f'Dimensions of label vector ({train_y.shape[0]}) and feature matrix ({train_X.shape[0]}) do not align.'
 assert train_y.shape[0] == train_X.shape[0], assert_str
 
+
+print('Starting machine learning.')
 setup.log('Model setup')
 # Algorithm (focusing on Logisitic Regression)
 algo = LogisticRegression(random_state=seed)
@@ -155,13 +174,6 @@ grid_search.fit(train_X, train_y)
 # Best model
 best_m = grid_search.best_estimator_ # is there a better version getter function
 
-# Test the model on the eur subset
-test_y_hat = pd.DataFrame(best_m.predict_proba(test_X))
-# Save propabilities
-test_y_hat['y'] = test_y
-test_y_hat['ancestry'] = setup.classification['train_ancestry'].upper()
-test_y_hat.to_csv(setup.out('Probabilities_test.csv'), index=False)
-
 # Save hyperparameters 
 hyp = pd.DataFrame(grid_search.best_params_, index=[setup.id])
 hyp.to_csv(setup.out('Hyperparameters.csv'), index=False)
@@ -172,42 +184,30 @@ if setup.save_model:
         pickle.dump(best_m, f, protocol=pickle.HIGHEST_PROTOCOL) # check if there is a better function
 
 # Training fisnished
-print(f'{setup.id} finished')
+print(f'Id: {setup.id} finished training.')
 
-# Test trained model on different ancestry to check if learned patterns generalize
+# Test the model on eur subset
+setup.log('Testing')
+test_y_hat = pd.DataFrame(best_m.predict_proba(test_X))
+# Save propabilities
+test_y_hat['y'] = test_y
+test_y_hat.to_csv(setup.out('Probabilities_test.csv'), index=False)
+
+
+# Test trained model on inferred ancestry 
 setup.log('Inference')
-inf_X = inf_data.X
-inf_y, _ = create_y(inf_data, setup.classification['output_column'])
 # Trained model predicts inferred ancestry
 inf_y_hat = pd.DataFrame(best_m.predict_proba(inf_X))
 inf_y_hat['y'] = inf_y
-inf_y_hat['ancestry'] = setup.classification['infer_ancestry'].upper()
 # Save propabilities
 inf_y_hat.to_csv(setup.out('Probabilities_inf.csv'), index=False)
 
-# Plot for visualization
-# TODO - Outsource to a R file
-# Calculate ROC AUC as metric
-test_auc = roc_auc_score(test_y, best_m.predict_proba(test_X)[:, 1])
-inf_auc = roc_auc_score(inf_y, best_m.predict_proba(inf_X)[:, 1])
+# Visualization
+if setup.visual_val:
+    setup.log('ML visualization')
+    R.run_script(script_path=os.path.join(os.getcwd(), 'run_visualization.R'),
+                 args = [os.path.join(os.getcwd(), commandline_input)])
 
-# Dataframe for plotting
-df = pd.concat(
-    [pd.DataFrame({'ROC AUC': [test_auc], 
-                   'Prediction': ['European subset']
-                   }, 
-                   index=[0]
-                   ), 
-     pd.DataFrame({'ROC AUC': [inf_auc],
-                   'Prediction': [f'Ancestry\n({setup.classification['infer_ancestry'].upper()})']
-                   }, 
-                   index=[1]
-                   )]
-                   )
-# Plot
-g = sns.barplot(data=df,
-                x='Prediction',
-                y='ROC AUC')
-g.figure.savefig(f'{setup.out('Metric.pdf')}')
 
+# TODO - How similar are the subsets (Jaccard)
 # TODO - Model interpretations
