@@ -45,11 +45,14 @@ def binary_metric_score(y_true, y_prob, thresholds=None, metric='accuracy'):
 
 
 # TODO - This is only availabe for binary classification
+# TODO- Make a bit more generalizable
 
 # Load settings
 file_path = sys.argv[1]
 with open(file_path, 'r') as f:
     setup = yaml.safe_load(f)
+
+print('Start calculating metric.')
 
 # Test probabilities (European subset)
 test_p = pd.read_csv(os.path.join(setup['output_directory'], 'Probabilities_test.csv'))
@@ -82,10 +85,9 @@ test_metric = (pd.concat(
 .reset_index(names='Threshold')
 .assign(
     **{
-    'ROC AUC': test_auc,
-    'Prediction': 'Eur Subset',
+    'ROC_AUC': test_auc,
     'Status': 'Test',
-    'Ancestry': setup['classification']['infer_ancestry'].upper()
+    'Ancestry': setup['classification']['infer_ancestry'].upper()  # infer ancestry needed for visualization
 }))
 
 inf_metric = (pd.concat(
@@ -96,12 +98,12 @@ inf_metric = (pd.concat(
 .reset_index(names='Threshold')
 .assign(
     **{
-    'ROC AUC': inf_auc,
-    'Prediction': 'Ancestry',
+    'ROC_AUC': inf_auc,
     'Status': 'Inference',
     'Ancestry': setup['classification']['infer_ancestry'].upper()
 }))
 
-# This variable is then used in R
-r_metric = pd.concat([test_metric, inf_metric]).reset_index(drop=True)
-
+# This Data frame is used in r
+# r_metric = pd.concat([test_metric, inf_metric]).reset_index(drop=True)
+test_metric.to_csv(os.path.join(setup['output_directory'], 'Metric_test.csv'), index=False)
+inf_metric.to_csv(os.path.join(setup['output_directory'], 'Metric_inf.csv'), index=False)

@@ -5,6 +5,10 @@ import numpy as np
 import anndata
 import pickle
 
+# Tools for command line input
+import sys
+import argparse
+
 # Subprocess to run R
 import subprocess
 
@@ -20,38 +24,39 @@ import seaborn as sns
 # Custom functions
 from py_utils import *
 
-# TODO - Make settings command line input
-# Command line input
-commandline_input = 'dev_settings.yml'
+# Command line parser
+parser = argparse.ArgumentParser()
+parser.add_argument('settings_yml', type=str, help='path to setup file')
+
+# Check if script is run from command line
+if len(sys.argv) > 1:
+    args = parser.parse_args()
+    YAML_FILE = args.settings_yml
+else:
+    # Dev settings 
+    YAML_FILE = 'dev_settings.yml'
+    print('Running interactive mode for development.')
 
 # Here starts the script   
 
 # Settings
-setup = Setup(commandline_input)
+setup = Setup(YAML_FILE)
 with open(setup.out('Settings.yml'), 'w') as f:
     yaml.dump(setup.final_config, f)
 setup.log('Settings done')
 
 # Data setup
+setup.log('Check data compatability')
 data = anndata.read_h5ad(setup.data_path)
 
-# Make feature names unique
-# data.var_names_make_unique()
-assert_str = 'Features not unique.'
-assert data.var.index.shape[0] == len(set(data.var.index)), assert_str
-
-# Check that class lables are in the data
-required_labels = setup.classification['comparison']
-for i in required_labels:
-    assert data.obs[setup.classification['output_column']].str.contains(i).any(), f"No '{i}' in data output column, choose different comparison in settings."
+# Check if defined settings are present in the data
+compatability = DataValidator(data=data, setup=setup)
+compatability.validate()
 
 # Define training and inferred ancestry
 setup.log('Define ancestries')
-eur_data = data[data.obs.genetic_ancestry == setup.classification['train_ancestry']]
-inf_data = data[data.obs.genetic_ancestry == setup.classification['infer_ancestry']]
-# Console output
-# print(f'Algorithms are trained on {setup.classification['train_ancestry'].upper()}' 
-#       f' and inferred on {setup.classification['infer_ancestry'].upper()}.')
+eur_data = data[data.obs[setup.classification['ancestry_column']] == setup.classification['train_ancestry']]
+inf_data = data[data.obs[setup.classification['ancestry_column']] == setup.classification['infer_ancestry']]
 
 # Define classification task 
 setup.log('Define classification')
@@ -67,22 +72,18 @@ inf_data = (inf_data[inf_data.obs[setup.classification['output_column']]
 counts = (eur_data.obs[setup.classification['output_column']]
           .value_counts()
           ) 
+
 assert_str = f'Prerequisite is a sample size of {setup.sample_cutoff} for each class.'
 assert (counts > setup.sample_cutoff).all(), assert_str
-
-# Normalization of features 
-# setup.log('Normalization')
-# eur_data.X = normalize(eval(setup.normalization), eur_data.X)
-# inf_data.X = normalize(eval(setup.normalization), inf_data.X) 
 
 setup.log('Setting seed')
 # Seed is used to generate different European subsets
 seed = setup.seed
 np.random.seed(seed)
 # os.environ['PYTHONHASHSEED'] = str(seed)
-# check this sklearn seed 
 
-setup.log('Data setup')
+
+setup.log('Create subset')
 # Proportions of output in inferred ancestry
 freq = (inf_data.obs[setup.classification['output_column']]
         .value_counts()
@@ -92,7 +93,7 @@ freq = (inf_data.obs[setup.classification['output_column']]
 train_data, test_data = stratified_subset(eur_data, freq, setup.classification['output_column'], seed)
 train_idx, test_idx, inf_idx = train_data.obs_names, test_data.obs_names, inf_data.obs_names
 # Assertion: Check for data leackage
-assert_str = f'Observation also occur in the testset.'
+assert_str = f'Data leakage! Observation also occur in the testset.'
 assert not test_idx.isin(train_idx).all(), assert_str
 
 # Save the samples that are used in train and test (use the same samples for 'stats')
@@ -112,11 +113,13 @@ with open(setup.out(save_str), 'w') as f:
     yaml.dump(inf_idx.to_list(), f)
 
 # RUN R define R to run
-R = RScriptRunner('/usr/bin/Rscript')
+R = ScriptRunner(r_path='/usr/bin/Rscript', py_path='/opt/conda/envs/ancestry/bin/python3')
+settings_file = os.path.join(os.getcwd(), setup.output_directory, 'Settings.yml')
+
 # Statistical analysis (DGE)
 setup.log('DGE')
 R.run_script(script_path=os.path.join(os.getcwd(), 'dge_workflow.R'),
-             args=[os.path.join(os.getcwd(), commandline_input)])
+             args=[settings_file])
 
 # Subset features that are used in DGE
 p = os.path.join(setup.output_directory, 'Features.yml')
@@ -144,6 +147,14 @@ test_y = encode_y(test_data.obs[setup.classification['output_column']], encoder)
 
 inf_X = np.array(inf_data.X)
 inf_y = encode_y(inf_data.obs[setup.classification['output_column']], encoder)
+
+
+# TODO - Normalization features 
+# Normalization of features 
+setup.log('Normalization')
+train_X = normalize(eval(setup.normalization), train_X)
+test_X = normalize(eval(setup.normalization), test_X) 
+inf_X = normalize(eval(setup.normalization), inf_X) 
 
 # Assertion: Check arrays
 # Labels
@@ -205,9 +216,27 @@ inf_y_hat.to_csv(setup.out('Probabilities_inf.csv'), index=False)
 # Visualization
 if setup.visual_val:
     setup.log('ML visualization')
-    R.run_script(script_path=os.path.join(os.getcwd(), 'run_visualization.R'),
-                 args = [os.path.join(os.getcwd(), commandline_input)])
+
+    # Calculate metric
+    # Multiclass calculation
+    if setup.classification['multiclass']:
+        # TODO - Create multiclass scoring script
+        print('Score metrics for multiclass needs to be developed.')
+
+    # Binary calculation
+    else:
+        R.run_script(script_path=os.path.join(os.getcwd(), 'metric_calculation.py'),
+                     args=[settings_file])
+
+    # Run the script to visualize
+    R.run_script(script_path=os.path.join(os.getcwd(), 'run_visualization.R'), 
+                 args=[settings_file])
 
 
+
+
+
+
+# TODO - Visualization script
 # TODO - How similar are the subsets (Jaccard)
 # TODO - Model interpretations

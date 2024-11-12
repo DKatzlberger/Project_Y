@@ -17,21 +17,28 @@ suppressPackageStartupMessages(
   library(httpgd)
   }
 )
-
 # Custom functions
 source('r_utils.R')
 
 # Here starts the script
 print('Envoking R.')
-# Load the settings (They are a command line input)
-args = commandArgs(trailingOnly = TRUE)
-# Check that it is a yaml file and exists
-is_yml_file(args[1])
-setup <- yaml.load_file(args[1])
 
+# Load command line arguments
+args <- commandArgs(trailingOnly = TRUE)
+# Check if script is run with a command-line argument
+if (length(args) > 0) {
+  YAML_FILE <- args[1]  
+  # Check if it's a valid YAML file
+  is_yml_file(YAML_FILE)
+  setup <- yaml.load_file(YAML_FILE)
+  
+} else {
+  # Dev settings if no command-line argument provided
+  YAML_FILE <- "dev_settings.yml"
+  print("Running interactive mode for development.")
+  setup <- yaml.load_file(YAML_FILE)
+}
 
-# Data loading for debugging
-setup <- yaml.load_file('/home/people/dkatzlberger/Project_Y/dev_settings.yml')
 
 print('Start differential gene expression analysis.')
 
@@ -170,17 +177,108 @@ i <- visual_validation(
 # Print statement to switch back to python script
 print('Switching back to Python.')
 
-# x <- function(s){
-# train_contrast_res |> 
-#   select(c(all_of(s), Gene)) |> 
-#   group_by(c(s)) |> 
-#   pivot_longer(
-#     cols = !c(s),
-#     names_to = 'name',
-#     values_to = 'Gene'
-#   )
-# }
 
 
-# x('coef')
+# meta = inf_data$obs
+# signal = inf_norm$E
+# mean_stats = inf_mean_res
+# contrast_stats = inf_contrast_res
+# goi = goi
+# data_output_column = setup$classification$output_column
+
+
+
+# mean_stats <- 
+#     mean_stats |> 
+#     as_tibble() |> 
+#     group_by(coef) |> 
+#     filter(Gene %in% goi) 
+
+# contrast_stats <- 
+#     contrast_stats |> 
+#     as_tibble() |> 
+#     group_by(coef) |> 
+#     filter(Gene %in% goi) 
+  
+# signal <- 
+#     signal |> 
+#     as_tibble(rownames = 'Gene') |> 
+#     filter(Gene %in% goi) |> 
+#     as.data.frame() |> 
+#     column_to_rownames('Gene') |> 
+#     t() |> 
+#     as_tibble(rownames = 'sampleId') 
+  
+# mean_signal <- 
+#     meta |> 
+#     as_tibble(rownames = 'sampleId') |> 
+#     select(all_of(data_output_column), sampleId) |> 
+#     merge(signal, by = 'sampleId') |> 
+#     group_by_at(data_output_column) |> 
+#     summarise(across(where(is.numeric), mean)) |> 
+#     pivot_longer(cols = !all_of(data_output_column),
+#                  values_to = 'E',
+#                  names_to = 'Gene')
+  
+#   # Plot stats. results
+#   contrast_stats_plot <- ggplot(
+#     contrast_stats,
+#     aes(
+#       x = coef,
+#       y = Gene,
+#       color = logFC,
+#       size = pmin(5, -log10(adj.P.Val))
+#     )
+#   ) +
+#        geom_point() +
+#        scale_color_gradient2(
+#         low="blue",
+#         high="red"
+#   ) +
+#   ggtitle('Results of comparison') +
+#   ylab('Gene') +
+#   xlab('Data output column') +
+#   theme(axis.text.x = element_text(angle = 90))
+
+#     mean_stats_plot <- ggplot(
+#     mean_stats,
+#     aes(
+#       x = coef,
+#       y = Gene,
+#       color = logFC,
+#       size = pmin(5, -log10(adj.P.Val))
+#     )
+#   ) +
+#        geom_point() +
+#        scale_color_gradient2(
+#         low="blue",
+#         high="red"
+#   ) +
+#   ggtitle('Results of means model') +
+#   ylab('Gene') +
+#   xlab('Data output column') +
+#   theme(axis.text.x = element_text(angle = 90))
+
+#   # Plot mean signal
+#   mean_signal_plot <- ggplot(
+#     mean_signal,
+#     aes(
+#       x = get(data_output_column),
+#       y = Gene,
+#       fill = E
+#     )
+#   ) +
+#   geom_tile() +
+#   scale_fill_gradient2(
+#         low="blue",
+#         high="red"
+#   ) +
+#   ggtitle('Mean signal in the data') +
+#   ylab('Gene') +
+#   xlab('Data output column') +
+#   theme(axis.text.x = element_text(angle = 90))
+
+#   # Patchwork
+#   validation_plot <- contrast_stats_plot + mean_stats_plot + mean_signal_plot
+#   validation_plot
 

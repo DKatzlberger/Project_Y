@@ -10,6 +10,9 @@ from datetime import datetime
 import psutil
 import subprocess
 
+# Data library
+import anndata as ad
+
 # Object that contains settings and methods
 class Setup(dict):
     def __init__(self, config_file):
@@ -40,17 +43,24 @@ class Setup(dict):
         # Check required settings
         required_settings = ['classification', 'data_path', 'output_directory', 'seed']
         for i in required_settings:
-            assert i in final_config, f'No {i} defined but required'     
+            assert i in final_config, f'No {i} defined but required!'     
         
         # Check required settings in classification
-        required_settings = ['comparison', 'output_column', 'train_ancestry', 'infer_ancestry']
+        required_settings = ['comparison', 'output_column', 'train_ancestry', 'infer_ancestry', 'ancestry_column']
         for i in required_settings:
-             assert i in final_config['classification'], f'No {i} in classification but required'
+             assert i in final_config['classification'], f'No {i} in classification but required!'
 
+        # Check for classification task
+        if len(final_config['classification']['comparison']) > 2:
+            final_config['classification'].update({'multiclass': True})
+            print(f'Multiclass problem comparing: {final_config['classification']['comparison']}.')
 
-        # TODO - Check for multiclass
-        # if len(final_config['classification']['comparison']) > 2:
-        #     final_config['classification'].set      
+        elif len(final_config['classification']['comparison']) == 2:
+            final_config['classification'].update({'multiclass': False})
+            print(f'Binaryclass problem comparing: {final_config['classification']['comparison']}.')
+        
+        else:
+            print(f'Cant do a classification with one assigned class in comparison: {final_config['classification']['comparison']}.')
 
         # Init
         self.final_config = final_config
@@ -75,8 +85,16 @@ class Setup(dict):
     def check_settings(self):
         # TODO - Check whether settings are of the right type 
         assert isinstance(self.seed, int)
+
+        # Check data_path
+        assert isinstance(self.data_path, str)
+        assert os.path.exists(self.data_path)
+        assert self.data_path.endswith('.h5ad'), f'Only support data files in h5ad fromat.'
+
+        # Classification
         assert isinstance(self.classification['train_ancestry'], str)
         assert isinstance(self.classification['infer_ancestry'], str)
+        assert isinstance(self.classification['ancestry_column'], str)
 
     def log(self, text):
         with open(self.out("Log.tsv"),"a") as file:
@@ -88,12 +106,86 @@ class Setup(dict):
                 time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()) + 
                 "\n")
 
-class RScriptRunner():
+class DataValidator():
+    """
+    Checks if data and setttings are compatible.
+        
+    :param data: AnnData object containing the data.
+    :param setup: Setup object containing settings.
+    """
+    def __init__(self, data: ad.AnnData, setup: Setup):
+
+        self.data = data
+        self.setup = setup
+
+    def validate_features(self):
+        """
+        Check that features are unique.
+        """
+        # Ensure that the number of unique features is equal to the total number of features
+        assert self.data.var.index.shape[0] == len(set(self.data.var.index)), \
+            'Features not unique.'
+    
+    def validate_output_column(self):
+        """
+        Check that output column is in the data.
+        """
+        output_column = self.setup['classification']['output_column']
+        assert output_column in self.data.obs.columns, f"Output column '{output_column}' not in the data."
+    
+    def validate_class_labels(self):
+        """
+        Check that class labels of comparisons are present in the output column of the data.
+        """
+        required_labels = self.setup['classification']['comparison']
+        output_column = self.setup['classification']['output_column']
+        
+        # Ensure that each comparison label is found in the output column
+        for label in required_labels:
+            assert self.data.obs[output_column].str.contains(label).any(), \
+                f"No '{label}' in output column: '{output_column}', choose different comparison in settings."
+    
+    def validate_ancestry(self):
+        """
+        Check if ancestries are present in ancetsry column.
+        """
+        ancestry_column = self.setup['classification']['ancestry_column']
+        train_ancestry = self.setup['classification']['train_ancestry']
+        inf_ancestry = self.setup['classification']['infer_ancestry']
+
+        assert self.data.obs[ancestry_column].str.contains(train_ancestry).any(), \
+            f"No '{train_ancestry}' in ancestry_column: '{ancestry_column}'."
+        assert self.data.obs[ancestry_column].str.contains(inf_ancestry).any(), \
+            f"No '{inf_ancestry}' in ancestry_column: '{ancestry_column}'."
+        
+    
+    def validate(self):
+        """
+        Run all validation checks on the data.
+        """
+        self.validate_features()
+        self.validate_output_column()
+        self.validate_class_labels()
+        self.validate_ancestry()
+
+
+class ScriptRunner():
+    """
+    Initialize ScriptRunner with paths to R and Python executables.
+        
+    :param r_path: Path to the R executable (default is 'Rscript')
+    :param py_path: Path to the Python executable (default is 'python')
+    """
+
     # Path to executible Rscript
-    def __init__(self, r_path):
+    def __init__(self, r_path, py_path):
         self.r_execute = r_path
+        self.py_execute = py_path
     
     def _make_executable(self, script_path):
+        '''
+        Ensures that the script is executable.
+        '''
 
         # Check if the script is not already executable
         if not os.access(script_path, os.X_OK):
@@ -106,14 +198,22 @@ class RScriptRunner():
 
     def run_script(self, script_path, args=None):
 
-         # Ensure the script is executable
+        # Determine script type
+        if script_path.endswith('.R'):
+            executable = self.r_execute
+        elif script_path.endswith('.py'):
+            executable = self.py_execute
+        else:
+            raise ValueError('Script type not supported. Please provide an .R or .py file.')
+
+        # Ensure the script is executable
         self._make_executable(script_path)
 
         if args is not None and not isinstance(args, list):
-            raise TypeError("Arguments must be provided as a list.")
+            raise TypeError('Arguments must be provided as a list.')
         
         # Add the Rscript, script_path and arguments to the run command
-        command = [self.r_execute, script_path]
+        command = [executable, script_path]
         if args:
             command.extend(args)
 
@@ -163,7 +263,6 @@ def encode_y(data, dictionary):
     y = np.array(y)
     return y
 
-
 def stratified_subset(data, proportion, output_column, seed): 
     """
     Makes a subset from the training data (usually Europeans) mimicking a given frequency of classes.
@@ -186,6 +285,8 @@ def stratified_subset(data, proportion, output_column, seed):
     test_data = data[data.obs_names.isin(idx)]
     return train_data, test_data
 
+
+# Unused functions
 def stratified_sample(df, category_col, proportions, n):
     '''
     Take a stratified sample from a dataframe with a given number of samples and a proportion.

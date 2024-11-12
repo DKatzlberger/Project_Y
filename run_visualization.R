@@ -6,10 +6,6 @@ suppressPackageStartupMessages({
     # Visualization
     library(patchwork)
     library(httpgd)
-    # Python
-    library(reticulate)
-    # Specify reticulate env
-    use_condaenv('/opt/conda/envs/ancestry/bin/python')
 })
 
 # Custom functions
@@ -17,28 +13,42 @@ source('r_utils.R')
 
 # Here starts the script
 print('Envoking R.')
-# Load the settings (They are a command line input)
-args = commandArgs(trailingOnly = TRUE)
-# Check that it is a yaml file and exists
-is_yml_file(args[1])
-setup <- yaml.load_file(args[1])
 
-# Run file for binary metric
-args  <- args[1]
-python_script_path  <- file.path(getwd(), 'metric_calculation.py')
+# Load command line arguments
+args <- commandArgs(trailingOnly = TRUE)
+# Check if script is run with a command-line argument
+if (length(args) > 0) {
+  YAML_FILE <- args[1]  
+  # Check if it's a valid YAML file
+  is_yml_file(YAML_FILE)
+  setup <- yaml.load_file(YAML_FILE)
 
-py_run_string(sprintf("import sys; sys.argv = ['%s', '%s']", 
-                      python_script_path, paste(args, collapse="', '")))
+} else {
+  # Dev settings if no command-line argument provided
+  YAML_FILE <- "dev_settings.yml"
+  print("Running interactive mode for development.")
+  setup <- yaml.load_file(YAML_FILE)
+}
 
-py_run_file(python_script_path)
 
 # Here starts the script
 print('Start visualization.')
 
+# Load metric dataframes
+test_metric <- fread(file.path(setup$output_directory, 'Metric_test.csv')) |> 
+    mutate(Prediction = 'Subset')
+inf_metric  <- fread(file.path(setup$output_directory, 'Metric_inf.csv')) |> 
+    mutate(Prediction = 'Ancestry')
+
+# Combine for visulization
+metric <- 
+    bind_rows(test_metric, inf_metric)
+
+
 # Change format (pivot longer)
-metric <- py$r_metric |>  
+metric <- metric |>  
     pivot_longer(
-        cols = c(Accuracy, F1, `ROC AUC`),
+        cols = c(Accuracy, F1, ROC_AUC),
         values_to = 'Value',
         names_to = 'Metric'
     ) |> 
@@ -78,7 +88,7 @@ acc_plot <- metric |>
 
 # Plot ROC AUC
 auc_plot <- metric |> 
-    filter(Metric == 'ROC AUC') |> 
+    filter(Metric == 'ROC_AUC') |> 
     select(!Threshold) |> 
     unique() |> 
     ggplot(

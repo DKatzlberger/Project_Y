@@ -114,7 +114,7 @@ visual_validation <- function(meta,
     as_tibble(rownames = 'sampleId') |> 
     select(all_of(data_output_column), sampleId) |> 
     merge(signal, by = 'sampleId') |> 
-    group_by(c(data_output_column)) |> 
+    group_by_at(data_output_column) |> # Very interesting that you have to use it like this
     summarise(across(where(is.numeric), mean)) |> 
     pivot_longer(cols = !all_of(data_output_column),
                  values_to = 'E',
@@ -163,7 +163,7 @@ visual_validation <- function(meta,
   mean_signal_plot <- ggplot(
     mean_signal,
     aes(
-      x = data_output_column,
+      x = get(data_output_column),
       y = Gene,
       fill = E
     )
