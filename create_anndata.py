@@ -3,12 +3,12 @@ import anndata as ad
 import numpy as np
 
 # Meta data with the original ancestries
-meta_original = pd.read_csv('TCGA/data/Project_X/tcga_csv/tcga_studies_meta_original_ancestry.csv')
+meta_original = pd.read_csv('data/downloads/tcga_csv/tcga_studies_meta_original_ancestry.csv')
 meta_original = meta_original.rename(columns={'consensus_ancestry': 'genetic_ancestry_detailed'})
 
 # Load latest data of Master thesis project
-meta = pd.read_csv('TCGA/data/Project_X/tcga_csv/tcga_studies_meta_intersection_adjusted_withnewcolumns.csv', index_col=[0])
-data = pd.read_csv('TCGA/data/Project_X/tcga_csv/seqV2_merged_RSEM.csv', index_col=[0])
+meta = pd.read_csv('data/downloads/tcga_csv/tcga_studies_meta_intersection_adjusted_withnewcolumns.csv', index_col=[0])
+data = pd.read_csv('data/downloads/tcga_csv/hm450_merged_betavalues.csv', index_col=[0])
 
 # Add non-pooled ancestry (original ancestries) to meta
 meta = meta.merge(meta_original[['sampleId', 'genetic_ancestry_detailed']], how='left', on='sampleId')

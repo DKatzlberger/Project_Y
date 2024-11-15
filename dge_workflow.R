@@ -14,7 +14,6 @@ suppressPackageStartupMessages(
   library(edgeR)
   # Visualization
   library(patchwork)
-  library(httpgd)
   }
 )
 # Custom functions

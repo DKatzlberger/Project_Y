@@ -5,7 +5,6 @@ suppressPackageStartupMessages({
     library(yaml)
     # Visualization
     library(patchwork)
-    library(httpgd)
 })
 
 # Custom functions
@@ -104,10 +103,10 @@ auc_plot <- metric |>
     ggtitle('ROC AUC') 
     
 # Patchwork 
-f1_plot + acc_plot + auc_plot +
+combined <- f1_plot + acc_plot + auc_plot +
   plot_layout(ncol = 2)
 
 # Save
-ggsave(file.path(setup$output_directory, 'Validation_ml.pdf'), height = 12, width = 12)
+ggsave(file.path(setup$output_directory, 'Validation_ml.pdf'), height = 10, width = 10)
 
 

@@ -66,16 +66,19 @@ class Setup(dict):
         self.final_config = final_config
         super().__init__(final_config)
 
+        # Check all the settings
+        self.check_settings()
+
         # Create output directory
         Path(final_config['output_directory']).mkdir(parents=True, exist_ok=self.overwrite)
         save_location = os.path.join(os.getcwd(), final_config['output_directory'])
         # Print tatement to inform about save location
         print(f'Output will be saved to {save_location}')
 
-        self.check_settings()
+        # Create a log file
         with open(self.out("Log.tsv"),"w") as file:
             file.write("Step\tMemory_MB\tTime\n")
-
+        
     def __getattr__(self, name):
         return self[name]
     
@@ -89,12 +92,21 @@ class Setup(dict):
         # Check data_path
         assert isinstance(self.data_path, str)
         assert os.path.exists(self.data_path)
-        assert self.data_path.endswith('.h5ad'), f'Only support data files in h5ad fromat.'
+        assert self.data_path.endswith('.h5ad'), f'Only support data files in h5ad format.'
 
         # Classification
         assert isinstance(self.classification['train_ancestry'], str)
         assert isinstance(self.classification['infer_ancestry'], str)
         assert isinstance(self.classification['ancestry_column'], str)
+
+        # Machine learning
+        assert isinstance(self.nfolds, int)
+        assert self.nfolds >= 2, \
+            f"Cross-validation requires at least nfolds: 2 folds, got nfolds: {self.nfolds}."
+        
+        # Grid search
+        assert all(isinstance(x, float) for x in self.grid_search['l1_ratio']), \
+            f"Grid search l1_ratio needs to be floating points between 0.0 and 1.0."
 
     def log(self, text):
         with open(self.out("Log.tsv"),"a") as file:

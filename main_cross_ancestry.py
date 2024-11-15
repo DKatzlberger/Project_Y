@@ -45,6 +45,8 @@ with open(setup.out('Settings.yml'), 'w') as f:
     yaml.dump(setup.final_config, f)
 setup.log('Settings done')
 
+setup.grid_search['l1_ratio']
+
 # Data setup
 setup.log('Check data compatability')
 data = anndata.read_h5ad(setup.data_path)
@@ -177,7 +179,7 @@ search_space = setup.grid_search
 setup.log('Start training')
 grid_search = GridSearchCV(estimator=algo, param_grid=search_space,
                            cv=cv_hyp, scoring='f1_weighted', 
-                           refit=True
+                           refit=True, n_jobs=setup.njobs
                            )
 # Training the model
 grid_search.fit(train_X, train_y)
