@@ -67,7 +67,7 @@ extract_results <- function(limmaFit){
   for (x in colnames(coef(limmaFit))){
     # Extract for each coefficient all genes
     limmaRes[[x]] <- topTable(limmaFit, coef=x, number = Inf) |> 
-      rownames_to_column('Gene')
+      rownames_to_column('Feature')
   }
   limmaRes <- bind_rows(limmaRes, .id = "coef") 
   limmaRes <- filter(limmaRes, coef != "(Intercept)") 
@@ -92,20 +92,20 @@ visual_validation <- function(meta,
     mean_stats |> 
     as_tibble() |> 
     group_by(coef) |> 
-    filter(Gene %in% goi) 
+    filter(Feature %in% goi) 
 
   contrast_stats <- 
     contrast_stats |> 
     as_tibble() |> 
     group_by(coef) |> 
-    filter(Gene %in% goi) 
+    filter(Feature %in% goi) 
   
   signal <- 
     signal |> 
-    as_tibble(rownames = 'Gene') |> 
-    filter(Gene %in% goi) |> 
+    as_tibble(rownames = 'Feature') |> 
+    filter(Feature %in% goi) |> 
     as.data.frame() |> 
-    column_to_rownames('Gene') |> 
+    column_to_rownames('Feature') |> 
     t() |> 
     as_tibble(rownames = 'sampleId') 
   
@@ -118,14 +118,17 @@ visual_validation <- function(meta,
     summarise(across(where(is.numeric), mean)) |> 
     pivot_longer(cols = !all_of(data_output_column),
                  values_to = 'E',
-                 names_to = 'Gene')
+                 names_to = 'Feature')
   
+  # Common plot settings
+  x_lab <- xlab('Data_output_column')
+
   # Plot stats. results
   contrast_stats_plot <- ggplot(
     contrast_stats,
     aes(
       x = coef,
-      y = Gene,
+      y = Feature,
       color = logFC,
       size = pmin(5, -log10(adj.P.Val))
     )
@@ -136,15 +139,15 @@ visual_validation <- function(meta,
         high="red"
   ) +
   ggtitle('Results of comparison') +
-  ylab('Gene') +
-  xlab('Data output column') +
+  ylab('Feature') +
+  x_lab +
   theme(axis.text.x = element_text(angle = 90))
 
     mean_stats_plot <- ggplot(
     mean_stats,
     aes(
       x = coef,
-      y = Gene,
+      y = Feature,
       color = logFC,
       size = pmin(5, -log10(adj.P.Val))
     )
@@ -155,8 +158,8 @@ visual_validation <- function(meta,
         high="red"
   ) +
   ggtitle('Results of means model') +
-  ylab('Gene') +
-  xlab('Data output column') +
+  ylab('Feature') +
+  x_lab +
   theme(axis.text.x = element_text(angle = 90))
 
   # Plot mean signal
@@ -164,7 +167,7 @@ visual_validation <- function(meta,
     mean_signal,
     aes(
       x = get(data_output_column),
-      y = Gene,
+      y = Feature,
       fill = E
     )
   ) +
@@ -174,8 +177,8 @@ visual_validation <- function(meta,
         high="red"
   ) +
   ggtitle('Mean signal in the data') +
-  ylab('Gene') +
-  xlab('Data output column') +
+  ylab('Feauture') +
+  x_lab +
   theme(axis.text.x = element_text(angle = 90))
 
   # Patchwork
@@ -191,4 +194,19 @@ is_yml_file <- function(file_path) {
   if (tolower(tools::file_ext(file_path)) != 'yml') {
     stop('Error: The file is not a YML file.')
   }
+}
+
+compute_correlation <- function(data, method = "spearman") {
+  # Compute correlation matrix
+  correlation_matrix <- data |> 
+    select(starts_with("logFC")) |> 
+    cor(method = method)
+  
+  # Melt the upper triangle of the correlation matrix into a data.table
+  melted_correlation <- as.data.table(as.table(correlation_matrix))[V1 < V2]
+  
+  # Rename the correlation value column
+  setnames(melted_correlation, old = "N", new = method)
+  
+  return(head(melted_correlation, 2))
 }

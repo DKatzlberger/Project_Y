@@ -45,7 +45,6 @@ with open(setup.out('Settings.yml'), 'w') as f:
     yaml.dump(setup.final_config, f)
 setup.log('Settings done')
 
-setup.grid_search['l1_ratio']
 
 # Data setup
 setup.log('Check data compatability')
@@ -82,7 +81,7 @@ setup.log('Setting seed')
 # Seed is used to generate different European subsets
 seed = setup.seed
 np.random.seed(seed)
-# os.environ['PYTHONHASHSEED'] = str(seed)
+os.environ['PYTHONHASHSEED'] = str(seed)
 
 
 setup.log('Create subset')
@@ -151,7 +150,6 @@ inf_X = np.array(inf_data.X)
 inf_y = encode_y(inf_data.obs[setup.classification['output_column']], encoder)
 
 
-# TODO - Normalization features 
 # Normalization of features 
 setup.log('Normalization')
 train_X = normalize(eval(setup.normalization), train_X)
@@ -227,7 +225,7 @@ if setup.visual_val:
 
     # Binary calculation
     else:
-        R.run_script(script_path=os.path.join(os.getcwd(), 'metric_calculation.py'),
+        R.run_script(script_path=os.path.join(os.getcwd(), 'binary_metric_calculation.py'),
                      args=[settings_file])
 
     # Run the script to visualize

@@ -38,8 +38,10 @@ if (length(args) > 0) {
   setup <- yaml.load_file(YAML_FILE)
 }
 
-
 print('Start differential gene expression analysis.')
+
+# Set seed (because why not)
+set.seed(setup$seed)
 
 # Load data
 adata <- read_h5ad(setup$data_path)
@@ -66,6 +68,7 @@ inf_design <- create_design(setup$classification$output_column, meta = inf_data$
 
 
 # Create contrast matrix (Only needs to be created once)
+# Used for hypothesis testing between groups
 contrast_matrix <- create_contrast(colnames(train_design))
 print(contrast_matrix)
 
@@ -123,6 +126,67 @@ train_limmaFit_contrast <- eBayes(train_limmaFit_contrast)
 test_limmaFit_contrast <- eBayes(test_limmaFit_contrast)
 inf_limmaFit_contrast <- eBayes(inf_limmaFit_contrast)
 
+
+# Metrics to score the model
+# Design matrix 
+# samples x condition
+
+# Coefficient matrix
+# genes x condition
+
+# Metric for goodnes of fit
+y_hat <- fitted(train_limmaFit) # values
+residuals <- train_norm$E - y_hat
+
+# Sum of square total (SST) based on Europeans
+mean_y <- rowMeans(train_norm$E)  # mean expression for each gene across all samples
+sst <- rowSums((train_norm$E - mean_y)^2) # the total error per gene
+# Residuals sum of squares
+ssr <- rowSums(residuals^2)
+# R2
+r2 <- 1 - (ssr / sst)
+mean_r2 <- mean(r2)
+
+# RMSE
+rmse <- sqrt(rowMeans(residuals^2))
+mean_rmse <- mean(rmse)
+
+# Apply European model to Asian
+design_europe <- model.matrix(~ cancer_type_detailed, data = train_data$obs)
+fit_europe <- lmFit(train_norm$E, design_europe)
+fit_europe <- eBayes(fit_europe)
+
+y_hat_europe <- fitted(fit_europe)
+residuals_europe <- train_norm$E - y_hat_europe
+
+mean_y_europe <- rowMeans(train_norm$E)
+sst_europe <- rowSums((train_norm$E - mean_y_europe)^2)
+sse_europe <- rowSums(residuals_europe^2)
+r2_europe <- 1 - (sse_europe / sst_europe)
+rmse_europe <- sqrt(rowMeans(residuals_europe^2))
+mean(rmse_europe)
+
+# Asian
+design_asian <- model.matrix(~ cancer_type_detailed, data = inf_data$obs)
+# Matrix multiplication for the right dimensions
+y_hat_asian <- t(design_asian %*% t(fit_europe$coefficients))
+residuals_asian <- inf_norm$E - y_hat_asian
+
+mean_y_asian <- rowMeans(inf_norm$E)
+sst_asian <- rowSums((inf_norm$E - mean_y_asian)^2)
+sse_asian <- rowSums(residuals_asian^2)
+r2_asian <- 1 - (sse_asian / sst_asian)
+rmse_asian <- sqrt(rowMeans(residuals_asian^2))
+mean(rmse_asian)
+
+
+mean(r2_asian)
+
+
+
+
+
+# The script continues
 # Results contrast
 train_contrast_res <- extract_results(train_limmaFit_contrast)
 test_contrast_res <- extract_results(test_limmaFit_contrast)
@@ -139,12 +203,12 @@ if(setup$visual_val){
 # Get genes for validation
 top <- train_mean_res |> 
   slice_max(logFC, n = 5) |> 
-  pull(Gene) |> 
+  pull(Feature) |> 
   unique()
   
 low <- train_mean_res |> 
   slice_min(logFC, n = 5) |> 
-  pull(Gene) |> 
+  pull(Feature) |> 
   unique()
 
 goi <- c(top, low)
@@ -172,6 +236,42 @@ i <- visual_validation(
   ggsave(file.path(setup$output_directory, 'Validation_stats_train.pdf'), plot = t, height = 6, width = 12)
   ggsave(file.path(setup$output_directory, 'Validation_stats_inf.pdf'), plot = i, height = 6, width = 12)
 }
+
+# Calculate metric 
+# Select and rename logFC columns from each data frame for clarity
+train_logFC <- train_contrast_res |> 
+  select(coef, Feature, logFC) |> 
+  rename(logFC_train = logFC)
+
+test_logFC <- test_contrast_res |> 
+  select(coef, Feature, logFC) |> 
+  rename(logFC_test = logFC)
+
+inf_logFC <- inf_contrast_res |> 
+  select(coef, Feature, logFC) |> 
+  rename(logFC_inf = logFC)
+
+# Merge all three data frames (aligned by coef and feature)
+merged_logFC <- train_logFC |> 
+  inner_join(test_logFC, by = c('coef', 'Feature')) |> 
+  inner_join(inf_logFC, by = c('coef', 'Feature'))
+
+# Correlation
+pearson <- compute_correlation(data = merged_logFC, method = 'pearson')
+spearman <- compute_correlation(data = merged_logFC, method = 'spearman')
+
+# Make metric dataframe
+metric_df <- inner_join(pearson, spearman, by = c('V1', 'V2')) |> 
+  mutate(
+    Seed = setup$seed, 
+    Status = ifelse(V1 == 'logFC_test', 'Test', 'Inference'),
+    Ancestry = toupper(setup$classification$infer_ancestry),
+    Prediction = ifelse(V1 == 'logFC_test', 'Subset', 'Ancestry'),
+  )
+
+# Save metric Dataframe
+fwrite(metric_df, file.path(setup$output_directory, 'Metric_dge.csv'))
+
 
 # Print statement to switch back to python script
 print('Switching back to Python.')

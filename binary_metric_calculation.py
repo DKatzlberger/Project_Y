@@ -48,9 +48,16 @@ def binary_metric_score(y_true, y_prob, thresholds=None, metric='accuracy'):
 # TODO- Make a bit more generalizable
 
 # Load settings
-file_path = sys.argv[1]
-with open(file_path, 'r') as f:
-    setup = yaml.safe_load(f)
+if len(sys.argv) > 1:
+    file_path = sys.argv[1]
+    with open(file_path, 'r') as f:
+        setup = yaml.safe_load(f)
+else:
+    # Dev settings 
+    file_path = 'dev_settings.yml'
+    with open(file_path, 'r') as f:
+        setup = yaml.safe_load(f)
+    print('Running interactive mode for development.')
 
 print('Start calculating metric.')
 
@@ -64,8 +71,8 @@ inf_p = pd.read_csv(os.path.join(setup['output_directory'], 'Probabilities_inf.c
 # Take probabilities for class 1
 inf_y, inf_p = np.array(inf_p.iloc[:,-1]), np.array(inf_p.iloc[:,1])
 
-# Thresholds for dependent metric
-thr = [0.2, 0.3, 0.4, 0.5]
+# Thresholds for thr dependent metric (accuracy, f1)
+thr = setup['thresholds']
 
 # Metric calculation
 test_auc = binary_metric_score(test_y, test_p, metric='roc_auc')
@@ -87,8 +94,10 @@ test_metric = (pd.concat(
     **{
     'ROC_AUC': test_auc,
     'Status': 'Test',
-    'Ancestry': setup['classification']['infer_ancestry'].upper()  # infer ancestry needed for visualization
-}))
+    'Ancestry': setup['classification']['infer_ancestry'].upper(),  # infer ancestry needed for visualization
+    'Seed': setup['seed']
+    }
+))
 
 inf_metric = (pd.concat(
     [pd.DataFrame.from_dict(metric, orient='index', columns=[name])
@@ -100,10 +109,14 @@ inf_metric = (pd.concat(
     **{
     'ROC_AUC': inf_auc,
     'Status': 'Inference',
-    'Ancestry': setup['classification']['infer_ancestry'].upper()
-}))
+    'Ancestry': setup['classification']['infer_ancestry'].upper(),
+    'Seed': setup['seed']
+    }
+))
+
+# TODO - Combine inf and test
+metric_df = pd.concat([test_metric, inf_metric])
 
 # This Data frame is used in r
 # r_metric = pd.concat([test_metric, inf_metric]).reset_index(drop=True)
-test_metric.to_csv(os.path.join(setup['output_directory'], 'Metric_test.csv'), index=False)
-inf_metric.to_csv(os.path.join(setup['output_directory'], 'Metric_inf.csv'), index=False)
+metric_df.to_csv(os.path.join(setup['output_directory'], 'Metric_ml.csv'), index=False)

@@ -34,9 +34,9 @@ if (length(args) > 0) {
 print('Start visualization.')
 
 # Load metric dataframes
-test_metric <- fread(file.path(setup$output_directory, 'Metric_test.csv')) |> 
+test_metric <- fread(file.path(setup$output_directory, 'Ml_metric_test.csv')) |> 
     mutate(Prediction = 'Subset')
-inf_metric  <- fread(file.path(setup$output_directory, 'Metric_inf.csv')) |> 
+inf_metric  <- fread(file.path(setup$output_directory, 'Ml_metric_inf.csv')) |> 
     mutate(Prediction = 'Ancestry')
 
 # Combine for visulization
@@ -53,6 +53,14 @@ metric <- metric |>
     ) |> 
     mutate(Prediction = fct_rev(Prediction))
 
+# Plots
+# Define common scale for y-axis
+common_scale_y <- scale_y_continuous(
+    limits = c(0, 1),
+    breaks = c(0, 0.5, 1)
+)
+
+
 # Plot F1
 f1_plot <- metric |> 
     filter(Metric == 'F1') |> 
@@ -63,6 +71,7 @@ f1_plot <- metric |>
         )
     ) +
     geom_col() +
+    common_scale_y +
     facet_grid(
         cols = vars(Ancestry),
         rows = vars(Threshold)
@@ -79,6 +88,7 @@ acc_plot <- metric |>
         )
     ) +
     geom_col() +
+    common_scale_y +
     facet_grid(
         cols = vars(Ancestry),
         rows = vars(Threshold)
@@ -97,6 +107,7 @@ auc_plot <- metric |>
         )
     ) +
     geom_col() +
+    common_scale_y +
     facet_grid(
         cols = vars(Ancestry),
     ) +
@@ -107,6 +118,6 @@ combined <- f1_plot + acc_plot + auc_plot +
   plot_layout(ncol = 2)
 
 # Save
-ggsave(file.path(setup$output_directory, 'Validation_ml.pdf'), height = 10, width = 10)
+ggsave(file.path(setup$output_directory, 'Generalizability_ml.pdf'), height = 10, width = 10)
 
 
