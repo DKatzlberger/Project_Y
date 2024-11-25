@@ -213,6 +213,13 @@ inf_y_hat['y'] = inf_y
 # Save propabilities
 inf_y_hat.to_csv(setup.out('Probabilities_inf.csv'), index=False)
 
+# Model weights (interpretation)
+feature_names = train_data.var_names # using train data because features got selected based on DE genes
+feature_weights = best_m.coef_
+feature_df = pd.DataFrame(data=feature_weights,
+                          columns=feature_names)
+feature_df.to_csv(setup.out('Weights.csv'), index=False)
+
 # Visualization
 if setup.visual_val:
     setup.log('ML visualization')
@@ -234,9 +241,4 @@ if setup.visual_val:
 
 
 
-
-
-
-# TODO - Visualization script
 # TODO - How similar are the subsets (Jaccard)
-# TODO - Model interpretations

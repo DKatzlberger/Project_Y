@@ -10,12 +10,15 @@ shift
 # Second argument
 seeds=("$@")
 
-# Script to run
-PYTHON_SCRIPT="main_cross_ancestry.py"
 # Process settings file
 PROCESS_SCRIPT="process_yaml_.py"
 # Singularity container for execution
 SINGULARITY_IMAGE="data/ancestry_dk.sif"
+
+# Scripts to run
+PYTHON_SCRIPT="main_cross_ancestry.py"
+R_SCRIPT="combined_visualization.R"
+
 
 # Check if the YAML file exists
 if [ ! -f "$SETTINGS_FILE" ]; then
@@ -23,9 +26,12 @@ if [ ! -f "$SETTINGS_FILE" ]; then
   exit 1
 fi
 
-# Make both scripts executable
-chmod +x "${PYTHON_SCRIPT}"
+# Make scripts executable
 chmod +x "${PROCESS_SCRIPT}"
+
+chmod +x "${PYTHON_SCRIPT}"
+chmod +x "${R_SCRIPT}"
+
 
 # Need to specify host
 HOSTNAME="trude.came.sbg.ac.at"
@@ -44,18 +50,14 @@ AVAILABLE_CPUS=$(printf "%.0f" "$AVAILABLE_CPUS")
 # Cpus per seed
 CPUS_PER_JOB=$((AVAILABLE_CPUS / ${#seeds[@]}))
 
-# echo "Host: $HOST"
-# echo "  Total CPUs: $NCPU"
-# echo "  Current Load: $LOAD"
-# echo "  Estimated Available CPUs (minus $SAVE_CPUS): $AVAILABLE_CPUS"
-# echo "  CPUs per job: $CPUS_PER_JOB"
+
 job_list=()
 for seed in "${seeds[@]}"; do
     # echo "$seed"
     # Modify settings file (singularity does not work within container)
     job_name=$(singularity exec --bind /vscratch:/vscratch "${SINGULARITY_IMAGE}" python3 "${PROCESS_SCRIPT}" "${SETTINGS_FILE}" "${seed}" "${CPUS_PER_JOB}")
 
-    job_list+=${job_name}
+    job_list+=${job_name},
     # Make output for qsub
     qsub_output="data/qsub/$job_name"
 
@@ -69,14 +71,19 @@ for seed in "${seeds[@]}"; do
 
     # Submit the job to the queuing system
     # singularity exec --bind /vscratch:/vscratch "${SINGULARITY_IMAGE}" python3 "${PYTHON_SCRIPT}" job_settings_.yml
+    
     # This is the one that runs the actual job
-    #echo "job_settings_"${seed}".yml"
     qsub -N $job_name -l hostname=$HOSTNAME -pe smp $CPUS_PER_JOB -o "$qsub_output/output.log" -e "$qsub_output/error.log" singularity exec --bind /vscratch:/vscratch "${SINGULARITY_IMAGE}" python3 "${PYTHON_SCRIPT}" _job_settings_"${seed}_".yml
+
     # qsub -N $job_name -l hostname=$HOSTNAME -o "$qsub_output/output.log" -e "$qsub_output/error.log" singularity exec --bind /vscratch:/vscratch "${SINGULARITY_IMAGE}" python3 "${PYTHON_SCRIPT}" job_settings_.yml
     # qsub -N "echo" -l hostname=$HOSTNAME -o "$qsub_output/output.log" -e "$qsub_output/error.log" echo "HALLO_there_should_be_no_error"
 done
 
+# These scripts wait to be executed once all jobs in job_list are finished
+qsub -N "Visualization" -hold_jid "${job_list[@]}" singularity exec --bind /vscratch:/vscratch "${SINGULARITY_IMAGE}" Rscript "${R_SCRIPT}" "${SETTINGS_FILE}"
+
 # Clean up
-qsub -N "Clean_up" -hold_jid "${joblist[@]}" -o /dev/null -e /dev/null rm _job_settings_[0-9]*_.yml
+# qsub -N "Clean_up" -hold_jid "${job_list[@]}" bash -c 'rm _job_settings_[0-9]*_.yml'
+
 
 # echo "Submitted jobs: $job_list"

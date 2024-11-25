@@ -72,7 +72,7 @@ inf_p = pd.read_csv(os.path.join(setup['output_directory'], 'Probabilities_inf.c
 inf_y, inf_p = np.array(inf_p.iloc[:,-1]), np.array(inf_p.iloc[:,1])
 
 # Thresholds for thr dependent metric (accuracy, f1)
-thr = setup['thresholds']
+thr = setup['thresholds'] # only available in default settings
 
 # Metric calculation
 test_auc = binary_metric_score(test_y, test_p, metric='roc_auc')
@@ -116,6 +116,7 @@ inf_metric = (pd.concat(
 
 # TODO - Combine inf and test
 metric_df = pd.concat([test_metric, inf_metric])
+metric_df['Prediction'] = metric_df['Status'].apply(lambda x: "Subset" if x == "Test" else 'Ancestry')
 
 # This Data frame is used in r
 # r_metric = pd.concat([test_metric, inf_metric]).reset_index(drop=True)

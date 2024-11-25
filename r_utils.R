@@ -114,14 +114,15 @@ visual_validation <- function(meta,
     as_tibble(rownames = 'sampleId') |> 
     select(all_of(data_output_column), sampleId) |> 
     merge(signal, by = 'sampleId') |> 
-    group_by_at(data_output_column) |> # Very interesting that you have to use it like this
+    group_by_at(data_output_column) |> # interestng to use group_by_at
     summarise(across(where(is.numeric), mean)) |> 
     pivot_longer(cols = !all_of(data_output_column),
                  values_to = 'E',
                  names_to = 'Feature')
   
   # Common plot settings
-  x_lab <- xlab('Data_output_column')
+  x_lab <- xlab('Comparison')
+  y_lab <- ylab('Feature')
 
   # Plot stats. results
   contrast_stats_plot <- ggplot(
@@ -139,7 +140,7 @@ visual_validation <- function(meta,
         high="red"
   ) +
   ggtitle('Results of comparison') +
-  ylab('Feature') +
+  y_lab +
   x_lab +
   theme(axis.text.x = element_text(angle = 90))
 
@@ -158,7 +159,7 @@ visual_validation <- function(meta,
         high="red"
   ) +
   ggtitle('Results of means model') +
-  ylab('Feature') +
+  y_lab +
   x_lab +
   theme(axis.text.x = element_text(angle = 90))
 
@@ -177,7 +178,7 @@ visual_validation <- function(meta,
         high="red"
   ) +
   ggtitle('Mean signal in the data') +
-  ylab('Feauture') +
+  y_lab +
   x_lab +
   theme(axis.text.x = element_text(angle = 90))
 
@@ -206,7 +207,7 @@ compute_correlation <- function(data, method = "spearman") {
   melted_correlation <- as.data.table(as.table(correlation_matrix))[V1 < V2]
   
   # Rename the correlation value column
-  setnames(melted_correlation, old = "N", new = method)
+  setnames(melted_correlation, old = "N", new = str_to_title(method))
   
   return(head(melted_correlation, 2))
 }

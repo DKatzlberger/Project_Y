@@ -36,7 +36,7 @@ def modify_yaml(input_path, output_path, seed, njobs):
         yaml.dump(data, f)
 
     # Print the modified path to use as qsub output
-    print(f'{modified_path}')
+    print(modified_path)
 
 # Here starts the script
 

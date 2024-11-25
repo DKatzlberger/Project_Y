@@ -34,18 +34,12 @@ if (length(args) > 0) {
 print('Start visualization.')
 
 # Load metric dataframes
-test_metric <- fread(file.path(setup$output_directory, 'Ml_metric_test.csv')) |> 
-    mutate(Prediction = 'Subset')
-inf_metric  <- fread(file.path(setup$output_directory, 'Ml_metric_inf.csv')) |> 
-    mutate(Prediction = 'Ancestry')
-
-# Combine for visulization
-metric <- 
-    bind_rows(test_metric, inf_metric)
+ml_metric <- fread(file.path(setup$output_directory, 'Metric_ml.csv')) 
+dge_metric <- fread(file.path(setup$output_directory, 'Metric_dge.csv')) 
 
 
 # Change format (pivot longer)
-metric <- metric |>  
+metric <- ml_metric |>  
     pivot_longer(
         cols = c(Accuracy, F1, ROC_AUC),
         values_to = 'Value',
@@ -119,5 +113,32 @@ combined <- f1_plot + acc_plot + auc_plot +
 
 # Save
 ggsave(file.path(setup$output_directory, 'Generalizability_ml.pdf'), height = 10, width = 10)
+
+# Plot correlation of logFCs
+metric <- dge_metric |> 
+    pivot_longer(
+        cols = c(Pearson, Spearman),
+        values_to = 'Value',
+        names_to = 'Metric'
+    ) |> 
+    mutate(Prediction = fct_rev(Prediction))
+
+log_correlation <- metric |> 
+    ggplot(
+        aes(
+            x = Prediction,
+            y = Value
+        )
+    ) +
+    geom_col() +
+    common_scale_y +
+    facet_grid(
+        cols = vars(Ancestry),
+        rows = vars(Metric)
+    ) +
+    ggtitle('Correlation') 
+
+# Save
+ggsave(file.path(setup$output_directory, 'Generalizability_dge.pdf'), height = 10, width = 10)
 
 
