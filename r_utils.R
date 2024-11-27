@@ -198,7 +198,7 @@ is_yml_file <- function(file_path) {
 }
 
 compute_correlation <- function(data, method = "spearman") {
-  # Compute correlation matrix
+  # Compute correlation matrix from DGE results
   correlation_matrix <- data |> 
     select(starts_with("logFC")) |> 
     cor(method = method)
@@ -210,4 +210,57 @@ compute_correlation <- function(data, method = "spearman") {
   setnames(melted_correlation, old = "N", new = str_to_title(method))
   
   return(head(melted_correlation, 2))
+}
+
+# Calculate Kolmogorow-Smirnow
+ks_test <- function(data, group_col, value_col, group1 = "Test", group2 = "Inference") {
+  
+  # Filter the data for the two groups and pull the corresponding values
+  group_data <- data |>
+    filter(!!sym(group_col) %in% c(group1, group2)) |>
+    select(!!sym(group_col), !!sym(value_col))
+  
+  # Extract the values for the two groups to compare
+  group1_values <- group_data |> filter(!!sym(group_col) == group1) |> pull(!!sym(value_col))
+  group2_values <- group_data |> filter(!!sym(group_col) == group2) |> pull(!!sym(value_col))
+  
+  # Perform Kolmogorov-Smirnov test
+  ks_result <- ks.test(group1_values, group2_values)
+  
+  # Return the result of the KS test
+  return(ks_result)
+}
+
+# Permutation test
+permutation_test <- function(data, value_col, group_col) {
+  
+   # Check if any group has identical values (zero variance)
+    var_check <- data |>
+    group_by(!!sym(group_col)) |>
+    summarise(var_value = var(!!sym(value_col)), .groups = 'drop')
+  
+  # If any group has zero variance, return p-value of 1
+  if (any(var_check$var_value == 0)) {
+    message("One or more groups have identical values. Returning p-value of 1.")
+    return(1.000)  # Return the p-value of 1 directly
+  }
+
+  # Quote the column names for later use in evaluation
+  value_col <- sym(value_col)  # Quoting the value column
+  group_col <- sym(group_col)  # Quoting the group column
+  
+  # Prepare the data by selecting relevant columns and ensuring the group variable is a factor
+  perm_data <- data |>
+    select(!!value_col, !!group_col) |>
+    mutate(!!group_col := as.factor(!!group_col))  # Ensure group_col is a factor
+  
+  # Construct the formula for the independence test
+  formula <- as.formula(paste(deparse(value_col), "~", deparse(group_col)))
+  
+  # Perform the permutation test (independence test)
+  perm_test_result <- independence_test(formula = formula, data = perm_data)
+  
+  # Return the result of the permutation test
+  p_value = pvalue(perm_test_result)
+  return(p_value)
 }

@@ -8,10 +8,10 @@ suppressPackageStartupMessages({
 })
 
 # Custom functions
-source('r_utils.R')
+source("r_utils.R")
 
 # Here starts the script
-print('Envoking R.')
+print("Envoking R.")
 
 # Load command line arguments
 args <- commandArgs(trailingOnly = TRUE)
@@ -54,6 +54,19 @@ common_scale_y <- scale_y_continuous(
     breaks = c(0, 0.5, 1)
 )
 
+# Create ancestry labels with n_ancestry
+ancestry_labels <- metric |>
+  distinct(Ancestry, n_ancestry) |>
+  mutate(label = paste0(Ancestry, " (n = ", n_ancestry, ")")) |>
+  select(Ancestry, label) |>
+  deframe()  # Converts to a named vector
+
+# Create threshold labels
+threshold_labels <- metric |>
+  distinct(Threshold) |>
+  mutate(label = paste0("Thr: ", Threshold)) |>
+  select(Threshold, label) |>
+  deframe()  # Converts to a named vector
 
 # Plot F1
 f1_plot <- metric |> 
@@ -68,7 +81,11 @@ f1_plot <- metric |>
     common_scale_y +
     facet_grid(
         cols = vars(Ancestry),
-        rows = vars(Threshold)
+        rows = vars(Threshold),
+        labeller = labeller(
+            Ancestry = as_labeller(ancestry_labels),
+            Threshold = as_labeller(threshold_labels)
+            )
     ) +
     ggtitle('F1') 
 
@@ -85,7 +102,11 @@ acc_plot <- metric |>
     common_scale_y +
     facet_grid(
         cols = vars(Ancestry),
-        rows = vars(Threshold)
+        rows = vars(Threshold),
+        labeller = labeller(
+            Ancestry = as_labeller(ancestry_labels),
+            Threshold = as_labeller(threshold_labels)
+            )
     ) +
     ggtitle('Accuracy')
 
@@ -104,6 +125,9 @@ auc_plot <- metric |>
     common_scale_y +
     facet_grid(
         cols = vars(Ancestry),
+        labeller = labeller(
+            Ancestry = as_labeller(ancestry_labels)
+        )
     ) +
     ggtitle('ROC AUC') 
     
@@ -134,7 +158,11 @@ log_correlation <- metric |>
     common_scale_y +
     facet_grid(
         cols = vars(Ancestry),
-        rows = vars(Metric)
+        rows = vars(Metric),
+        labeller = labeller(
+            Ancestry = as_labeller(ancestry_labels),
+            Metric = label_value
+        )
     ) +
     ggtitle('Correlation') 
 

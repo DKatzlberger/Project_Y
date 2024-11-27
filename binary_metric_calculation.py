@@ -63,13 +63,15 @@ print('Start calculating metric.')
 
 # Test probabilities (European subset)
 test_p = pd.read_csv(os.path.join(setup['output_directory'], 'Probabilities_test.csv'))
+inf_p = pd.read_csv(os.path.join(setup['output_directory'], 'Probabilities_inf.csv'))
+
 # Take probabilities for class 1
 test_y, test_p = np.array(test_p.iloc[:,-1]), np.array(test_p.iloc[:,1])
-
-# Inf probabilities
-inf_p = pd.read_csv(os.path.join(setup['output_directory'], 'Probabilities_inf.csv'))
-# Take probabilities for class 1
 inf_y, inf_p = np.array(inf_p.iloc[:,-1]), np.array(inf_p.iloc[:,1])
+
+# Sample number
+test_n = len(test_y)
+inf_n = len(inf_y)
 
 # Thresholds for thr dependent metric (accuracy, f1)
 thr = setup['thresholds'] # only available in default settings
@@ -110,13 +112,15 @@ inf_metric = (pd.concat(
     'ROC_AUC': inf_auc,
     'Status': 'Inference',
     'Ancestry': setup['classification']['infer_ancestry'].upper(),
-    'Seed': setup['seed']
+    'Seed': setup['seed'],
     }
 ))
 
 # TODO - Combine inf and test
 metric_df = pd.concat([test_metric, inf_metric])
 metric_df['Prediction'] = metric_df['Status'].apply(lambda x: "Subset" if x == "Test" else 'Ancestry')
+# Add samples of ancestry
+metric_df['n_ancestry'] = inf_n
 
 # This Data frame is used in r
 # r_metric = pd.concat([test_metric, inf_metric]).reset_index(drop=True)

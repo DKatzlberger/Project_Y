@@ -17,7 +17,7 @@ SINGULARITY_IMAGE="data/ancestry_dk.sif"
 
 # Scripts to run
 PYTHON_SCRIPT="main_cross_ancestry.py"
-R_SCRIPT="combined_visualization.R"
+R_SCRIPT="combine_runs.R"
 
 
 # Check if the YAML file exists
@@ -80,7 +80,7 @@ for seed in "${seeds[@]}"; do
 done
 
 # These scripts wait to be executed once all jobs in job_list are finished
-qsub -N "Visualization" -hold_jid "${job_list[@]}" singularity exec --bind /vscratch:/vscratch "${SINGULARITY_IMAGE}" Rscript "${R_SCRIPT}" "${SETTINGS_FILE}"
+qsub -N "Combine_runs" -hold_jid "${job_list[@]}" singularity exec --bind /vscratch:/vscratch "${SINGULARITY_IMAGE}" Rscript "${R_SCRIPT}" "${SETTINGS_FILE}"
 
 # Clean up
 # qsub -N "Clean_up" -hold_jid "${job_list[@]}" bash -c 'rm _job_settings_[0-9]*_.yml'

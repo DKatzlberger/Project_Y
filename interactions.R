@@ -88,7 +88,7 @@ stopifnot(all(colnames(t(data$X)) ==
 
 # Filter genes 
 # TODO - stronger filter maybe
-keep <- filterByExpr(t(data$X), group=group)
+keep <- filterByExpr(t(data$X))
 data <- data[, keep]
 
 # Create design matrix
@@ -126,10 +126,25 @@ limma_res <- bind_rows(limma_res, .id = "coef")
 limma_res <- filter(limma_res, coef != "(Intercept)")
 
 # Save the results from statistics
-# TODO - Save the results from statistics
+fwrite(limma_res, 
+       file.path(output_path, "Interaction_results.csv"))
 
 # Filter for interaction terms
 limma_res_interactions <- filter(limma_res, str_detect(coef, ":"))
+
+# limma_res_sig |>
+#   filter(str_detect(coef, ":")) |>
+#   group_by(coef) |>
+#   count()
+
+# limma_res_sig |>
+#   filter(str_detect(coef, ":")) |>
+#   filter(logFC < 0) |>
+#   mutate(coef = str_replace(coef, ":.*$", "")) |>
+#   filter(coef == 'afr') |>
+#   pull(Feature)
+
+
 
 # Plot them as a volcano plot
 volcano_plot <- limma_res_interactions |>
@@ -254,7 +269,7 @@ stat_up <- limma_res_interactions |>
   ggplot(
     aes(
       y = Feature,
-      x = coef,
+      x = str_replace(coef, ":.*$", ""),
       color = logFC,
       size = -log10(adj.P.Val))
   ) + 
@@ -305,7 +320,7 @@ stat_down <- limma_res_interactions |>
   ggplot(
     aes(
       y = Feature,
-      x = coef,
+      x = str_replace(coef, ":.*$", ""),
       color = logFC,
       size = -log10(adj.P.Val))
   ) + 

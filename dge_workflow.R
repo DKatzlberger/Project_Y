@@ -34,7 +34,7 @@ if (length(args) > 0) {
   # Dev settings if no command-line argument provided
   yaml_file <- "dev_settings.yml"
   print("Running interactive mode for development.")
-  setup <- yaml.load_file(YAML_FILE)
+  setup <- yaml.load_file(yaml_file)
 }
 
 print("Start differential gene expression analysis.")
@@ -57,7 +57,6 @@ inf_idx <- yaml.load_file(file.path(setup$output_directory, "Obs_inf.yml"))
 train_n = length(train_idx)
 test_n = length(test_idx)
 inf_n = length(inf_idx)
-
 
 # Subset the data by the indexes create in python
 train_data <- adata[adata$obs_names %in% train_idx, ]
@@ -145,9 +144,9 @@ inf_limma_fit_contrast <- eBayes(inf_limma_fit_contrast)
 
 # The script continues
 # Results contrast
-train_contrast_res <- extract_results(train_limmaFit_contrast)
-test_contrast_res <- extract_results(test_limmaFit_contrast)
-inf_contrast_res <- extract_results(inf_limmaFit_contrast)
+train_contrast_res <- extract_results(train_limma_fit_contrast)
+test_contrast_res <- extract_results(test_limma_fit_contrast)
+inf_contrast_res <- extract_results(inf_limma_fit_contrast)
 
 # Save results
 fwrite(train_contrast_res,
@@ -230,6 +229,7 @@ metric_df <- inner_join(pearson, spearman, by = c("V1", "V2")) |>
     Status = ifelse(V1 == "logFC_test", "Test", "Inference"),
     Ancestry = toupper(setup$classification$infer_ancestry),
     Prediction = ifelse(V1 == "logFC_test", "Subset", "Ancestry"),
+    n_ancestry = inf_n
   )
 
 # Save metric Dataframe

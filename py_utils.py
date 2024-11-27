@@ -143,7 +143,8 @@ class DataValidator():
         Check that output column is in the data.
         """
         output_column = self.setup['classification']['output_column']
-        assert output_column in self.data.obs.columns, f"Output column '{output_column}' not in the data."
+        assert output_column in self.data.obs.columns, \
+            f"Output column '{output_column}' not in the data."
     
     def validate_class_labels(self):
         """
@@ -156,6 +157,14 @@ class DataValidator():
         for label in required_labels:
             assert self.data.obs[output_column].str.contains(label).any(), \
                 f"No '{label}' in output column: '{output_column}', choose different comparison in settings."
+            
+    def validate_ancestry_column(self):
+        """
+        Check if the ancestry column is present in the data.
+        """
+        ancestry_column = self.setup['classification']['ancestry_column']
+        assert ancestry_column in self.data.obs.columns, \
+            f"Ancestry column '{ancestry_column}' not in the data."
     
     def validate_ancestry(self):
         """
@@ -178,6 +187,7 @@ class DataValidator():
         self.validate_features()
         self.validate_output_column()
         self.validate_class_labels()
+        self.validate_ancestry_column()
         self.validate_ancestry()
 
 
