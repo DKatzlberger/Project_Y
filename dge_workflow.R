@@ -45,9 +45,6 @@ set.seed(setup$seed)
 # Load data
 adata <- read_h5ad(setup$data_path)
 
-# TODO - Filter lowley expressed genes based on all Europeans
-# (so that we analyse same genes across ancestries)
-
 # Load the observation used in ml
 train_idx <- yaml.load_file(file.path(setup$output_directory, "Obs_train.yml"))
 test_idx <- yaml.load_file(file.path(setup$output_directory, "Obs_test.yml"))
@@ -141,8 +138,6 @@ train_limma_fit_contrast <- eBayes(train_limma_fit_contrast)
 test_limma_fit_contrast <- eBayes(test_limma_fit_contrast)
 inf_limma_fit_contrast <- eBayes(inf_limma_fit_contrast)
 
-
-# The script continues
 # Results contrast
 train_contrast_res <- extract_results(train_limma_fit_contrast)
 test_contrast_res <- extract_results(test_limma_fit_contrast)
@@ -219,8 +214,8 @@ merged_log_FC <- train_log_FC |>
   inner_join(inf_log_FC, by = c("coef", "Feature"))
 
 # Correlation
-pearson <- compute_correlation(data = merged_log_FC, method = "pearson")
-spearman <- compute_correlation(data = merged_log_FC, method = "spearman")
+pearson <- head(compute_correlation(data = merged_log_FC, method = "pearson"), 2)
+spearman <- head(compute_correlation(data = merged_log_FC, method = "spearman"), 2)
 
 # Make metric dataframe
 metric_df <- inner_join(pearson, spearman, by = c("V1", "V2")) |>

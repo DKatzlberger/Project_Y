@@ -209,7 +209,7 @@ compute_correlation <- function(data, method = "spearman") {
   # Rename the correlation value column
   setnames(melted_correlation, old = "N", new = str_to_title(method))
   
-  return(head(melted_correlation, 2))
+  return(melted_correlation)
 }
 
 # Calculate Kolmogorow-Smirnow
@@ -263,4 +263,28 @@ permutation_test <- function(data, value_col, group_col) {
   # Return the result of the permutation test
   p_value = pvalue(perm_test_result)
   return(p_value)
+}
+
+# Take a non stratified sample from a population by proportortions
+sample_with_proportions <- function(data, proportions, seed) {
+  # Set seed for reproducibility
+  set.seed(seed)
+  
+  # Calculate the total size of the sampling_subset
+  total_size <- nrow(data)
+  
+  # Calculate the sizes for each proportion
+  sizes <- floor(proportions * total_size)
+  
+  # List to store the sampled subsets
+  samples <- list()
+  
+  # Sample data with replacement for each proportion
+  for (i in seq_along(sizes)) {
+    sample_name <- paste0("proportion_", gsub("\\.", "_", as.character(proportions[i])))
+    indexes <- sample(nrow(data), size = sizes[i], replace = FALSE)
+    samples[[sample_name]] <- data[indexes, ]
+  }
+  
+  return(samples)
 }

@@ -41,4 +41,17 @@ directory <- file.path(vscratch_dir, comparison)
 all_folders <- list.dirs(directory, full.names = TRUE, recursive = FALSE)
 matching_folders <- grep(comparison, all_folders, value = TRUE)
 
+for (folder in matching_folders){
+    dge_file <- file.path(folder, "Metric_dge.csv")
+    ml_file <- file.path(folder, "Metric_ml.csv")
+
+    # Load and append DGE data
+    dge_data <- fread(dge_file) 
+    metric_dge <- bind_rows(metric_dge, dge_data) 
+
+    # Load and append ML data
+    ml_data <- fread(ml_file) 
+    metric_ml <- bind_rows(metric_ml, ml_data) 
+}
+
 

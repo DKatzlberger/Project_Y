@@ -66,6 +66,13 @@ for (folder in matching_folders){
 metric_dge <- metric_dge |> mutate(Comparison = comparison)
 metric_ml <- metric_ml |> mutate(Comparison = comparison)
 
+# Only take seeds: 1-5
+metric_dge <- metric_dge |>
+  filter(Seed %in% c(1, 2, 3, 4, 5))
+
+metric_ml <- metric_ml |>
+  filter(Seed %in% c(1, 2, 3, 4, 5))
+
 # Outlier test
 # With hampel filter 3 * MAD confidence interval
 hampel_filter <- function(x, t0 = 3) {
@@ -87,6 +94,9 @@ metric_dge <- metric_dge |>
     Spearman_outlier = hampel_filter(Spearman),  # Hampel filter for Spearman
   )
 
+# metric_dge |>
+#   select(!c(V1, V2, Comparison, n_ancestry))
+
 # Add otlier column to check if ROC_AUC values contain outliers
 metric_ml <- metric_ml |>
   group_by(Status) |>
@@ -97,7 +107,7 @@ metric_ml <- metric_ml |>
 # Differential gene expression analysis:
 
 # Test difference in distribution of correlated logFC  
-# 1. with Kolmogorow-Smirnow
+# 1. Kolmogorow-Smirnow
 # Non-parametric
 # H0: The samples come from the same probability distribution
 # H1: The samples are from different probability distribution
@@ -110,6 +120,21 @@ ks_spearman <- ks_test(data = metric_dge, group_col = "Status", value_col = "Spe
 p_pearson <- permutation_test(data = metric_dge, group_col = "Status", value_col = "Pearson")
 p_spearman <- permutation_test(data = metric_dge, group_col = "Status", value_col = "Spearman")
 
+# 3. t-test
+# parametric
+pearson_test <- metric_dge |>
+  filter(Status == "Test",
+         #Seed %in% c(1, 2, 3, 4, 5)
+         ) |>
+  pull(Pearson)
+pearson_inference <- metric_dge |>
+  filter(Status == "Inference",
+         #Seed %in% c(1, 2, 3, 4, 5)
+         ) |>
+  pull(Pearson)
+
+t_pearson <- t.test(pearson_test, pearson_inference)
+
 # Summarize data (taking mean of correlation values)
 summarized_dge <- metric_dge |> 
     mutate(Prediction = fct_rev(Prediction)) |> 
@@ -121,6 +146,7 @@ summarized_dge <- metric_dge |>
     group_by(Ancestry, Status, Prediction, Metric, n_ancestry) |>  
     summarize(
     mean_value = mean(Value, na.rm = TRUE),
+    sd_value = sd(Value, na.rm = TRUE),
     se_value = sd(Value, na.rm = TRUE) / sqrt(n())
   ) |>
   mutate(p_value = ifelse(Metric == "Pearson", p_pearson, p_spearman))
@@ -151,6 +177,7 @@ summarized_ml <- metric_ml |>
     group_by(Ancestry, Status, Prediction, Metric, n_ancestry) |>  
     summarize(
     mean_value = mean(Value, na.rm = TRUE),
+    sd_value = sd(Value, na.rm = TRUE),
     se_value = sd(Value, na.rm = TRUE) / sqrt(n())
   ) |>
   mutate(p_value = p_roc)
@@ -175,7 +202,7 @@ common_y <- scale_y_continuous(
 DGE_plot <- summarized_dge |> 
     ggplot(
         aes(
-            x = Prediction,
+            x = fct_rev(Prediction),
             y = mean_value
         )
     ) +
@@ -185,8 +212,8 @@ DGE_plot <- summarized_dge |>
     ) +
     geom_errorbar(
         aes(
-            ymin = mean_value - se_value, 
-            ymax = mean_value + se_value
+            ymin = mean_value - sd_value, 
+            ymax = mean_value + sd_value
             ), 
         width = 0.2, position = position_dodge(0.7)
     ) +
@@ -212,13 +239,14 @@ DGE_plot <- summarized_dge |>
     vjust = 2,   # Align text to the top (since we're using Inf for y)
     hjust = 0,   # Align text to the left (since we're using x = 0.5 for the first bar)
     inherit.aes = FALSE  # Don't inherit the default aesthetics
-  )
+  ) 
+
 
 # Plot of ml
 ML_plot <- summarized_ml |> 
         ggplot(
         aes(
-            x = Prediction,
+            x = fct_rev(Prediction),
             y = mean_value
         )
     ) +
@@ -228,8 +256,8 @@ ML_plot <- summarized_ml |>
     ) +
     geom_errorbar(
         aes(
-            ymin = mean_value - se_value, 
-            ymax = mean_value + se_value
+            ymin = mean_value - sd_value, 
+            ymax = mean_value + sd_value
             ), 
         width = 0.2, position = position_dodge(0.7)
     ) +

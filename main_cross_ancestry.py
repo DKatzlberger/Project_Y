@@ -70,12 +70,21 @@ inf_data = (inf_data[inf_data.obs[setup.classification['output_column']]
                      )
 
 # Assertion: Check for enough samples per class
+# Limma eBayes needs replicates per class
 counts = (eur_data.obs[setup.classification['output_column']]
           .value_counts()
           ) 
 
-assert_str = f'Prerequisite is a sample size of {setup.sample_cutoff} for each class.'
+assert_str = f'Prerequisite is a train sample size of {setup.sample_cutoff} per class.'
 assert (counts > setup.sample_cutoff).all(), assert_str
+
+# Check compared ancestry (infer_ancestry) if there are replicates
+counts = (inf_data.obs[setup.classification['output_column']]
+          .value_counts()
+          )
+
+assert (counts >= 2).all(), \
+    f'For DGE analysis of compared ancesty ({setup.classification['infer_ancestry'].upper()}) at least one replicate per class is needed.'
 
 setup.log('Setting seed')
 # Seed is used to generate different European subsets
