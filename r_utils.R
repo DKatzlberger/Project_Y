@@ -266,24 +266,64 @@ permutation_test <- function(data, value_col, group_col) {
 }
 
 # Take a non stratified sample from a population by proportortions
-sample_with_proportions <- function(data, proportions, seed) {
+# sample_with_proportions <- function(data, proportions, sizes, seed) {
+#   # Set seed for reproducibility
+#   set.seed(seed)
+  
+#   # List to store the sampled subsets
+#   samples <- list()
+  
+#   # Sample data with replacement for each proportion
+#   for (i in seq_along(sizes)) {
+#     sample_name <- paste0("proportion_", gsub("\\.", "_", as.character(proportions[i])))
+#     indexes <- sample(nrow(data), size = sizes[i], replace = FALSE)
+#     samples[[sample_name]] <- data[indexes, ]
+#   }
+  
+#   return(samples)
+# }
+
+sample_by_size <- function(data, sizes, seed, class_column) {
   # Set seed for reproducibility
   set.seed(seed)
-  
-  # Calculate the total size of the sampling_subset
-  total_size <- nrow(data)
-  
-  # Calculate the sizes for each proportion
-  sizes <- floor(proportions * total_size)
   
   # List to store the sampled subsets
   samples <- list()
   
-  # Sample data with replacement for each proportion
+  # Ensure each class has at least two samples
   for (i in seq_along(sizes)) {
-    sample_name <- paste0("proportion_", gsub("\\.", "_", as.character(proportions[i])))
-    indexes <- sample(nrow(data), size = sizes[i], replace = FALSE)
-    samples[[sample_name]] <- data[indexes, ]
+    sample_name <- paste0("size_", gsub("\\.", "_", as.character(sizes[i])))
+    size <- sizes[i]
+    
+    # Split data by class
+    class_groups <- split(data$obs, data$obs[[class_column]])
+    
+    # Initialize storage for indices
+    selected_indices <- c()
+    
+    # First, ensure at least 2 samples per class
+    for (class_data in class_groups) {
+      if (nrow(class_data) >= 2) {
+        selected_indices <- c(selected_indices, sample(rownames(class_data), size = 2, replace = FALSE))
+      } else {
+        stop("Insufficient samples to guarantee at least 2 per class in proportion: ", proportions[i])
+      }
+    }
+    
+    # Determine remaining samples to pick
+    remaining_size <- size - length(selected_indices)
+    
+    if (remaining_size > 0) {
+      # Remove already selected indices
+      remaining_data <- data[!(rownames(data) %in% selected_indices), ]
+      
+      # Randomly sample remaining indices
+      additional_indices <- sample(rownames(remaining_data), size = remaining_size, replace = FALSE)
+      selected_indices <- c(selected_indices, additional_indices)
+    }
+    
+    # Save the sampled subset
+    samples[[sample_name]] <- data[selected_indices, ]
   }
   
   return(samples)

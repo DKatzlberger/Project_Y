@@ -18,14 +18,14 @@ args <- commandArgs(trailingOnly = TRUE)
 # Check if the script is run interactively or with command-line arguments
 if (length(args) > 0) {
   yaml_file <- args[1]  # First argument is the YAML file path
+  setup <- yaml.load_file(yaml_file)
 } else {
   # Dev settings
   yaml_file <- "job_settings.yml"
+  setup <- yaml.load_file(yaml_file)
   print("Running interactive mode for development.\n")
 }
 
-# Load setup file
-setup <- yaml.load_file(yaml_file)
 
 # Location where I store my files
 vscratch_dir <- "data/runs"
@@ -145,9 +145,10 @@ summarized_dge <- metric_dge |>
     ) |> 
     group_by(Ancestry, Status, Prediction, Metric, n_ancestry) |>  
     summarize(
-    mean_value = mean(Value, na.rm = TRUE),
-    sd_value = sd(Value, na.rm = TRUE),
-    se_value = sd(Value, na.rm = TRUE) / sqrt(n())
+      n_seeds = n(),
+      mean_value = mean(Value, na.rm = TRUE),
+      sd_value = sd(Value, na.rm = TRUE),
+      se_value = sd(Value, na.rm = TRUE) / sqrt(n())
   ) |>
   mutate(p_value = ifelse(Metric == "Pearson", p_pearson, p_spearman))
 
@@ -176,9 +177,10 @@ summarized_ml <- metric_ml |>
     ) |> 
     group_by(Ancestry, Status, Prediction, Metric, n_ancestry) |>  
     summarize(
-    mean_value = mean(Value, na.rm = TRUE),
-    sd_value = sd(Value, na.rm = TRUE),
-    se_value = sd(Value, na.rm = TRUE) / sqrt(n())
+      n_seeds = n(),
+      mean_value = mean(Value, na.rm = TRUE),
+      sd_value = sd(Value, na.rm = TRUE),
+      se_value = sd(Value, na.rm = TRUE) / sqrt(n())
   ) |>
   mutate(p_value = p_roc)
 
@@ -200,7 +202,7 @@ common_y <- scale_y_continuous(
 
 # Plot of correlation 
 DGE_plot <- summarized_dge |> 
-    ggplot(
+   ggplot(
         aes(
             x = fct_rev(Prediction),
             y = mean_value
