@@ -43,8 +43,8 @@ if (length(args) > 0) {
 # Is often modified using a script which manipulates path to compute many seeds at once
 path_to_save_location <- setup$output_directory
 # Create directory if not exist inclusive parents
-if (!dir.exists(directory)) {
-  dir.create(directory, recursive = TRUE)
+if (!dir.exists(path_to_save_location)) {
+  dir.create(path_to_save_location, recursive = TRUE)
 }
 
 # This script relies on random sampling
@@ -131,74 +131,99 @@ subset_list <- sample_by_size(sampling_split,
                               class_column = setup$classification$output_column,
                               seed = setup$seed)
 
-# Visualize each sampled subset 
-sample_meta <- data.frame()
+# Extract the meta data of each subset for visualization
+# Initialize data frame to store results
+subsets_meta <- data.frame()
 for (i in seq_along(subset_list)) {
   smpl <- subset_list[[i]]
-  sample_name <- names(subset_list)[i]
-  # Get meta and add column Sample
+  # Extract meta and add information
   meta <- smpl$obs |> 
-    mutate(Sample = sample_name)
+    mutate(
+      subset = "sampled",
+      n_observations = n(),
+      subset_name = paste0(subset, " (n = ", n_observations, ")")
+      ) 
   # Combine
-  sample_meta <- bind_rows(sample_meta, meta) 
+  subsets_meta <- bind_rows(subsets_meta, meta) 
 }
-# Add meta of 'stable_subset'
-sample_meta <- 
+
+# Add meta of 'constant_split'
+subsets_meta <- 
   constant_split$obs |>
-  mutate(Sample = "constant_observations") |>
-  bind_rows(sample_meta)
+  mutate(
+    subset = "constant",
+    n_observations = n(),
+    subset_name = paste0(subset, " (n = ", n_observations, ")")
+    ) |>
+  bind_rows(subsets_meta)
 
-
-# Plot with ggplot
-sample_distribution <- ggplot(
-    sample_meta,
+# Visualize
+subset_plot <- ggplot(
+    subsets_meta,
     aes(
-        x = fct_rev(Sample),
+        x = as_factor(subset_name),
         fill = get(setup$classification$output_column)
         )
     ) +
     geom_bar(
         position = "stack"
     ) +
-    theme(axis.text.x = element_text(angle = 90))
+    labs(
+      x = "Subset",
+      y = "Count",
+      fill = setup$classification$output_column,
+      caption = "All EUR were randomly split into two splits (50/50).\n One split was kept as constant. From the other split, random subsets were sampled by size."
+    ) + 
+    theme(
+      axis.text.x = element_text(angle = 90),
+      plot.caption = element_text(hjust = 0)
+    ) 
 
 # Save the pictures
 ggsave(file.path(setup$output_directory, "Subsets.pdf"),
-        plot = sample_distribution, height = 6, width = 12)
+        plot = subset_plot, height = 6, width = 12)
 
-# Limma for all other subsets
+# Limma analysis for all other subsets
+# 1. Initalize a instance to store results
+# 2. Iterate over all subsets in 'subset_list'
 logFC_results <- NULL
-# Iterate over all samples in sample_list
-for (i in seq_along(sample_list)) {
+for (i in seq_along(subset_list)) {
 
-  subset <- sample_list[[i]]
+  subset <- subset_list[[i]]
   # Check if observations in subset are unique
   stopifnot(anyDuplicated(subset$obs_names) == 0)
 
   # Information about the subset
-  subset_name <- names(sample_list)[i]
+  # 1. Name (don't know if will use)
+  # 2. Number of observations
+  subset_name <- names(subset_list)[i]
   n_obs <- nrow(subset)
-  # Create design matrix
+
+  # TODO - Create DGEList object
+  # TODO - CalcNormFactors
+
+  # Limma workflow
+  # 1. Create design matrix
+  # 2. logCPM transformation (voom)
   subset_design <- create_design(setup$classification$output_column, meta = subset$obs)
-
-  # logCPM transformation
   subset_norm <- voom(t(subset$X), subset_design, plot = FALSE)
-
-  # Fit the model (means model)
+  # 3. Fit the model (means model)
+  # 4. Ebayes
+  # 5. Extract results
   subset_limma_fit <- lmFit(subset_norm, design = subset_design)
-  # Ebayes
   subset_limma_fit <- eBayes(subset_limma_fit)
-  # Results
   susbet_means_res <- extract_results(subset_limma_fit)
 
-  # Fit contrast
+  # Hypothesis testing
+  # 1. Fit contrast
+  # 2. Ebayes
+  # 3. Extract results
   subset_limma_fit_contrast <- contrasts.fit(subset_limma_fit, contrast_matrix)
-  # Ebayes
   subset_limma_fit_contrast <- eBayes(subset_limma_fit_contrast)
-  # Results
   subset_contrast_res <- extract_results(subset_limma_fit_contrast)
 
-  # LogFC for correlation analysis
+  # Extract logFC for correlation analysis
+  # Uses the subset name to distinguish 
   subset_logFC <- subset_contrast_res |>
     select(coef, Feature, logFC) |>
     rename_with(~ paste0("logFC_", subset_name), .cols = logFC) 
@@ -213,23 +238,25 @@ for (i in seq_along(sample_list)) {
   }
 }
 
-# Add the logFC of the 'stable_subset' (ground truth)
-logFC_results <- inner_join(logFC_results, stable_logFC, by = c("coef", "Feature"))
+# Add the logFC of the 'constant_split' (ground truth)
+logFC_results <- inner_join(logFC_results, constant_logFC, by = c("coef", "Feature"))
 
 # Correlation of all numeric columns (logFC)
+# 1. Pearson
+# 2. Spearman
 pearson <- compute_correlation(data = logFC_results, method = "pearson") |>
-  filter(str_detect(V2, "stable"))
+  filter(str_detect(V1, "constant"))
 spearman <- compute_correlation(data = logFC_results, method = "spearman") |>
-  filter(str_detect(V2, "stable"))
+  filter(str_detect(V1, "constant"))
 
-# Make metric dataframe with all important information 
+# Combine Pearson and Spearman
+# Add all information need to combine multiple seeds
 metric_df <- inner_join(pearson, spearman, by = c("V1", "V2")) |>
   mutate(
-    Ancestry = "EUR"
+    Ancestry = toupper(setup$classification$train_ancestry),
     Seed = setup$seed,
-    Proportions = props,
-    n_proportion = sizes,
-    n_stable = stable_n_obs
+    Proportion_of_constant_split = props,
+    n = sizes
   )
 
 # Save metric Dataframe

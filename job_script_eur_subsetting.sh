@@ -10,13 +10,17 @@ shift
 # Second argument
 seeds=("$@")
 
+# Need to specify host
+HOSTNAME="merida.came.sbg.ac.at"
+SAVE_CPUS=0
+
 # Process settings file
 PROCESS_SCRIPT="process_yaml_eur_subsetting_.py"
 # Singularity container for execution
 SINGULARITY_IMAGE="data/ancestry_dk.sif"
 
 # Scripts to run
-R_SCRIPT_SUBSETTING="subset_Europeans.R"
+R_SCRIPT_SUBSETTING="eur_subsetting.R"
 R_SCRIPT_COMBINE="combine_runs.R"
 
 
@@ -32,10 +36,6 @@ chmod +x "${PROCESS_SCRIPT}"
 chmod +x "${R_SCRIPT_SUBSETTING}"
 chmod +x "${R_SCRIPT_COMBINE}"
 
-
-# Need to specify host
-HOSTNAME="trude.came.sbg.ac.at"
-SAVE_CPUS=10
 
 # Check availability of cpus on host
 qhost_output=$(qhost -h "${HOSTNAME}")

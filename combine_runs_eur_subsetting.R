@@ -57,10 +57,10 @@ if (length(args) > 0) {
 }
 
 # Extracting all folders in the 'vscratch_dir' that match 'match_pattern'
-# 1. List all folders in 'vscratch_dir'
+# 1. List all folders in 'vscratch_dir_in'
 # 2. With 'match_pattern' extract matching folders
-all_vscratch_dir <- list.dirs(vscratch_dir_in, full.names = TRUE, recursive = FALSE)
-match_vsratch_dir <- grep(match_pattern, all_vscratch_dir, value = TRUE)
+all_vscratch_dir_in <- list.dirs(vscratch_dir_in, full.names = TRUE, recursive = FALSE)
+match_vsratch_dir <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
 
 # Check if there were matching folders
 if (length(match_vsratch_dir) == 0) {
@@ -68,7 +68,7 @@ if (length(match_vsratch_dir) == 0) {
 }
 
 # Save the results of the analysis: 'EUR_subsetting'
-# 'Vscratch_dir' where summarized analysis are stored
+# 'Vscratch_dir_out' where summarized analysis are stored
 vscratch_dir_out  <- "data/combined_runs"
 path_to_save_location <- file.path(vscratch_dir_out, comparison, analysis_name)
 # Create the directory also parents (if it does not exist)
@@ -103,7 +103,7 @@ summarized_metric <- metric_all |>
     ) |> 
     # Summarize by Seed 
     # Dont use Seed in 'group_by'
-    group_by(Proportions, n_proportion, Metric) |>  
+    group_by(Proportion_of_constant_split, n, Metric) |>  
     summarize(
         n_seeds = n(),
         mean_value = mean(Value, na.rm = TRUE),
@@ -111,8 +111,8 @@ summarized_metric <- metric_all |>
         se_value = sd(Value, na.rm = TRUE) / sqrt(n())
   ) |>
   mutate(
-    n_proportion = as.factor(n_proportion),
-    Proportions = as.factor(Proportions)
+    n = as.factor(n),
+    Proportion_of_constant_split = as.factor(Proportion_of_constant_split)
     )
 
 # Plot the correlation
@@ -121,10 +121,11 @@ common_y <- scale_y_continuous(
     limits = c(0, 1.1), 
     breaks = c(0, 0.5, 1))
 
-summarized_metric |>
+# TODO 
+test <- summarized_metric |>
   ggplot(
     aes(
-        x = fct_rev(paste0(Proportions, " (n = ", n_proportion, ")")),
+        x = fct_rev(n),
         y = mean_value
     )
   ) +
@@ -145,9 +146,10 @@ summarized_metric |>
   ) +
   labs(
     # title = paste(gsub("_", " ", comparison)),
-    x = "EUR subsets",
+    x = "EUR subsets (n)",
     y = "Correlation coefficient"
   ) +
   theme(axis.text.x = element_text(angle = 90))
 
-
+ggsave(file.path(path_to_save_location, "Subsets.pdf"),
+        plot = test, height = 6, width = 12)
