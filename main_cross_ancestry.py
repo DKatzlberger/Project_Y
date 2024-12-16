@@ -167,7 +167,7 @@ inf_X = normalize(eval(setup.normalization), inf_X)
 
 # Assertion: Check arrays
 # Labels
-assert_str = f'There have to be at least 2 labels, {np.unique(train_y).shape[0]} are given.'
+assert_str = f'There have to be at least 2 classes, {np.unique(train_y).shape[0]} are given.'
 assert np.unique(train_y).shape[0] >= 2, assert_str
 # Dimension
 assert_str = f'Dimensions of label vector ({train_y.shape[0]}) and feature matrix ({train_X.shape[0]}) do not align.'

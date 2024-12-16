@@ -17,61 +17,89 @@ args <- commandArgs(trailingOnly = TRUE)
 
 # Check if the script is run interactively or with command-line arguments
 if (length(args) > 0) {
-  yaml_file <- args[1]  # First argument is the YAML file path
+  yaml_file <- args[1] 
+  # 1. Check if it's a valid yaml file
+  # 2. Load the yaml file
+  is_yml_file(yaml_file)
   setup <- yaml.load_file(yaml_file)
+  # When the script is run from the command line then 'output_directory' is given
+  # The pattern to extract all matchin directories is extracted from 'output_directory'
+  output_path = setup$output_directory
+  # This regular expression removes trailing underscores followed by digits from strings 
+  match_pattern <- gsub("_\\d+$", "", output_path)
+  # TODO - Check if regular expression also works for other approaches
+
 } else {
-  # Dev settings
+  print("Running interactive mode for development.")
+  # Yaml file used for development (often an actual job script)
   yaml_file <- "job_settings.yml"
+  # 1. Check if it's a valid yaml file
+  # 2. Load the yaml file
+  is_yml_file(yaml_file)
   setup <- yaml.load_file(yaml_file)
-  print("Running interactive mode for development.\n")
+
+  # When run for development no 'output_directory' is specified
+  # Hence, the 'output_directory' has to be contructed like in the 'process_yaml_... .py'
+
+  # Construction:
+  # Vscratch_dir is the place where the files are stored
+  vscratch_dir_in = "data/runs"
+  # Tag is used to specify which data it is e.g. TCGA, NIAGADS
+  tag <- setup$tag
+  # Comparison is specified which conditions are compared e.g. cancer_1_vs_cancer_2
+  comparison <- paste0(tag, "_", paste(setup$classification$comparison, collapse = "_vs_"))
+  # Analysis_name specifies what was analysed
+  # E.g. comparsion of ancestries EUR_to_AMR, subsetting_EUR
+  # This often is modified depending which analysis
+  train_ancestry <- toupper(setup$classification$train_ancestry)
+  infer_ancestry <- toupper(setup$classification$infer_ancestry)
+  analysis_name  <-  paste0(train_ancestry, "_to_", infer_ancestry)
+  # Combination of components to create the 'match_pattern'
+  # The 'match_pattern' is used as pattern to extract all folders in the vscratch dir
+  match_pattern <- paste0(comparison, "_", analysis_name)
+}
+
+# Extracting all folders in the 'vscratch_dir' that match 'match_pattern'
+# 1. List all folders in 'vscratch_dir_in'
+# 2. With 'match_pattern' extract matching folders
+all_vscratch_dir_in <- list.dirs(vscratch_dir_in, full.names = TRUE, recursive = FALSE)
+match_vsratch_dir <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
+
+# Check if there were matching folders
+if (length(match_vsratch_dir) == 0) {
+  message("No matching folders found.")
+}
+
+# Save the results of the analysis
+# 'vscratch_dir_out' where summarized analysis are stored
+vscratch_dir_out  <- "data/combined_runs"
+path_to_save_location <- file.path(vscratch_dir_out, comparison, match_pattern)
+# Create the directory also parents (if it does not exist)
+# Create directory if it does not exists
+if (!dir.exists(path_to_save_location)) {
+  dir.create(path_to_save_location, recursive = TRUE)
 }
 
 
-# Location where I store my files
-vscratch_dir <- "data/runs"
-
-# Tag is used to know which data is used
-tag <- setup$tag
-comparison <- paste0(tag, "_", paste(setup$classification$comparison, collapse = "_vs_"))
-train_ancestry <- toupper(setup$classification$train_ancestry)
-infer_ancestry <- toupper(setup$classification$infer_ancestry)
-
-# Combine (modified path is used for the pattern)
-modified_path <- paste0(comparison, "_", train_ancestry, "_to_", infer_ancestry)
-
-# Is used when there is a dir for all runs otherwise it is vscratch_dir
-# Directory to run folders for comparison
-directory <- file.path(vscratch_dir, comparison)
-
-# Extract all folders matching the pattern in the vscratch directory
-all_folders <- list.dirs(directory, full.names = TRUE, recursive = FALSE)
-matching_folders <- grep(modified_path, all_folders, value = TRUE)
-
 # Combining metric csv files 
+# Each folder is one seed
 metric_dge <- data.frame()
 metric_ml <- data.frame()
 for (folder in matching_folders){
     dge_file <- file.path(folder, "Metric_dge.csv")
     ml_file <- file.path(folder, "Metric_ml.csv")
 
-    # Load and append DGE data
+    # Load and append DGE data for each seed
     dge_data <- fread(dge_file) 
     metric_dge <- bind_rows(metric_dge, dge_data) 
 
-    # Load and append ML data
+    # Load and append ML data for each seed
     ml_data <- fread(ml_file) 
     metric_ml <- bind_rows(metric_ml, ml_data) 
 }
 # Add information to the dataframe
 metric_dge <- metric_dge |> mutate(Comparison = comparison)
 metric_ml <- metric_ml |> mutate(Comparison = comparison)
-
-# Only take seeds: 1-5
-metric_dge <- metric_dge |>
-  filter(Seed %in% c(1, 2, 3, 4, 5))
-
-metric_ml <- metric_ml |>
-  filter(Seed %in% c(1, 2, 3, 4, 5))
 
 # Outlier test
 # With hampel filter 3 * MAD confidence interval
@@ -184,6 +212,7 @@ summarized_ml <- metric_ml |>
   ) |>
   mutate(p_value = p_roc)
 
+
 # Plot differential gene expression analysis and machine learning
 # Space for some shared variables (plotting)
 
@@ -287,37 +316,28 @@ ML_plot <- summarized_ml |>
   )
 
 
-# Save the data (create directory)
-# Make a combined directory for the comparison (based on the var: comparison)
-base_dir <- "data/combined_runs"
-combined_dir <- file.path(base_dir, comparison)
-# Create directory if it does not exists
-if (!dir.exists(combined_dir)) {
-  dir.create(combined_dir, recursive = TRUE)
-}
 
-save_directory <- file.path(combined_dir, modified_path)
-# Create directory if it does not exists
-if (!dir.exists(save_directory)) {
-  dir.create(save_directory)
-}
-
-# Save files and plots
-fwrite(metric_dge, file.path(save_directory, "Metric_dge.csv"))
-fwrite(metric_ml, file.path(save_directory, "Metric_ml.csv"))
-
+# Save DGE and ML approach
+# 1. Metric
+fwrite(metric_dge, file.path(path_to_save_location, "Metric_dge.csv"))
+fwrite(metric_ml, file.path(path_to_save_location, "Metric_ml.csv"))
+# 2. Summarized metric
+fwrite(summarized_dge, file.path(path_to_save_location, "Summarized_metric_dge.csv"))
+fwrite(summarized_ml, file.path(path_to_save_location, "Summarized_metric_ml.csv"))
+# 3. Plots
 # Save the image
 ggsave(filename = "Plot_dge.pdf", plot = DGE_plot, 
-       path = save_directory, width = 5, height = 5
+       path = path_to_save_location, width = 5, height = 5
        )
 
 ggsave(filename = "Plot_ml.pdf", plot = ML_plot, 
-       path = save_directory, width = 5, height = 5
+       path = path_to_save_location, width = 5, height = 5
        )
 
 # Save the R object
-saveRDS(DGE_plot, file = file.path(save_directory, "Plot_dge.rds"))
-saveRDS(ML_plot, file = file.path(save_directory, "Plot_ml.rds"))
+saveRDS(DGE_plot, file = file.path(path_to_save_location, "Plot_dge.rds"))
+saveRDS(ML_plot, file = file.path(path_to_save_location, "Plot_ml.rds"))
+
 
 # Combine model weights
 # Read the files 
@@ -344,7 +364,7 @@ for (folder in matching_folders){
 # summarized_weights$se_value <- sem_weights
 
 # Save
-fwrite(combined_weights, file.path(save_directory, "Weights.csv"))
+fwrite(combined_weights, file.path(path_to_save_location, "Weights.csv"))
 
 # TODO - Create overall directory in runs to move single run files
 

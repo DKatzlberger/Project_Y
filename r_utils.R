@@ -23,17 +23,37 @@ normalize_log <- function(X, e = 0.01){
   X = log2(X + e)
 }
 
-create_design <- function(output_column, meta){
-  # Creates design matrix 
-  # Currently supports means model.
+create_design <- function(output_column, meta, covariate = NULL) {
+  # Creates design matrix
+  # Supports means model with optional covariate.
   # output_column: Condition to be calculated.
+  # covariate: Optional covariate to include.
   
-  # Design matrix
-  design <- model.matrix(~0 + eval(as.name(output_column)), data = meta) 
-  # Rename the columns of design matrix
-  repl_str <- 'eval(as.name(output_column))'
-  colnames(design) <- gsub(repl_str, '', colnames(design), fixed=TRUE)
-  # Return
+  if (!is.null(covariate)) {
+    if (!(covariate %in% colnames(meta))) {
+      stop(paste("Covariate", covariate, "is not present in the metadata."))
+    }
+    # Design matrix including covariate
+    design <- model.matrix(~0 + eval(as.name(output_column)) + eval(as.name(covariate)), data = meta)
+  } else {
+    # Design matrix without covariate
+    design <- model.matrix(~0 + eval(as.name(output_column)), data = meta)
+  }
+  
+  # Rename the columns of the design matrix
+  if (!is.null(covariate)) {
+    # Replace both output_column and covariate from column names
+    output_repl_str <- 'eval(as.name(output_column))'
+    covariate_repl_str <- 'eval(as.name(covariate))'
+    colnames(design) <- gsub(output_repl_str, '', colnames(design), fixed = TRUE)
+    colnames(design) <- gsub(covariate_repl_str, '', colnames(design), fixed = TRUE)
+  } else {
+    # Replace only output_column from column names
+    output_repl_str <- 'eval(as.name(output_column))'
+    colnames(design) <- gsub(output_repl_str, '', colnames(design), fixed = TRUE)
+  }
+  
+  # Return the design matrix
   design
 }
 
@@ -58,6 +78,36 @@ create_contrast <- function(coef){
   # Return
   contrast.matrix
 }
+
+# Function to check if a covariate is continuous or discrete
+check_covariate_type <- function(data, covariate) {
+  # Check if the covariate exists in the data
+  if (!(covariate %in% colnames(data$obs))) {
+    stop(paste("Covariate", covariate, "is not present in the data."))
+  }
+  
+  # Extract the covariate values
+  covariate_values <- data$obs[[covariate]]
+  
+  # Check if the covariate is numeric (continuous)
+  if (is.numeric(covariate_values)) {
+    # Check if the covariate has more than a few unique values to confirm it's continuous
+    if (length(unique(covariate_values)) > 10) {
+      return("continuous")
+    } else {
+      return("discrete")  # If there are only a few unique values, treat it as discrete
+    }
+  }
+  
+  # Check if the covariate is a factor (discrete)
+  if (is.factor(covariate_values) || is.character(covariate_values)) {
+    return("discrete")
+  }
+  
+  # If the data is neither numeric nor factor, return unknown type
+  return("unknown")
+}
+
 
 extract_results <- function(limmaFit){
   # Extracts results from a topTable for all coefficients.

@@ -118,6 +118,8 @@ class Setup(dict):
                 time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()) + 
                 "\n")
 
+
+
 class DataValidator():
     """
     Checks if data and setttings are compatible.
@@ -178,8 +180,20 @@ class DataValidator():
             f"No '{train_ancestry}' in ancestry_column: '{ancestry_column}'."
         assert self.data.obs[ancestry_column].str.contains(inf_ancestry).any(), \
             f"No '{inf_ancestry}' in ancestry_column: '{ancestry_column}'."
+
+    def validate_covariate_column(self):
+        """
+        Check if covariate column is present in the data, if specified.
+        """
+        classification_settings = self.setup.get('classification', {})
         
-    
+        # Check if 'covariate' is provided in the classification settings
+        covariate = classification_settings.get('covariate')
+        if covariate:  # If covariate is specified
+            assert covariate in self.data.obs.columns, \
+                f"No '{covariate}' column in the data, can't be used as covariate."
+        
+    # Function that runs all validate functions
     def validate(self):
         """
         Run all validation checks on the data.
@@ -189,6 +203,7 @@ class DataValidator():
         self.validate_class_labels()
         self.validate_ancestry_column()
         self.validate_ancestry()
+        self.validate_covariate_column()
 
 
 class ScriptRunner():

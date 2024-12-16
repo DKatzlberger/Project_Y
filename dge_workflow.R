@@ -68,12 +68,28 @@ stopifnot(all(colnames(t(train_data$X)) ==
                 row.names(train_data$obs[colnames(t(train_data$X)), ])))
 
 # Create design matrix
+# 1. Extract the covariate, if it exists and has a meaningful value
+# 2. Check if covariate is discrete or continues
+covariate <- if ("covariate" %in% names(setup$classification) && 
+                 !is.null(setup$classification$covariate) &&
+                 setup$classification$covariate != "") {
+  setup$classification$covariate
+} else {
+  NULL
+}
+
+# TODO - Check if in each group is at least 2 female/male 
+check_gender_balance(train_data)
+
 train_design <- create_design(setup$classification$output_column,
-                              meta = train_data$obs)
+                              meta = train_data$obs,
+                              covariate = covariate)                            
 test_design <- create_design(setup$classification$output_column,
-                             meta = test_data$obs)
+                             meta = test_data$obs,
+                             covariate = covariate)
 inf_design <- create_design(setup$classification$output_column,
-                            meta = inf_data$obs)
+                            meta = inf_data$obs,
+                            covariate = covariate)
 
 
 # Create contrast matrix (Only needs to be created once)
@@ -98,6 +114,9 @@ write_yaml(train_filtered$var_names,
 stopifnot(all(train_data$var_names == test_data$var_names))
 # Dimensions
 stopifnot(table(keeper_genes)[2] == dim(train_filtered$X)[2])
+
+# TODO - DGEList object
+# TODO - CalcNormFactors
 
 # Normalization (logCPM)
 train_norm <- voom(t(train_filtered$X), train_design, plot = FALSE)
