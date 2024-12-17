@@ -23,6 +23,42 @@ normalize_log <- function(X, e = 0.01){
   X = log2(X + e)
 }
 
+
+# Check type of covariate
+check_covariate_type <- function(data, covariate) {
+  column <- data$obs[[covariate]]  # Extract the column by name
+  
+  if (is.factor(column) || is.character(column)) {
+    return("Discrete")  # Factors and character variables are discrete
+  } else if (is.numeric(column)) {
+    unique_values <- length(unique(column))
+    if (all(column %% 1 == 0) && unique_values < 20) {
+      return("Discrete")  # Numeric with few unique integer values is discrete
+    } else {
+      return("Continuous")  # Otherwise, it's continuous
+    }
+  } else {
+    return("Unknown")  # If the type is neither numeric, factor, nor character
+  }
+}
+
+# If covariate is 'Discrete' check for enough samples
+check_covariate_conditions <- function(data, covariate, possible_values){
+  # Count occurrences of each possible value in the data
+  counts <- data$obs |> group_by_at(covariate) |> count()
+  # Check if all 'possible_values' are available in the data
+  if (!(all(possible_values %in% counts[[covariate]]))){
+    missing_values <- setdiff(possible_values, counts[[covariate]])
+    stop(paste("Not enough samples for:", missing_values, "to calculate covariate!"))
+  }
+  # Check if there are at least 2 samples per 'possible_value'
+  if (!(all(counts$n > 2))){
+    stop(paste("Not enough samples per covariate value!"))
+  }
+
+}
+
+# Create desing matrix with covariate if available
 create_design <- function(output_column, meta, covariate = NULL) {
   # Creates design matrix
   # Supports means model with optional covariate.
@@ -54,7 +90,7 @@ create_design <- function(output_column, meta, covariate = NULL) {
   }
   
   # Return the design matrix
-  design
+  return(design)
 }
 
 create_contrast <- function(coef){
@@ -77,35 +113,6 @@ create_contrast <- function(coef){
   }
   # Return
   contrast.matrix
-}
-
-# Function to check if a covariate is continuous or discrete
-check_covariate_type <- function(data, covariate) {
-  # Check if the covariate exists in the data
-  if (!(covariate %in% colnames(data$obs))) {
-    stop(paste("Covariate", covariate, "is not present in the data."))
-  }
-  
-  # Extract the covariate values
-  covariate_values <- data$obs[[covariate]]
-  
-  # Check if the covariate is numeric (continuous)
-  if (is.numeric(covariate_values)) {
-    # Check if the covariate has more than a few unique values to confirm it's continuous
-    if (length(unique(covariate_values)) > 10) {
-      return("continuous")
-    } else {
-      return("discrete")  # If there are only a few unique values, treat it as discrete
-    }
-  }
-  
-  # Check if the covariate is a factor (discrete)
-  if (is.factor(covariate_values) || is.character(covariate_values)) {
-    return("discrete")
-  }
-  
-  # If the data is neither numeric nor factor, return unknown type
-  return("unknown")
 }
 
 

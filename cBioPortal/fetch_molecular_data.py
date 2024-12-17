@@ -132,10 +132,12 @@ for study_id in to_fetch['studyid'].unique():
 
         # Save individual study
         response_wide.to_csv(path_to_successful, index=False)
-        # Save failed samples in a list
-        with open(path_to_failed, 'w') as file:
-            for item in failed_samples:
-                file.write(item + '\n')
+
+        # If 'failed_samples' is not empty save them in a list
+        if failed_samples:
+            with open(path_to_failed, 'w') as file:
+                for item in failed_samples:
+                    file.write(item)
 
         # Create a list of dataframes
         molecular_data.append(response_wide)

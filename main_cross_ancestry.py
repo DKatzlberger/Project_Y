@@ -84,14 +84,13 @@ counts = (inf_data.obs[setup.classification['output_column']]
           )
 
 assert (counts >= 2).all(), \
-    f'For DGE analysis of compared ancesty ({setup.classification['infer_ancestry'].upper()}) at least one replicate per class is needed.'
+    f'For DGE analysis of compared ancestry ({setup.classification['infer_ancestry'].upper()}) at least one replicate per class is needed.'
 
 setup.log('Setting seed')
 # Seed is used to generate different European subsets
 seed = setup.seed
 np.random.seed(seed)
 os.environ['PYTHONHASHSEED'] = str(seed)
-
 
 setup.log('Create subset')
 # Proportions of output in inferred ancestry
@@ -105,6 +104,8 @@ train_idx, test_idx, inf_idx = train_data.obs_names, test_data.obs_names, inf_da
 # Assertion: Check for data leackage
 assert_str = f'Data leakage! Observation also occur in the testset.'
 assert not test_idx.isin(train_idx).all(), assert_str
+
+# TODO - Check setup.covariate
 
 # Save the samples that are used in train and test (use the same samples for 'stats')
 # Remaining Europeans
@@ -144,7 +145,7 @@ setup.log('Sklearn data')
 
 # Encoding for the output column
 encoder = {}
-for i, j in enumerate(sorted(train_data.obs[setup.classification['output_column']].unique())):
+for i,j in enumerate(setup.classification['comparison']):
     encoder.update({j: i})
 inv_encoder = {v: k for k, v in encoder.items()}
 
@@ -229,20 +230,21 @@ feature_df = pd.DataFrame(data=feature_weights,
                           columns=feature_names)
 feature_df.to_csv(setup.out('Weights.csv'), index=False)
 
+
+# Calculate metric
+# Multiclass calculation
+if setup.classification['multiclass']:
+    # TODO - Create multiclass scoring script
+    print('Score metrics for multiclass needs to be developed.')
+
+# Binary calculation
+else:
+    R.run_script(script_path=os.path.join(os.getcwd(), 'binary_metric_calculation.py'),
+                    args=[settings_file])
+
 # Visualization
 if setup.visual_val:
     setup.log('ML visualization')
-
-    # Calculate metric
-    # Multiclass calculation
-    if setup.classification['multiclass']:
-        # TODO - Create multiclass scoring script
-        print('Score metrics for multiclass needs to be developed.')
-
-    # Binary calculation
-    else:
-        R.run_script(script_path=os.path.join(os.getcwd(), 'binary_metric_calculation.py'),
-                     args=[settings_file])
 
     # Run the script to visualize
     R.run_script(script_path=os.path.join(os.getcwd(), 'run_visualization.R'), 

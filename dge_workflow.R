@@ -20,7 +20,7 @@ suppressPackageStartupMessages(
 source("r_utils.R")
 
 # Here starts the script
-print("Envoking R.")
+print("Evoking R.")
 
 # Load command line arguments
 args <- commandArgs(trailingOnly = TRUE)
@@ -31,9 +31,9 @@ if (length(args) > 0) {
   is_yml_file(yaml_file)
   setup <- yaml.load_file(yaml_file)
 } else {
+  print("Running interactive mode for development.")
   # Dev settings if no command-line argument provided
   yaml_file <- "dev_settings.yml"
-  print("Running interactive mode for development.")
   setup <- yaml.load_file(yaml_file)
 }
 
@@ -67,7 +67,8 @@ stopifnot(length(train_idx) == length(train_data$obs_names))
 stopifnot(all(colnames(t(train_data$X)) ==
                 row.names(train_data$obs[colnames(t(train_data$X)), ])))
 
-# Create design matrix
+
+# Covariate
 # 1. Extract the covariate, if it exists and has a meaningful value
 # 2. Check if covariate is discrete or continues
 covariate <- if ("covariate" %in% names(setup$classification) && 
@@ -78,9 +79,29 @@ covariate <- if ("covariate" %in% names(setup$classification) &&
   NULL
 }
 
-# TODO - Check if in each group is at least 2 female/male 
-check_gender_balance(train_data)
+if (!is.null(covariate)){
+  # TODO - When age is available check if is continous
+  covariate_type <- check_covariate_type(train_data, covariate = covariate)
 
+  # Check conditions for 'covariate_type'
+  # Discrete:
+  if (covariate_type == "Discrete"){
+    # Possible values of the covariate
+    possible_values <- unique(train_data$obs[[covariate]])
+    # Check conditions
+    # 1. Check values of covariate
+    # 2. Ensure that there are 2 samples per value
+    # 3. The script gets terminated if conditions are not met
+    check_covariate_conditions(train_data, covariate = covariate, possible_values = possible_values)
+    check_covariate_conditions(test_data, covariate = covariate, possible_values = possible_values)
+    
+    # 'inf_data' doesn't change per seed
+    # If conditions don't met they will never met
+    check_covariate_conditions(inf_data, covariate = covariate, possible_values = possible_values)
+  }
+}
+
+# Create design matrix
 train_design <- create_design(setup$classification$output_column,
                               meta = train_data$obs,
                               covariate = covariate)                            
@@ -95,7 +116,6 @@ inf_design <- create_design(setup$classification$output_column,
 # Create contrast matrix (Only needs to be created once)
 # Used for hypothesis testing between groups
 contrast_matrix <- create_contrast(colnames(train_design))
-
 
 # Filter genes by expression (Use the train set)
 # TODO - will maybe be outsourced to keep same genes across ancestries
@@ -122,6 +142,8 @@ stopifnot(table(keeper_genes)[2] == dim(train_filtered$X)[2])
 train_norm <- voom(t(train_filtered$X), train_design, plot = FALSE)
 test_norm <- voom(t(test_filtered$X), test_design, plot = FALSE)
 inf_norm <- voom(t(inf_filtered$X), inf_design, plot = FALSE)
+
+# TODO - Quality control
 
 # Fit the model (Means model)
 train_limma_fit <- lmFit(train_norm, design = train_design)

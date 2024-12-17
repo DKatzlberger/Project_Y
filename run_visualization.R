@@ -11,7 +11,7 @@ suppressPackageStartupMessages({
 source("r_utils.R")
 
 # Here starts the script
-print("Envoking R.")
+print("Evoking R.")
 
 # Load command line arguments
 args <- commandArgs(trailingOnly = TRUE)

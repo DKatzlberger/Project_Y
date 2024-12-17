@@ -255,7 +255,10 @@ class ScriptRunner():
             command.extend(args)
 
         # Run subprocess
-        subprocess.run(command)
+        try:
+            subprocess.run(command, check=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Script {script_path} failed with exit code {e.returncode}")
     
     def check_rversion(self):
         # Check R version
@@ -385,3 +388,48 @@ def stratified_folds(data, category_col, proportions, k):
         i += 1
     # Returns folds and the data that was not used while sampling
     return folds, data
+
+
+# EUR Subsetting
+def sample_by_size(adata, props, seed, output_column):
+    # Set seed for reproducibility
+    np.random.seed(seed)  
+    
+    # List to store the sampled subsets
+    samples = {}
+    
+    # Ensure each class has at least two samples
+    class_groups = adata.obs.groupby(output_column)
+    
+    for prop in props:
+        # Name for the subset
+        sample_name = f"proportion_{str(prop).replace('.', '_')}"
+        
+        # Calculate the total number of samples for this proportion
+        total_size = int(len(adata) * prop)
+        
+        # Initialize storage for indices
+        selected_indices = []
+        
+        # First, ensure at least 2 samples per class
+        for class_name, class_data in class_groups:
+            if len(class_data) >= 2:
+                selected_indices += class_data.sample(n=2, random_state=seed).index.tolist()
+            else:
+                raise ValueError(f"Class {class_name} has fewer than 2 samples, cannot guarantee at least 2 per class.")
+        
+        # Remaining size to sample after ensuring 2 samples per class
+        remaining_size = total_size - len(selected_indices)
+        
+        if remaining_size > 0:
+            # Create a DataFrame excluding the already selected indices
+            remaining_data = adata[~adata.obs.index.isin(selected_indices)]
+            
+            # Randomly sample remaining indices
+            additional_indices = remaining_data.obs.sample(n=remaining_size, random_state=seed).index.tolist()
+            selected_indices += additional_indices
+        
+        # Store the sampled subset
+        samples[sample_name] = adata[selected_indices]
+    
+    return samples
