@@ -385,3 +385,15 @@ sample_by_size <- function(data, sizes, seed, class_column) {
   
   return(samples)
 }
+
+# Function to read geneset libraries
+read_enrichR_database <- function(path){
+  # Read the file:
+  res <- readLines(path)
+  # Split each line by tabs:
+  res <- strsplit(res, "\t")
+  # First entry per tab is the gene set name:
+  names(res) <- sapply(res, function(x) x[1])
+  # Entries 3 to end are the gene names
+  lapply(res, function(x) x[3:length(x)])
+}

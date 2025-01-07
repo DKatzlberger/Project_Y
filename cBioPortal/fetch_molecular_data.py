@@ -42,43 +42,111 @@ for study_id in to_fetch['studyid'].unique():
     path_to_successful = os.path.join(vscratch_dir_out, f"{study_id}.csv")
     path_to_failed = os.path.join(vscratch_dir_out, f"failed_samples_{study_id}.txt")
 
-    try: 
-        # Fetch all molecular data for 'molecularProfileId' and available RNA data
-        print(f"Trying to fetch by 'sample_list_id'.")
-        response = md.fetch_all_molecular_data_in_molecular_profile(molecular_profile_id=rna_profile_id, 
-                                                                    sample_list_id=rna_profile_id,
-                                                                    projection='DETAILED')
+    if len(to_fetch_samples) < 500:
+        try: 
+            # Fetch all molecular data for 'molecularProfileId' and available RNA data
+            print(f"Trying to fetch by 'sample_list_id'.")
+            response = md.fetch_all_molecular_data_in_molecular_profile(molecular_profile_id=rna_profile_id, 
+                                                                        sample_list_id=rna_profile_id,
+                                                                        projection='DETAILED')
 
-        # Filter for samples that are in the meta data
-        # Because some dont have genetic ancestry
-        # 1. Get samples with ancestry from meta data
-        # 2. Filter for samples with ancestry
-        # 3. Filter for important attributes
-        samples_with_ancestry = to_fetch[to_fetch['studyid'] == study_id]['sampleid']
-        attributes = ['gene_entrezGeneId', 'gene_hugoGeneSymbol', 'sampleId', 'patientId', 'value', 'studyId']
-        # Filter
-        response = response[response['sampleId'].isin(samples_with_ancestry)]
-        response = response[attributes]
+            # Filter for samples that are in the meta data
+            # Because some dont have genetic ancestry
+            # 1. Get samples with ancestry from meta data
+            # 2. Filter for samples with ancestry
+            # 3. Filter for important attributes
+            samples_with_ancestry = to_fetch[to_fetch['studyid'] == study_id]['sampleid']
+            attributes = ['gene_entrezGeneId', 'gene_hugoGeneSymbol', 'sampleId', 'patientId', 'value', 'studyId']
+            # Filter
+            response = response[response['sampleId'].isin(samples_with_ancestry)]
+            response = response[attributes]
 
-        # Pivot dataframe wider (will drop Entrez gene id)
-        response_wide = response.pivot(index=['sampleId', 'patientId', 'studyId'], 
-                                       columns='gene_hugoGeneSymbol', 
-                                       values='value').reset_index()
-        
-        # Check if all samples have been downloaded
-        if not response_wide['sampleId'].isin(to_fetch_samples).all():
-            print(f"Not all samples downloaded.")
-        else:
-            print("Successful.\n")
+            # Pivot dataframe wider (will drop Entrez gene id)
+            response_wide = response.pivot(index=['sampleId', 'patientId', 'studyId'], 
+                                        columns='gene_hugoGeneSymbol', 
+                                        values='value').reset_index()
+            
+            # Check if all samples have been downloaded
+            if not response_wide['sampleId'].isin(to_fetch_samples).all():
+                print(f"Not all samples downloaded.")
+            else:
+                print("Successful.\n")
 
-        # Save individual study
-        response_wide.to_csv(path_to_successful, index=False)
+            # Save individual study
+            response_wide.to_csv(path_to_successful, index=False)
 
-        # Create a list of dataframes
-        molecular_data.append(response_wide)
+            # Create a list of dataframes
+            molecular_data.append(response_wide)
 
-    except:
+        except:
+            # Fetch data by individual samples
+            print(f"Trying to fetch by individual sample.")
+
+            # Initialize data frame to combine all samples
+            response = pd.DataFrame()
+            failed_samples = []
+            sample_count = 1
+            # Iterate over each sample
+            for i in range(0, len(to_fetch_samples)): 
+
+                # 1. Fetch each individual sample
+                # 2. Combine them to complete data frame
+                # 3. Failed samples append to list
+                sample = to_fetch_samples[i:i + 1]
+                try:
+                    sample_response = md.fetch_all_molecular_data_in_molecular_profile(molecular_profile_id=rna_profile_id,
+                                                                                    sample_ids=sample,
+                                                                                    projection='DETAILED')
+                    response = pd.concat([response, sample_response], axis=0)
+                    # Statement to keep track of samples 
+                    print(f"{sample_count}/{len(to_fetch_samples)}")
+
+                except:
+                    # Append failed sample to 'failed_samples'
+                    print(f"'{sample[0]}' failed to download.")
+                    failed_samples.append(sample[0])
+                
+                # Add counter
+                sample_count += 1
+
+            # Filter for samples that are in the meta data
+            # Because some dont have genetic ancestry
+            # 1. Get samples with ancestry from meta data
+            # 2. Filter for samples with ancestry
+            # 3. Filter for important attributes
+            samples_with_ancestry = to_fetch[to_fetch['studyid'] == study_id]['sampleid']
+            attributes = ['gene_entrezGeneId', 'gene_hugoGeneSymbol', 'sampleId', 'patientId', 'value', 'studyId']
+            # Filter
+            response = response[response['sampleId'].isin(samples_with_ancestry)]
+            response = response[attributes]
+
+            # Pivot dataframe wider (will drop Entrez gene id)
+            response_wide = response.pivot(index=['sampleId', 'patientId', 'studyId'], 
+                                        columns='gene_hugoGeneSymbol', 
+                                        values='value').reset_index()
+
+            # Check if all samples have been downloaded
+            if not response_wide['sampleId'].isin(to_fetch_samples).all():
+                print(f"Not all samples downloaded.")
+            else:
+                print("Successful.\n")
+
+            # Save individual study
+            response_wide.to_csv(path_to_successful, index=False)
+
+            # If 'failed_samples' is not empty save them in a list
+            if failed_samples:
+                with open(path_to_failed, 'w') as file:
+                    for item in failed_samples:
+                        file.write(item + '\n')
+
+            # Create a list of dataframes
+            molecular_data.append(response_wide)
+
+    else:
+        # Fetch individual samples if more than 500 samples in study
         # Fetch data by individual samples
+        print(f"Study has more than 500 samples.")
         print(f"Trying to fetch by individual sample.")
 
         # Initialize data frame to combine all samples
@@ -94,8 +162,8 @@ for study_id in to_fetch['studyid'].unique():
             sample = to_fetch_samples[i:i + 1]
             try:
                 sample_response = md.fetch_all_molecular_data_in_molecular_profile(molecular_profile_id=rna_profile_id,
-                                                                                   sample_ids=sample,
-                                                                                   projection='DETAILED')
+                                                                                sample_ids=sample,
+                                                                                projection='DETAILED')
                 response = pd.concat([response, sample_response], axis=0)
                 # Statement to keep track of samples 
                 print(f"{sample_count}/{len(to_fetch_samples)}")
@@ -103,7 +171,7 @@ for study_id in to_fetch['studyid'].unique():
             except:
                 # Append failed sample to 'failed_samples'
                 print(f"'{sample[0]}' failed to download.")
-                failed_samples.append(sample)
+                failed_samples.append(sample[0])
             
             # Add counter
             sample_count += 1
@@ -121,8 +189,8 @@ for study_id in to_fetch['studyid'].unique():
 
         # Pivot dataframe wider (will drop Entrez gene id)
         response_wide = response.pivot(index=['sampleId', 'patientId', 'studyId'], 
-                                       columns='gene_hugoGeneSymbol', 
-                                       values='value').reset_index()
+                                    columns='gene_hugoGeneSymbol', 
+                                    values='value').reset_index()
 
         # Check if all samples have been downloaded
         if not response_wide['sampleId'].isin(to_fetch_samples).all():
@@ -137,12 +205,13 @@ for study_id in to_fetch['studyid'].unique():
         if failed_samples:
             with open(path_to_failed, 'w') as file:
                 for item in failed_samples:
-                    file.write(item)
+                    file.write(item + '\n')
 
         # Create a list of dataframes
         molecular_data.append(response_wide)
 
 
+print('Finished!')
 # Assertion: Check if all studies have been downloaded
 if not len(molecular_data) == len(to_fetch['studyid'].unique()):
     print("Not all studies have samples.")

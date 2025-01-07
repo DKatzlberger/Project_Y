@@ -81,9 +81,3 @@ done
 
 # These scripts wait to be executed once all jobs in job_list are finished
 qsub -N "Combine_runs" -hold_jid "${job_list[@]}" singularity exec --bind /vscratch:/vscratch "${SINGULARITY_IMAGE}" Rscript "${R_SCRIPT}" "${SETTINGS_FILE}"
-
-# Clean up
-# qsub -N "Clean_up" -hold_jid "${job_list[@]}" bash -c 'rm _job_settings_[0-9]*_.yml'
-
-
-# echo "Submitted jobs: $job_list"

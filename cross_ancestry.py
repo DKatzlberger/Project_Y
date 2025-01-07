@@ -70,21 +70,19 @@ inf_data = (inf_data[inf_data.obs[setup.classification['output_column']]
                      )
 
 # Assertion: Check for enough samples per class
-# Limma eBayes needs replicates per class
-counts = (eur_data.obs[setup.classification['output_column']]
-          .value_counts()
-          ) 
-
+# 1. Check for enough samples in the training ancestries (EUR)
+# 2. Check for enough samples in inferred ancestry
+counts = eur_data.obs[setup.classification['output_column']].value_counts()
+          
 assert_str = f'Prerequisite is a train sample size of {setup.sample_cutoff} per class.'
 assert (counts > setup.sample_cutoff).all(), assert_str
 
 # Check compared ancestry (infer_ancestry) if there are replicates
-counts = (inf_data.obs[setup.classification['output_column']]
-          .value_counts()
-          )
+# Limma eBayes needs at least one replicate per class
+counts = inf_data.obs[setup.classification['output_column']].value_counts()
 
-assert (counts >= 2).all(), \
-    f'For DGE analysis of compared ancestry ({setup.classification['infer_ancestry'].upper()}) at least one replicate per class is needed.'
+assert_str = f'For DGE analysis of compared ancestry ({setup.classification['infer_ancestry'].upper()}) at least one replicate per class is needed.'
+assert (counts >= 2).all(), assert_str
 
 setup.log('Setting seed')
 # Seed is used to generate different European subsets
@@ -129,7 +127,8 @@ settings_file = os.path.join(os.getcwd(), setup.output_directory, 'Settings.yml'
 
 # Statistical analysis (DGE)
 setup.log('DGE')
-R.run_script(script_path=os.path.join(os.getcwd(), 'dge_workflow.R'),
+script = "cross_ancestry_dge.R"
+R.run_script(script_path=os.path.join(os.getcwd(), script),
              args=[settings_file])
 
 # Subset features that are used in DGE
@@ -250,6 +249,3 @@ if setup.visual_val:
     R.run_script(script_path=os.path.join(os.getcwd(), 'run_visualization.R'), 
                  args=[settings_file])
 
-
-
-# TODO - How similar are the subsets (Jaccard)

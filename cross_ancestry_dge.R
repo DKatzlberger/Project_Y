@@ -138,6 +138,7 @@ stopifnot(table(keeper_genes)[2] == dim(train_filtered$X)[2])
 # TODO - DGEList object
 # TODO - CalcNormFactors
 
+# Limma workflow
 # Normalization (logCPM)
 train_norm <- voom(t(train_filtered$X), train_design, plot = FALSE)
 test_norm <- voom(t(test_filtered$X), test_design, plot = FALSE)

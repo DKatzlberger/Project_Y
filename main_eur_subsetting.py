@@ -212,7 +212,34 @@ print(f'Id: {setup.id} finished training.')
 # Test the model on all subsets
 setup.log('Testing')
 # Iterate over all X and y
-for i in zip(subset_X, subset_y):
-    print(i)
+# 1. Calculate propabilities
+# 2. Calculate metric
+# Initialize lists to store intermediate results
+propabilities_list = []
+metrics_list = []
+for X, y in zip(subset_X, subset_y):
+    # Get predicted probabilities
+    test_y_hat = pd.DataFrame(best_m.predict_proba(X))
+    test_y_hat['y'] = y
+    test_y_hat['n'] = y.shape[0]
+    # Collect probabilities
+    propabilities_list.append(test_y_hat)
 
-    
+    # Calculate metrics
+    props, labels = np.array(test_y_hat.iloc[:, 1]), np.array(test_y_hat['y'])
+    auc = roc_auc_score(y_true=labels, y_score=props)
+    metric = {'ROC_AUC': auc, 'n': y.shape[0]}
+    # Collect metrics
+    metrics_list.append(metric)
+
+# Concatenate collected results at once
+propabilities = pd.concat(propabilities_list, ignore_index=True)
+metric_combined = pd.DataFrame(metrics_list)
+
+# Add information to the metric dataframe
+metric_combined['Ancestry'] = setup.classification['train_ancestry'].upper()
+metric_combined['Seed'] = setup.seed
+
+# Save both dataframes
+propabilities.to_csv(setup.out('Probabilities.csv'), index=False)
+metric_combined.to_csv(setup.out('Metric_eur_subsetting_ml.csv'), index=False)

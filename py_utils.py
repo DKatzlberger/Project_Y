@@ -2,12 +2,13 @@
 import numpy as np
 import pandas as pd
 import yaml
+import re
+
 import uuid
-import os
 import time
 from pathlib import Path
-from datetime import datetime
 import psutil
+import os
 import subprocess
 
 # Data library
@@ -325,7 +326,93 @@ def stratified_subset(data, proportion, output_column, seed):
     test_data = data[data.obs_names.isin(idx)]
     return train_data, test_data
 
+# EUR Subsetting
+def sample_by_size(adata, props, seed, output_column):
+    # Set seed for reproducibility
+    np.random.seed(seed)  
+    
+    # List to store the sampled subsets
+    samples = {}
+    
+    # Ensure each class has at least two samples
+    class_groups = adata.obs.groupby(output_column)
+    
+    for prop in props:
+        # Name for the subset
+        sample_name = f"proportion_{str(prop).replace('.', '_')}"
+        
+        # Calculate the total number of samples for this proportion
+        total_size = int(len(adata) * prop)
+        
+        # Initialize storage for indices
+        selected_indices = []
+        
+        # First, ensure at least 2 samples per class
+        for class_name, class_data in class_groups:
+            if len(class_data) >= 2:
+                selected_indices += class_data.sample(n=2, random_state=seed).index.tolist()
+            else:
+                raise ValueError(f"Class {class_name} has fewer than 2 samples, cannot guarantee at least 2 per class.")
+        
+        # Remaining size to sample after ensuring 2 samples per class
+        remaining_size = total_size - len(selected_indices)
+        
+        if remaining_size > 0:
+            # Create a DataFrame excluding the already selected indices
+            remaining_data = adata[~adata.obs.index.isin(selected_indices)]
+            
+            # Randomly sample remaining indices
+            additional_indices = remaining_data.obs.sample(n=remaining_size, random_state=seed).index.tolist()
+            selected_indices += additional_indices
+        
+        # Store the sampled subset
+        samples[sample_name] = adata[selected_indices]
+    
+    return samples
 
+# Calculate available CPUs on a host
+def get_available_cpus(hostname):
+    """
+    Get the number of available CPUs for a given host.
+
+    Parameters:
+        hostname (str): The name of the host to query.
+        save_cpus (int): Number of CPUs to reserve (default is 0).
+
+    Returns:
+        int: The number of available CPUs.
+    """
+    try:
+        # Get the qhost output
+        qhost_output = subprocess.run(
+            ["qhost", "-h", hostname],
+            check=True,
+            text=True,
+            capture_output=True
+        ).stdout
+
+        # Match relevant information from the output
+        pattern = re.compile(r'(\S+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+([0-9.]+)\s+(\S+)')
+        matches = pattern.findall(qhost_output)
+
+        if not matches:
+            raise ValueError(f"No matching host information found for {hostname}")
+
+        # Extract values
+        host, arch, ncpu, nsoc, ncor, nthr, load, rest = matches[0]
+
+        # Calculate available CPUs
+        ncpu = float(ncpu)
+        available_cpus = ncpu
+
+        return available_cpus
+
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Error running qhost: {e.stderr.strip()}") from e
+    except Exception as e:
+        raise RuntimeError(f"An error occurred: {str(e)}") from e
+
+# -----------------------------------------------------------------------------------------------
 # Unused functions
 def stratified_sample(df, category_col, proportions, n):
     '''
@@ -390,46 +477,3 @@ def stratified_folds(data, category_col, proportions, k):
     return folds, data
 
 
-# EUR Subsetting
-def sample_by_size(adata, props, seed, output_column):
-    # Set seed for reproducibility
-    np.random.seed(seed)  
-    
-    # List to store the sampled subsets
-    samples = {}
-    
-    # Ensure each class has at least two samples
-    class_groups = adata.obs.groupby(output_column)
-    
-    for prop in props:
-        # Name for the subset
-        sample_name = f"proportion_{str(prop).replace('.', '_')}"
-        
-        # Calculate the total number of samples for this proportion
-        total_size = int(len(adata) * prop)
-        
-        # Initialize storage for indices
-        selected_indices = []
-        
-        # First, ensure at least 2 samples per class
-        for class_name, class_data in class_groups:
-            if len(class_data) >= 2:
-                selected_indices += class_data.sample(n=2, random_state=seed).index.tolist()
-            else:
-                raise ValueError(f"Class {class_name} has fewer than 2 samples, cannot guarantee at least 2 per class.")
-        
-        # Remaining size to sample after ensuring 2 samples per class
-        remaining_size = total_size - len(selected_indices)
-        
-        if remaining_size > 0:
-            # Create a DataFrame excluding the already selected indices
-            remaining_data = adata[~adata.obs.index.isin(selected_indices)]
-            
-            # Randomly sample remaining indices
-            additional_indices = remaining_data.obs.sample(n=remaining_size, random_state=seed).index.tolist()
-            selected_indices += additional_indices
-        
-        # Store the sampled subset
-        samples[sample_name] = adata[selected_indices]
-    
-    return samples

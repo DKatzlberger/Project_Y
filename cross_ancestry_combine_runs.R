@@ -22,13 +22,6 @@ if (length(args) > 0) {
   # 2. Load the yaml file
   is_yml_file(yaml_file)
   setup <- yaml.load_file(yaml_file)
-  # When the script is run from the command line then 'output_directory' is given
-  # The pattern to extract all matchin directories is extracted from 'output_directory'
-  output_path = setup$output_directory
-  # This regular expression removes trailing underscores followed by digits from strings 
-  match_pattern <- gsub("_\\d+$", "", output_path)
-  # TODO - Check if regular expression also works for other approaches
-
 } else {
   print("Running interactive mode for development.")
   # Yaml file used for development (often an actual job script)
@@ -37,29 +30,26 @@ if (length(args) > 0) {
   # 2. Load the yaml file
   is_yml_file(yaml_file)
   setup <- yaml.load_file(yaml_file)
-
-  # When run for development no 'output_directory' is specified
-  # Hence, the 'output_directory' has to be contructed like in the 'process_yaml_... .py'
-
-  # Construction:
-  # Vscratch_dir is the place where the files are stored
-  vscratch_dir_in = "data/runs"
-  # Tag is used to specify which data it is e.g. TCGA, NIAGADS
-  tag <- setup$tag
-  # Comparison is specified which conditions are compared e.g. cancer_1_vs_cancer_2
-  comparison <- paste0(tag, "_", paste(setup$classification$comparison, collapse = "_vs_"))
-  # Analysis_name specifies what was analysed
-  # E.g. comparsion of ancestries EUR_to_AMR, subsetting_EUR
-  # This often is modified depending which analysis
-  train_ancestry <- toupper(setup$classification$train_ancestry)
-  infer_ancestry <- toupper(setup$classification$infer_ancestry)
-  analysis_name  <-  paste0(train_ancestry, "_to_", infer_ancestry)
-  # Combination of components to create the 'match_pattern'
-  # The 'match_pattern' is used as pattern to extract all folders in the vscratch dir
-  match_pattern <- paste0(comparison, "_", analysis_name)
 }
 
-# Extracting all folders in the 'vscratch_dir' that match 'match_pattern'
+# Construction:
+# Vscratch_dir is the place where the files are stored
+vscratch_dir_in = file.path("data", "runs")
+# Tag is used to specify which data it is e.g. TCGA, NIAGADS
+tag <- setup$tag
+# Comparison is specified which conditions are compared e.g. cancer_1_vs_cancer_2
+comparison <- paste0(tag, "_", paste(setup$classification$comparison, collapse = "_vs_"))
+# Analysis_name specifies what was analysed
+# E.g. comparsion of ancestries EUR_to_AMR, subsetting_EUR
+# This often is modified depending which analysis
+train_ancestry <- toupper(setup$classification$train_ancestry)
+infer_ancestry <- toupper(setup$classification$infer_ancestry)
+analysis_name  <-  paste0(train_ancestry, "_to_", infer_ancestry)
+# Combination of components to create the 'match_pattern'
+# The 'match_pattern' is used as pattern to extract all folders in the vscratch dir
+match_pattern <- paste0(comparison, "_", analysis_name)
+
+# Extracting all folders in the 'vscratch_dir_in' that match 'match_pattern'
 # 1. List all folders in 'vscratch_dir_in'
 # 2. With 'match_pattern' extract matching folders
 all_vscratch_dir_in <- list.dirs(vscratch_dir_in, full.names = TRUE, recursive = FALSE)
@@ -72,7 +62,7 @@ if (length(match_vsratch_dir) == 0) {
 
 # Save the results of the analysis
 # 'vscratch_dir_out' where summarized analysis are stored
-vscratch_dir_out  <- "data/combined_runs"
+vscratch_dir_out  <- file.path("data", "combined_runs")
 path_to_save_location <- file.path(vscratch_dir_out, comparison, match_pattern)
 # Create the directory also parents (if it does not exist)
 # Create directory if it does not exists
@@ -80,12 +70,11 @@ if (!dir.exists(path_to_save_location)) {
   dir.create(path_to_save_location, recursive = TRUE)
 }
 
-
 # Combining metric csv files 
 # Each folder is one seed
 metric_dge <- data.frame()
 metric_ml <- data.frame()
-for (folder in matching_folders){
+for (folder in match_vsratch_dir){
     dge_file <- file.path(folder, "Metric_dge.csv")
     ml_file <- file.path(folder, "Metric_ml.csv")
 
@@ -342,7 +331,7 @@ saveRDS(ML_plot, file = file.path(path_to_save_location, "Plot_ml.rds"))
 # Combine model weights
 # Read the files 
 combined_weights <- data.frame()
-for (folder in matching_folders){
+for (folder in match_vsratch_dir){
     weights_file <- file.path(folder, "Weights.csv")
 
     # Load and append DGE data

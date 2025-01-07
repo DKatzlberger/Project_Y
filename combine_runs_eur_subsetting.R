@@ -79,77 +79,106 @@ if (!dir.exists(path_to_save_location)) {
 
 
 # Loading and combining the matched folders
-metric_all <- data.frame()
+metric_dge <- data.frame()
+metric_ml <- data.frame()
 for (folder in match_vsratch_dir){
-    # Generate path to csv_file
-    # All csv_files are stored under 'Metric_subsetting.csv'
-    # 1. Load the files
-    # 2. Combine them into single data frame
-    path_to_metric <- file.path(folder, "Metric_subsetting.csv")
-    metric <- fread(path_to_metric)
-    metric_all <- bind_rows(metric_all, metric) 
+    dge_file <- file.path(folder, "Metric_eur_subsetting_dge.csv")
+    ml_file <- file.path(folder, "Metric_eur_subsetting_ml.csv")
+
+    # Load and append DGE data for each seed
+    dge_data <- fread(dge_file) 
+    metric_dge <- bind_rows(metric_dge, dge_data) 
+
+    # Load and append ML data for each seed
+    ml_data <- fread(ml_file) 
+    metric_ml <- bind_rows(metric_ml, ml_data) 
 }
 
 # Check for outliers
 # TODO - Check for outliers per proportion of the subset using hampel filer 
 
-# Summarize the across seeds
+# Summarize metric across seeds
 # Calculate mean, sd, sem 
-summarized_metric <- metric_all |> 
+# 1. DGE
+# 2. ML
+summarized_dge <- metric_dge |> 
     pivot_longer(
         cols = c(Pearson, Spearman),
         values_to = "Value",
         names_to = "Metric"
     ) |> 
-    # Summarize by Seed 
-    # Dont use Seed in 'group_by'
-    group_by(Proportion_of_constant_split, n, Metric) |>  
+    # Dont use 'Seed' in 'group_by'
+    group_by(Metric, Ancestry, n) |>  
     summarize(
         n_seeds = n(),
         mean_value = mean(Value, na.rm = TRUE),
         sd_value = sd(Value, na.rm = TRUE),
         se_value = sd(Value, na.rm = TRUE) / sqrt(n())
   ) |>
-  mutate(
-    n = as.factor(n),
-    Proportion_of_constant_split = as.factor(Proportion_of_constant_split)
-    )
+  mutate(type = "DGE")
 
-# Plot the correlation
-# Correlation axis from 0 to 1
-common_y <- scale_y_continuous(
-    limits = c(0, 1.1), 
-    breaks = c(0, 0.5, 1))
+summarized_ml <- metric_ml |> 
+    pivot_longer(
+        cols = ROC_AUC,
+        values_to = "Value",
+        names_to = "Metric"
+    ) |> 
+    # Dont use 'Seed' in 'group_by'
+    group_by(Metric, Ancestry, n) |>  
+    summarize(
+        n_seeds = n(),
+        mean_value = mean(Value, na.rm = TRUE),
+        sd_value = sd(Value, na.rm = TRUE),
+        se_value = sd(Value, na.rm = TRUE) / sqrt(n())
+  ) |>
+  mutate(type = "ML")
 
-# TODO 
-test <- summarized_metric |>
+# Combine DGE and ML 
+# Add 'Metric_Type' column
+combined_metric <- bind_rows(summarized_dge, summarized_ml) |>
+  mutate(Metric_Type = paste(Metric, " (", type, ")", sep = ""),
+         Metric_Type = factor(Metric_Type, 
+                              levels = c("ROC_AUC (ML)", "Pearson (DGE)", "Spearman (DGE)")
+                              )
+        )
+
+# Save the combined metric
+fwrite(combined_metric, file.path(path_to_save_location, "Combined_metric.csv"))
+
+# Visualize
+performance_plot <- combined_metric |>
   ggplot(
     aes(
-        x = fct_rev(n),
-        y = mean_value
+      x = n,
+      y = mean_value,
+      color = Metric_Type,
+      group = Metric
     )
   ) +
-  geom_bar(
-        stat = "identity", 
-        width = 0.7
-  ) +
+  geom_point() +
+  geom_line() +
   geom_errorbar(
-        aes(
-            ymin = mean_value - sd_value, 
-            ymax = mean_value + sd_value
-            ), 
-        width = 0.2, position = position_dodge(0.7)
+    aes(
+      ymin = mean_value - sd_value, 
+      ymax = mean_value + sd_value
+      ), 
+    width = 0.2
   ) +
-  common_y +
+  scale_y_continuous(
+    limits = c(0, 1.1),
+    breaks = c(0.0, 0.5, 1.0)
+  ) +
   facet_grid(
-    rows = vars(Metric)
-  ) +
+    cols = vars(Ancestry)
+  ) + 
   labs(
-    # title = paste(gsub("_", " ", comparison)),
-    x = "EUR subsets (n)",
-    y = "Correlation coefficient"
-  ) +
-  theme(axis.text.x = element_text(angle = 90))
+    x = "Sample Size (n)",
+    y = "Mean Value",
+    color = "Metric",
+    title = "Performance by sample size"
+  )
 
-ggsave(file.path(path_to_save_location, "Subsets.pdf"),
-        plot = test, height = 6, width = 12)
+# Save
+ggsave(file.path(path_to_save_location, "Performance_by_sample_size.pdf"),
+        plot = performance_plot, height = 5, width = 8)
+

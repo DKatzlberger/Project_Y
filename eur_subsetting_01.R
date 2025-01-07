@@ -189,7 +189,7 @@ metric_df <- inner_join(pearson, spearman, by = c("V1", "V2")) |>
   )
 
 # Save metric Dataframe
-fwrite(metric_df, file.path(setup$output_directory, "Metric_subsetting.csv"))
+fwrite(metric_df, file.path(setup$output_directory, "Metric_eur_subsetting_dge.csv"))
 
 
 if (setup$visual_val){

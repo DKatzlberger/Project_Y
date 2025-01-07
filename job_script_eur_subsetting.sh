@@ -11,7 +11,7 @@ shift
 seeds=("$@")
 
 # Need to specify host
-HOSTNAME="merida.came.sbg.ac.at"
+HOSTNAME="trude.came.sbg.ac.at"
 SAVE_CPUS=0
 
 # Process settings file
@@ -20,7 +20,7 @@ PROCESS_SCRIPT="process_yaml_eur_subsetting_.py"
 SINGULARITY_IMAGE="data/ancestry_dk.sif"
 
 # Scripts to run
-R_SCRIPT_SUBSETTING="eur_subsetting.R"
+SCRIPT_SUBSETTING="main_eur_subsetting.py"
 R_SCRIPT_COMBINE="combine_runs.R"
 
 
@@ -33,7 +33,7 @@ fi
 # Make scripts executable
 chmod +x "${PROCESS_SCRIPT}"
 
-chmod +x "${R_SCRIPT_SUBSETTING}"
+chmod +x "${SCRIPT_SUBSETTING}"
 chmod +x "${R_SCRIPT_COMBINE}"
 
 
@@ -73,7 +73,7 @@ for seed in "${seeds[@]}"; do
     # singularity exec --bind /vscratch:/vscratch "${SINGULARITY_IMAGE}" python3 "${PYTHON_SCRIPT}" job_settings_.yml
     
     # This is the one that runs the actual job
-    qsub -N $job_name -l hostname=$HOSTNAME -pe smp $CPUS_PER_JOB -o "$qsub_output/output.log" -e "$qsub_output/error.log" singularity exec --bind /vscratch:/vscratch "${SINGULARITY_IMAGE}" Rscript "${R_SCRIPT_SUBSETTING}" _job_settings_"${seed}_".yml
+    qsub -N $job_name -l hostname=$HOSTNAME -pe smp $CPUS_PER_JOB -o "$qsub_output/output.log" -e "$qsub_output/error.log" singularity exec --bind /vscratch:/vscratch "${SINGULARITY_IMAGE}" python3 "${SCRIPT_SUBSETTING}" _job_settings_"${seed}_".yml
 
     # qsub -N $job_name -l hostname=$HOSTNAME -o "$qsub_output/output.log" -e "$qsub_output/error.log" singularity exec --bind /vscratch:/vscratch "${SINGULARITY_IMAGE}" python3 "${PYTHON_SCRIPT}" job_settings_.yml
     # qsub -N "echo" -l hostname=$HOSTNAME -o "$qsub_output/output.log" -e "$qsub_output/error.log" echo "HALLO_there_should_be_no_error"
@@ -82,8 +82,3 @@ done
 # These scripts wait to be executed once all jobs in job_list are finished
 # qsub -N "Combine_runs" -hold_jid "${job_list[@]}" singularity exec --bind /vscratch:/vscratch "${SINGULARITY_IMAGE}" Rscript "${R_SCRIPT}" "${SETTINGS_FILE}"
 
-# Clean up
-# qsub -N "Clean_up" -hold_jid "${job_list[@]}" bash -c 'rm _job_settings_[0-9]*_.yml'
-
-
-# echo "Submitted jobs: $job_list"
