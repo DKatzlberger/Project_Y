@@ -18,7 +18,6 @@ import anndata as ad
 class Setup(dict):
     def __init__(self, config_file):
         
-        # TODO - Maybe combination of default and custom settings outsource
         # Open the default config file
         try:
             default_config = yaml.safe_load(Path('default_settings.yml').read_text())
@@ -106,8 +105,8 @@ class Setup(dict):
             f"Cross-validation requires at least nfolds: 2 folds, got nfolds: {self.nfolds}."
         
         # Grid search
-        assert all(isinstance(x, float) for x in self.grid_search['l1_ratio']), \
-            f"Grid search l1_ratio needs to be floating points between 0.0 and 1.0."
+        # assert all(isinstance(x, float) for x in self.grid_search['l1_ratio']), \
+        #     f"Grid search l1_ratio needs to be floating points between 0.0 and 1.0."
 
     def log(self, text):
         with open(self.out("Log.tsv"),"a") as file:
@@ -335,7 +334,7 @@ def sample_by_size(adata, props, seed, output_column):
     samples = {}
     
     # Ensure each class has at least two samples
-    class_groups = adata.obs.groupby(output_column)
+    class_groups = adata.obs.groupby(output_column, observed=False)
     
     for prop in props:
         # Name for the subset
@@ -370,47 +369,38 @@ def sample_by_size(adata, props, seed, output_column):
     
     return samples
 
-# Calculate available CPUs on a host
-def get_available_cpus(hostname):
-    """
-    Get the number of available CPUs for a given host.
 
+# Afunction to extract feature importance
+def extract_feature_importance(model, feature_names):
+    """
+    Extract feature importance from a given model.
+    
     Parameters:
-        hostname (str): The name of the host to query.
-        save_cpus (int): Number of CPUs to reserve (default is 0).
-
+        model: Trained sklearn model
+        feature_names: List of feature names (columns)
+    
     Returns:
-        int: The number of available CPUs.
+        DataFrame with feature importance scores
     """
-    try:
-        # Get the qhost output
-        qhost_output = subprocess.run(
-            ["qhost", "-h", hostname],
-            check=True,
-            text=True,
-            capture_output=True
-        ).stdout
+    if hasattr(model, "feature_importances_"):  # Tree-based models
+        importance = model.feature_importances_
+    elif hasattr(model, "coef_"):  # Linear models
+        importance = model.coef_
+    else:
+        raise ValueError(f"Model {type(model).__name__} does not support feature importance extraction.")
+    
+    # Normalize importance scores to sum to 1 (optional)
+    importance = importance / np.sum(importance)
+    
+    # Create a DataFrame for readability
+    importance_df = pd.DataFrame({
+        "Feature": feature_names,
+        "Importance": importance
+    }).sort_values(by="Importance", ascending=False)
+    
+    return importance_df
 
-        # Match relevant information from the output
-        pattern = re.compile(r'(\S+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+([0-9.]+)\s+(\S+)')
-        matches = pattern.findall(qhost_output)
 
-        if not matches:
-            raise ValueError(f"No matching host information found for {hostname}")
-
-        # Extract values
-        host, arch, ncpu, nsoc, ncor, nthr, load, rest = matches[0]
-
-        # Calculate available CPUs
-        ncpu = float(ncpu)
-        available_cpus = ncpu
-
-        return available_cpus
-
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Error running qhost: {e.stderr.strip()}") from e
-    except Exception as e:
-        raise RuntimeError(f"An error occurred: {str(e)}") from e
 
 # -----------------------------------------------------------------------------------------------
 # Unused functions
@@ -475,5 +465,47 @@ def stratified_folds(data, category_col, proportions, k):
         i += 1
     # Returns folds and the data that was not used while sampling
     return folds, data
+
+# Calculate available CPUs on a host
+def get_available_cpus(hostname):
+    """
+    Get the number of available CPUs for a given host.
+
+    Parameters:
+        hostname (str): The name of the host to query.
+        save_cpus (int): Number of CPUs to reserve (default is 0).
+
+    Returns:
+        int: The number of available CPUs.
+    """
+    try:
+        # Get the qhost output
+        qhost_output = subprocess.run(
+            ["qhost", "-h", hostname],
+            check=True,
+            text=True,
+            capture_output=True
+        ).stdout
+
+        # Match relevant information from the output
+        pattern = re.compile(r'(\S+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+([0-9.]+)\s+(\S+)')
+        matches = pattern.findall(qhost_output)
+
+        if not matches:
+            raise ValueError(f"No matching host information found for {hostname}")
+
+        # Extract values
+        host, arch, ncpu, nsoc, ncor, nthr, load, rest = matches[0]
+
+        # Calculate available CPUs
+        ncpu = float(ncpu)
+        available_cpus = ncpu
+
+        return available_cpus
+
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Error running qhost: {e.stderr.strip()}") from e
+    except Exception as e:
+        raise RuntimeError(f"An error occurred: {str(e)}") from e
 
 

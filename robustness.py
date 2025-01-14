@@ -302,8 +302,8 @@ for prop in setup.proportion:
     # Combine
     metric_df = (pd.concat([test_metric, inf_metric])
                  .assign(
-                       **{"n_train_ancestry": len(obs_inf),
-                          "n_test_ancetry": len(obs_train),
+                       **{"n_inf_ancestry": len(obs_inf),
+                          "n_train_ancestry": len(obs_train),
                           "proportion": prop.replace("_", "."),
                           "Ancestry": setup.classification["infer_ancestry"].upper()
                           }

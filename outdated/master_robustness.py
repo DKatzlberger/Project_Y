@@ -59,7 +59,7 @@ HOSTNAME = "trude.came.sbg.ac.at"
 #   Settings:   YAML file
 #   Seeds:      List of seeds 
 
-SETTINGS_FILE = "EUR_ASI_settings.yml"
+SETTINGS_FILE = "EUR_to_ASI_settings.yml"
 SEEDS = np.arange(1,11)
 
 # Check if 'SETTINGS_FILE' exists

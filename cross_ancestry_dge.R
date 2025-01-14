@@ -67,6 +67,12 @@ stopifnot(length(train_idx) == length(train_data$obs_names))
 stopifnot(all(colnames(t(train_data$X)) ==
                 row.names(train_data$obs[colnames(t(train_data$X)), ])))
 
+# Check if inf_idx are from the correct ancestry
+inf_adata = adata[adata$obs[setup$classification$ancestry_column] == setup$classification$infer_ancestry]
+inf_adata = inf_adata[inf_adata$obs[[setup$classification$output_column]] %in% setup$classification$comparison]
+inf_adata_obs = inf_adata$obs_names
+stopifnot(all(inf_adata_obs == inf_idx))
+
 
 # Covariate
 # 1. Extract the covariate, if it exists and has a meaningful value
@@ -118,7 +124,6 @@ inf_design <- create_design(setup$classification$output_column,
 contrast_matrix <- create_contrast(colnames(train_design))
 
 # Filter genes by expression (Use the train set)
-# TODO - will maybe be outsourced to keep same genes across ancestries
 keeper_genes <- filterByExpr(t(train_data$X), train_design)
 # Subset
 train_filtered <- train_data[, keeper_genes]
@@ -143,8 +148,6 @@ stopifnot(table(keeper_genes)[2] == dim(train_filtered$X)[2])
 train_norm <- voom(t(train_filtered$X), train_design, plot = FALSE)
 test_norm <- voom(t(test_filtered$X), test_design, plot = FALSE)
 inf_norm <- voom(t(inf_filtered$X), inf_design, plot = FALSE)
-
-# TODO - Quality control
 
 # Fit the model (Means model)
 train_limma_fit <- lmFit(train_norm, design = train_design)
@@ -266,7 +269,8 @@ metric_df <- inner_join(pearson, spearman, by = c("V1", "V2")) |>
     Status = ifelse(V1 == "logFC_test", "Test", "Inference"),
     Ancestry = toupper(setup$classification$infer_ancestry),
     Prediction = ifelse(V1 == "logFC_test", "Subset", "Ancestry"),
-    n_ancestry = inf_n
+    n_train_ancestry = train_n,
+    n_inf_ancestry = inf_n,
   )
 
 # Save metric Dataframe

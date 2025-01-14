@@ -115,7 +115,7 @@ settings_file = os.path.join(os.getcwd(), setup.output_directory, 'Settings.yml'
 # Uses files from the disk and writes to the disk
 # All files are strored in specified 'output_directory'
 setup.log('DGE')
-R.run_script(script_path=os.path.join(os.getcwd(), 'eur_subsetting_01.R'),
+R.run_script(script_path=os.path.join(os.getcwd(), 'eur_subsetting.R'),
              args=[settings_file])
 
 # Subset features that are used in DGE

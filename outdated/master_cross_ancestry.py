@@ -169,7 +169,6 @@ for seed in SEEDS:
         print(f"Error executing command:\n{e.stderr}")
 
 # After all seeds run submit combine runs script
-# First analysis is 'main_cross_ancestry'
 script_name = "cross_ancestry_combine_runs.R"
 # Make the script executable
 os.chmod(script_name, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)

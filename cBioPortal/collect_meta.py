@@ -159,7 +159,7 @@ meta_all['RNASeqV2'] = True
 
 # Do reformating
 # 1. Make all colnames lower case
-meta_all.columns = map(str.lower, meta_all.columns)
+# meta_all.columns = map(str.lower, meta_all.columns)
 
 # Save meta dataframe
 meta_all.to_csv('../data/downloads/cbioportal/rna_studies/tcga_pan_studies_with_rna.csv', index=False)

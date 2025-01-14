@@ -9,6 +9,9 @@ import pickle
 import sys
 import argparse
 
+# Import library
+import importlib
+
 # Subprocess to run R
 import subprocess
 
@@ -16,6 +19,7 @@ import subprocess
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score
 
 # Visualization
@@ -49,6 +53,7 @@ setup.log('Settings done')
 # Data setup
 setup.log('Check data compatability')
 data = anndata.read_h5ad(setup.data_path)
+
 
 # Check if defined settings are present in the data
 compatability = DataValidator(data=data, setup=setup)
@@ -175,7 +180,72 @@ assert train_y.shape[0] == train_X.shape[0], assert_str
 
 
 print('Starting machine learning.')
-setup.log('Model setup')
+setup.log('Machine learning')
+# TODO - Use a non linear model e.g. Random Forest
+for algo_name in setup.algorithms:
+
+    setup.log(algo_name)
+    # Load the sklearn class
+    module_name = "sklearn.linear_model" if "LogisticRegression" in algo_name else "sklearn.ensemble"
+    algo_class = getattr(importlib.import_module(module_name), algo_name)
+    # Create instance of the algortihm
+    algo_instance = algo_class(random_state=seed)
+
+
+    # Cross-validation for hyperparameter search
+    cv_hyp = StratifiedKFold(n_splits=setup.nfolds, shuffle=True, random_state=seed)
+    # Load the grid_search parameters
+    search_space = setup.grid_search[algo_name]
+
+    setup.log("Training")
+    # Train with grid search and extract best model
+    grid_search = GridSearchCV(estimator=algo_instance, param_grid=search_space,
+                               cv=cv_hyp, scoring='f1_weighted', 
+                               refit=True, n_jobs=setup.njobs
+                               )
+    grid_search.fit(train_X, train_y)
+    best_m = grid_search.best_estimator_ 
+
+    # Save hyperparameters 
+    hyp = pd.DataFrame(grid_search.best_params_, index=[setup.id])
+    hyp.to_csv(setup.out(f"Hyperparameters_{algo_name}.csv"), index=False)
+
+    # Save model
+    if setup.save_model:
+        with open(setup.out(f"{algo_name}_{setup.id}.pkl"), 'wb') as f:
+            pickle.dump(best_m, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    # Training finished
+    print(f"{algo_name} training done.")
+
+    setup.log("Testing")
+    # Validate prediction performance on EUR-subset
+    test_y_hat = pd.DataFrame(best_m.predict_proba(test_X))
+    test_y_hat["y"] = test_y
+    # Save propabilities
+    test_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_test.csv"), index=False)
+
+    setup.log("Infering")
+    # Validate prediction performance on ancestry
+    inf_y_hat = pd.DataFrame(best_m.predict_proba(inf_X))
+    inf_y_hat["y"] = inf_y
+    # Save propabilities
+    inf_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_inf.csv"), index=False)
+
+    # Validation finished
+    print(f"{algo_name} validation done")
+
+    setup.log("Model interpretations")
+    # Model feature importances
+    feature_names = train_data.var_names
+    feature_importance = extract_feature_importance(best_m, feature_names)
+    # Save
+    feature_importance.to_csv(setup.out(f"Feature_importance_{algo_name}.csv"), index=False)
+
+
+
+
+
 # Algorithm (focusing on Logisitic Regression)
 algo = LogisticRegression(random_state=seed)
 # Cross-validation for hyperparameter search
@@ -201,7 +271,7 @@ hyp.to_csv(setup.out('Hyperparameters.csv'), index=False)
 # Save model
 if setup.save_model:
     with open(setup.out(f'{setup.id}.pkl'), 'wb') as f:
-        pickle.dump(best_m, f, protocol=pickle.HIGHEST_PROTOCOL) # check if there is a better function
+        pickle.dump(best_m, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 # Training fisnished
 print(f'Id: {setup.id} finished training.')
@@ -221,6 +291,8 @@ inf_y_hat = pd.DataFrame(best_m.predict_proba(inf_X))
 inf_y_hat['y'] = inf_y
 # Save propabilities
 inf_y_hat.to_csv(setup.out('Probabilities_inf.csv'), index=False)
+
+
 
 # Model weights (interpretation)
 feature_names = train_data.var_names # using train data because features got selected based on DE genes

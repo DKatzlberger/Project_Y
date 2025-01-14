@@ -291,10 +291,10 @@ ks_test <- function(data, group_col, value_col, group1 = "Test", group2 = "Infer
 # Permutation test
 permutation_test <- function(data, value_col, group_col) {
   
-   # Check if any group has identical values (zero variance)
-    var_check <- data |>
-    group_by(!!sym(group_col)) |>
-    summarise(var_value = var(!!sym(value_col)), .groups = 'drop')
+  # Check if any group has identical values (zero variance)
+  var_check <- data |>
+  group_by(!!sym(group_col)) |>
+  summarise(var_value = var(!!sym(value_col)), .groups = 'drop')
   
   # If any group has zero variance, return p-value of 1
   if (any(var_check$var_value == 0)) {
@@ -318,7 +318,7 @@ permutation_test <- function(data, value_col, group_col) {
   perm_test_result <- independence_test(formula = formula, data = perm_data)
   
   # Return the result of the permutation test
-  p_value = pvalue(perm_test_result)
+  p_value = as.numeric(pvalue(perm_test_result))
   return(p_value)
 }
 
@@ -386,6 +386,8 @@ sample_by_size <- function(data, sizes, seed, class_column) {
   return(samples)
 }
 
+# Functional analysis
+
 # Function to read geneset libraries
 read_enrichR_database <- function(path){
   # Read the file:
@@ -396,4 +398,130 @@ read_enrichR_database <- function(path){
   names(res) <- sapply(res, function(x) x[1])
   # Entries 3 to end are the gene names
   lapply(res, function(x) x[3:length(x)])
+}
+
+# Function to perform GSEA with fgsea on pvals and logFC
+perform_gsea <- function(dge_results, database_path, rank_by = "logFC") {
+  
+  # Validate the rank_by argument
+  if (!(rank_by %in% colnames(dge_results))) {
+    stop("The specified rank_by column does not exist in the dge_results dataframe.")
+  }
+  
+  # Rank genes by the specified rank_by column using the new pipe
+  ranked_stats <- dge_results |>
+    arrange(desc(.data[[rank_by]])) |>
+    distinct(Feature, .keep_all = TRUE) |>
+    pull(.data[[rank_by]], Feature)
+  
+  # Check if all values in ranked_stats are positive
+  score_type <- if (all(ranked_stats > 0)) {
+    "pos"  # Use "pos" if all values are positive
+  } else {
+    "std"  # Use "std" if there are negative values
+  }
+  
+  # Read the database (path to file)
+  db <- read_enrichR_database(database_path)
+  
+  # Run fgsea with the dynamic scoreType
+  fgsea_results <- fgsea(pathways = db, stats = ranked_stats, scoreType = score_type) |>
+    mutate(ranked_by = rank_by)
+  
+  return(fgsea_results)
+}
+
+# Quality control
+# PCA
+# Function to plot PCA combinations for a single condition
+plot_pca_for_condition <- function(pca_df, pca_result, condition, default_condition) {
+  # Check if the condition column exists in pca_df
+  if (!(condition %in% colnames(pca_df))) {
+    stop(paste("Condition", condition, "not found in pca_df."))
+  }
+  
+  # Dynamically detect the number of PCs in pca_df (assumes columns are named "PC1", "PC2", etc.)
+  pc_columns <- grep("^PC[0-9]+$", colnames(pca_df), value = TRUE)
+  if (length(pc_columns) < 2) {
+    stop("At least two PCs are required for pairwise combinations.")
+  }
+  
+  # Generate all combinations of the detected PCs
+  pc_combinations <- combn(pc_columns, 2, simplify = FALSE)
+
+  # Extract variance explained by each PC
+  pc_variances <- summary(pca_result)$importance[2, ]
+  
+  # Create plots for each PC combination
+  plot_list <- list()
+  for (comb in pc_combinations) {
+    x_pc <- comb[1]
+    y_pc <- comb[2]
+
+    # Calculate the variance explained by each PC in the combination
+    x_var <- round(pc_variances[x_pc] * 100, 2)
+    y_var <- round(pc_variances[y_pc] * 100, 2)
+    
+    # Create a ggplot for the given PC combination
+    p <- ggplot(pca_df, aes(x = !!sym(x_pc), y = !!sym(y_pc), 
+                            color = !!sym(condition),
+                            shape = !!sym(default_condition)
+                            )
+      ) +
+      geom_point(size = 3) +
+      labs(
+        x = paste0(x_pc, " (", x_var, "% Variance)"),
+        y = paste0(y_pc, " (", y_var, "% Variance)")
+      )
+  
+    # Add the plot to the list
+    plot_list[[paste(x_pc, y_pc, sep = "_")]] <- p
+  }
+  
+  return(plot_list)
+}
+
+
+# Function to generate a list of t-SNE plots with different perplexities
+generate_tsne_plots <- function(data, meta, condition, perplexity_range, default_condition, seed = 42) {
+  # Set the seed for reproducibility
+  set.seed(seed)
+  
+  # Create an empty list to store plots
+  plot_list <- list()
+  
+  # Loop through each value in the perplexity range
+  for (perplexity in perplexity_range) {
+    
+    # Perform t-SNE with the current perplexity
+    tsne_result <- Rtsne(data, dims = 2, perplexity = perplexity)
+    
+    # Create a data frame with t-SNE results and the condition labels
+    tsne_data <- data.frame(
+      TSNE1 = tsne_result$Y[, 1],
+      TSNE2 = tsne_result$Y[, 2],
+      Perplexity = factor(paste("Perplexity =", perplexity))
+    )
+
+    # Add meta
+    tsne_data <- as_tibble(bind_cols(tsne_data, meta))
+    
+    # Create a ggplot for this perplexity value
+    tsne_plot <- ggplot(tsne_data, aes(x = TSNE1, 
+                                       y = TSNE2, 
+                                      color = !!sym(condition),
+                                      shape = !!sym(default_condition))
+      ) +
+      geom_point() +
+      facet_grid(cols = vars(Perplexity))
+      labs(
+        x = "t-SNE1",
+        y = "t-SNE2"
+      ) 
+    
+    # Add the plot to the list
+    plot_list[[paste("Perplexity", perplexity)]] <- tsne_plot
+  }
+  
+  return(plot_list)
 }

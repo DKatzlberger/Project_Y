@@ -22,48 +22,58 @@ if (length(args) > 0) {
   # 2. Load the yaml file
   is_yml_file(yaml_file)
   setup <- yaml.load_file(yaml_file)
+  # Vscratch directory
+  vscratch_dir_in = file.path("data", "runs")
+  # When the script is run from the command line then 'output_directory' is given
+  # The pattern to extract all matchin directories is extracted from 'output_directory'
+  output_path = setup$output_directory
+  match_pattern <- sub("_\\d+$", "", sub(".*/", "", output_path))
 } else {
   print("Running interactive mode for development.")
   # Yaml file used for development (often an actual job script)
-  yaml_file <- "job_settings.yml"
+  yaml_file <- "EUR_to_ASI_settings.yml"
   # 1. Check if it's a valid yaml file
   # 2. Load the yaml file
   is_yml_file(yaml_file)
   setup <- yaml.load_file(yaml_file)
-}
 
-# Construction:
-# Vscratch_dir is the place where the files are stored
-vscratch_dir_in = file.path("data", "runs")
-# Tag is used to specify which data it is e.g. TCGA, NIAGADS
-tag <- setup$tag
-# Comparison is specified which conditions are compared e.g. cancer_1_vs_cancer_2
-comparison <- paste0(tag, "_", paste(setup$classification$comparison, collapse = "_vs_"))
-# Analysis_name specifies what was analysed
-# E.g. comparsion of ancestries EUR_to_AMR, subsetting_EUR
-# This often is modified depending which analysis
-train_ancestry <- toupper(setup$classification$train_ancestry)
-infer_ancestry <- toupper(setup$classification$infer_ancestry)
-analysis_name  <-  paste0(train_ancestry, "_to_", infer_ancestry)
-# Combination of components to create the 'match_pattern'
-# The 'match_pattern' is used as pattern to extract all folders in the vscratch dir
-match_pattern <- paste0(comparison, "_", analysis_name)
+  # Construction:
+  # Vscratch_dir is the place where the files are stored
+  vscratch_dir_in = file.path("data", "runs")
+  # Tag is used to specify which data it is e.g. TCGA, NIAGADS
+  tag <- setup$tag
+  # Comparison is specified which conditions are compared e.g. cancer_1_vs_cancer_2
+  comparison <- paste0(tag, "_", paste(setup$classification$comparison, collapse = "_vs_"))
+  # Analysis_name specifies what was analysed
+  # E.g. comparsion of ancestries EUR_to_AMR, subsetting_EUR
+  # This often is modified depending which analysis
+  train_ancestry <- toupper(setup$classification$train_ancestry)
+  infer_ancestry <- toupper(setup$classification$infer_ancestry)
+  analysis_name  <-  paste0(train_ancestry, "_to_", infer_ancestry)
+  # Combination of components to create the 'match_pattern'
+  # The 'match_pattern' is used as pattern to extract all folders in the vscratch dir
+  match_pattern <- paste0(comparison, "_", analysis_name)
+
+}
 
 # Extracting all folders in the 'vscratch_dir_in' that match 'match_pattern'
 # 1. List all folders in 'vscratch_dir_in'
 # 2. With 'match_pattern' extract matching folders
 all_vscratch_dir_in <- list.dirs(vscratch_dir_in, full.names = TRUE, recursive = FALSE)
-match_vsratch_dir <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
+match_vscratch_dir <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
+# Print the match folders
+print("Matched folders:")
+print(match_vscratch_dir)
 
 # Check if there were matching folders
-if (length(match_vsratch_dir) == 0) {
+if (length(match_vscratch_dir) == 0) {
   message("No matching folders found.")
 }
 
 # Save the results of the analysis
 # 'vscratch_dir_out' where summarized analysis are stored
 vscratch_dir_out  <- file.path("data", "combined_runs")
-path_to_save_location <- file.path(vscratch_dir_out, comparison, match_pattern)
+path_to_save_location <- file.path(vscratch_dir_out, match_pattern)
 # Create the directory also parents (if it does not exist)
 # Create directory if it does not exists
 if (!dir.exists(path_to_save_location)) {
@@ -74,7 +84,7 @@ if (!dir.exists(path_to_save_location)) {
 # Each folder is one seed
 metric_dge <- data.frame()
 metric_ml <- data.frame()
-for (folder in match_vsratch_dir){
+for (folder in match_vscratch_dir){
     dge_file <- file.path(folder, "Metric_dge.csv")
     ml_file <- file.path(folder, "Metric_ml.csv")
 
@@ -87,39 +97,38 @@ for (folder in match_vsratch_dir){
     metric_ml <- bind_rows(metric_ml, ml_data) 
 }
 # Add information to the dataframe
-metric_dge <- metric_dge |> mutate(Comparison = comparison)
-metric_ml <- metric_ml |> mutate(Comparison = comparison)
+# comparison = paste0(tag, "_", paste(setup$classification$comparison, collapse = "_vs_"))
+# metric_dge <- metric_dge |> mutate(Comparison = comparison)
+# metric_ml <- metric_ml |> mutate(Comparison = comparison)
 
 # Outlier test
 # With hampel filter 3 * MAD confidence interval
-hampel_filter <- function(x, t0 = 3) {
-  # x: Numeric vector
-  # t0: Threshold (default is 3 standard deviations equivalent)
-  med <- median(x, na.rm = TRUE)  # Median of the data
-  mad_val <- mad(x, na.rm = TRUE)  # MAD of the data
-  threshold <- t0 * mad_val  # Threshold based on MAD and t0
+# hampel_filter <- function(x, t0 = 3) {
+#   # x: Numeric vector
+#   # t0: Threshold (default is 3 standard deviations equivalent)
+#   med <- median(x, na.rm = TRUE)  # Median of the data
+#   mad_val <- mad(x, na.rm = TRUE)  # MAD of the data
+#   threshold <- t0 * mad_val  # Threshold based on MAD and t0
   
-  # Identify outliers
-  abs(x - med) > threshold
-}
+#   # Identify outliers
+#   abs(x - med) > threshold
+# }
 
-# Add outlier column for correlation values
-metric_dge <- metric_dge |>
-  group_by(Status) |>
-  mutate(
-    Pearson_outlier = hampel_filter(Pearson),  # Hampel filter for Pearson
-    Spearman_outlier = hampel_filter(Spearman),  # Hampel filter for Spearman
-  )
+# # Add outlier column for correlation values
+# metric_dge <- metric_dge |>
+#   group_by(Status) |>
+#   mutate(
+#     Pearson_outlier = hampel_filter(Pearson),  # Hampel filter for Pearson
+#     Spearman_outlier = hampel_filter(Spearman),  # Hampel filter for Spearman
+#   )
 
-# metric_dge |>
-#   select(!c(V1, V2, Comparison, n_ancestry))
 
 # Add otlier column to check if ROC_AUC values contain outliers
-metric_ml <- metric_ml |>
-  group_by(Status) |>
-  mutate(
-    ROC_AUC_outlier = hampel_filter(ROC_AUC),  # Hampel filter for ROC AUC
-  )
+# metric_ml <- metric_ml |>
+#   group_by(Status) |>
+#   mutate(
+#     ROC_AUC_outlier = hampel_filter(ROC_AUC),  # Hampel filter for ROC AUC
+#   )
 
 # Differential gene expression analysis:
 
@@ -128,8 +137,8 @@ metric_ml <- metric_ml |>
 # Non-parametric
 # H0: The samples come from the same probability distribution
 # H1: The samples are from different probability distribution
-ks_pearson <- ks_test(data = metric_dge, group_col = "Status", value_col = "Pearson")
-ks_spearman <- ks_test(data = metric_dge, group_col = "Status", value_col = "Spearman")
+# ks_pearson <- ks_test(data = metric_dge, group_col = "Status", value_col = "Pearson")
+# ks_spearman <- ks_test(data = metric_dge, group_col = "Status", value_col = "Spearman")
 
 # 2. with permutation testing (returns a p-value of 1 if there is no variance between groups)
 # Non-parametric
@@ -137,30 +146,14 @@ ks_spearman <- ks_test(data = metric_dge, group_col = "Status", value_col = "Spe
 p_pearson <- permutation_test(data = metric_dge, group_col = "Status", value_col = "Pearson")
 p_spearman <- permutation_test(data = metric_dge, group_col = "Status", value_col = "Spearman")
 
-# 3. t-test
-# parametric
-pearson_test <- metric_dge |>
-  filter(Status == "Test",
-         #Seed %in% c(1, 2, 3, 4, 5)
-         ) |>
-  pull(Pearson)
-pearson_inference <- metric_dge |>
-  filter(Status == "Inference",
-         #Seed %in% c(1, 2, 3, 4, 5)
-         ) |>
-  pull(Pearson)
-
-t_pearson <- t.test(pearson_test, pearson_inference)
-
 # Summarize data (taking mean of correlation values)
 summarized_dge <- metric_dge |> 
-    mutate(Prediction = fct_rev(Prediction)) |> 
     pivot_longer(
         cols = c(Pearson, Spearman),
         values_to = "Value",
         names_to = "Metric"
     ) |> 
-    group_by(Ancestry, Status, Prediction, Metric, n_ancestry) |>  
+    group_by(Ancestry, Status, Prediction, Metric, n_inf_ancestry) |>  
     summarize(
       n_seeds = n(),
       mean_value = mean(Value, na.rm = TRUE),
@@ -176,7 +169,7 @@ summarized_dge <- metric_dge |>
 # Non-parametric
 # H0: The samples come from the same probability distribution
 # H1: The samples are from different probability distribution
-ks_roc <- ks_test(data = metric_ml, group_col = "Status", value_col = "ROC_AUC")
+# ks_roc <- ks_test(data = metric_ml, group_col = "Status", value_col = "ROC_AUC")
 
 # 2. with permutation testing
 # Non-parametric
@@ -186,13 +179,12 @@ p_roc <- permutation_test(data = metric_ml, group_col = "Status", value_col = "R
 # Prepare data format
 summarized_ml <- metric_ml |> 
     # select(c(Status, Ancestry, Seed, Prediction, ROC_AUC)) |> 
-    mutate(Prediction = fct_rev(Prediction)) |> 
     pivot_longer(
         cols = c(ROC_AUC),
         values_to = "Value",
         names_to = "Metric"
     ) |> 
-    group_by(Ancestry, Status, Prediction, Metric, n_ancestry) |>  
+    group_by(Ancestry, Status, Prediction, Metric, n_inf_ancestry) |>  
     summarize(
       n_seeds = n(),
       mean_value = mean(Value, na.rm = TRUE),
@@ -208,8 +200,8 @@ summarized_ml <- metric_ml |>
 # Labeller to annotate number of samples per ancestry
 ancestry_labels <- summarized_dge |>
   ungroup() |>  
-  distinct(Ancestry, n_ancestry) |>
-  mutate(label = paste0(Ancestry, " (n = ", n_ancestry, ")")) |>
+  distinct(Ancestry, n_inf_ancestry) |>
+  mutate(label = paste0(Ancestry, " (n = ", n_inf_ancestry, ")")) |>
   select(Ancestry, label) |>
   deframe()
 
@@ -304,8 +296,6 @@ ML_plot <- summarized_ml |>
     inherit.aes = FALSE  # Don't inherit the default aesthetics
   )
 
-
-
 # Save DGE and ML approach
 # 1. Metric
 fwrite(metric_dge, file.path(path_to_save_location, "Metric_dge.csv"))
@@ -323,15 +313,11 @@ ggsave(filename = "Plot_ml.pdf", plot = ML_plot,
        path = path_to_save_location, width = 5, height = 5
        )
 
-# Save the R object
-saveRDS(DGE_plot, file = file.path(path_to_save_location, "Plot_dge.rds"))
-saveRDS(ML_plot, file = file.path(path_to_save_location, "Plot_ml.rds"))
-
 
 # Combine model weights
 # Read the files 
 combined_weights <- data.frame()
-for (folder in match_vsratch_dir){
+for (folder in match_vscratch_dir){
     weights_file <- file.path(folder, "Weights.csv")
 
     # Load and append DGE data
@@ -355,7 +341,6 @@ for (folder in match_vsratch_dir){
 # Save
 fwrite(combined_weights, file.path(path_to_save_location, "Weights.csv"))
 
-# TODO - Create overall directory in runs to move single run files
 
 
 
