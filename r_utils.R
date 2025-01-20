@@ -23,97 +23,264 @@ normalize_log <- function(X, e = 0.01){
   X = log2(X + e)
 }
 
+# Function to check if covariate is present in settings
+get_covariate <- function(setup) {
+  # Function to extract the covariate if present and valid
+  if ("covariate" %in% names(setup$classification) && 
+      !is.null(setup$classification$covariate) &&
+      any(nzchar(setup$classification$covariate))) {
+    return(setup$classification$covariate)
+  } else {
+    return(NULL)
+  }
+}
 
-# Check type of covariate
-check_covariate_type <- function(data, covariate) {
-  column <- data$obs[[covariate]]  # Extract the column by name
+classify_covariates <- function(df, covariates) {
+  # Initialize lists to store continuous and discrete covariates
+  classified_covariates <- list(
+    continuous = c(),
+    discrete = c()
+  )
   
-  if (is.factor(column) || is.character(column)) {
-    return("Discrete")  # Factors and character variables are discrete
-  } else if (is.numeric(column)) {
-    unique_values <- length(unique(column))
-    if (all(column %% 1 == 0) && unique_values < 20) {
-      return("Discrete")  # Numeric with few unique integer values is discrete
+  # Iterate through each covariate
+  for (covariate in covariates) {
+    # Skip covariates not present in the DataFrame
+    if (!covariate %in% colnames(df)) {
+      next
+    }
+    
+    # Extract the column data
+    col_data <- df[[covariate]]
+    unique_values <- length(unique(col_data))
+    
+    # Check if column is a factor or character (discrete)
+    if (is.factor(col_data) || is.character(col_data)) {
+      classified_covariates$discrete <- c(classified_covariates$discrete, covariate)
+    } else if (is.numeric(col_data)) {
+      # Heuristic: Numerical columns with <= 10 unique values are discrete
+      if (unique_values <= 10) {
+        classified_covariates$discrete <- c(classified_covariates$discrete, covariate)
+      } else {
+        classified_covariates$continuous <- c(classified_covariates$continuous, covariate)
+      }
     } else {
-      return("Continuous")  # Otherwise, it's continuous
+      # Treat other data types as discrete by default
+      classified_covariates$discrete <- c(classified_covariates$discrete, covariate)
     }
-  } else {
-    return("Unknown")  # If the type is neither numeric, factor, nor character
   }
+  
+  return(classified_covariates)
 }
 
-# If covariate is 'Discrete' check for enough samples
-check_covariate_conditions <- function(data, covariate, possible_values){
-  # Count occurrences of each possible value in the data
-  counts <- data$obs |> group_by_at(covariate) |> count()
-  # Check if all 'possible_values' are available in the data
-  if (!(all(possible_values %in% counts[[covariate]]))){
+
+check_covariate_conditions <- function(data, covariates) {
+  
+  # Iterate through the list of covariates
+  for (covariate in covariates) {
+    
+    # Count occurrences of each unique value in the covariate
+    counts <- data |> group_by_at(covariate) |> count()
+    
+    # Get the unique values directly from the dataset
+    possible_values <- unique(data[[covariate]])
+    
+    # Check if there are at least two unique levels in the covariate
+    if (length(possible_values) < 2) {
+      stop(paste("Covariate", covariate, "has fewer than two unique values"))
+    }
+    
+    # Check if all 'possible_values' are represented in the counts
     missing_values <- setdiff(possible_values, counts[[covariate]])
-    stop(paste("Not enough samples for:", missing_values, "to calculate covariate!"))
-  }
-  # Check if there are at least 2 samples per 'possible_value'
-  if (!(all(counts$n > 2))){
-    stop(paste("Not enough samples per covariate value!"))
-  }
+    if (length(missing_values) > 0) {
+      stop(paste(
+        "Not enough samples for:",
+        paste(missing_values, collapse = ", "),
+        "to calculate covariate for covariate",
+        covariate
+      ))
+    }
 
+    # Check if there are at least 2 samples per value
+    # if (any(counts$n <= 2)) {
+    #   stop(paste("Not enough samples per covariate value for:", covariate))
+    # }
+  }
 }
 
-# Create desing matrix with covariate if available
-create_design <- function(output_column, meta, covariate = NULL) {
-  # Creates design matrix
-  # Supports means model with optional covariate.
-  # output_column: Condition to be calculated.
-  # covariate: Optional covariate to include.
+
+# Define the function
+create_stratification_plot <- function(datasets, to_visualize_columns) {
+  # Combine datasets with their labels
+  combined_data <- bind_rows(
+    lapply(names(datasets), function(set_name) {
+      datasets[[set_name]] |> mutate(Set = set_name)
+    })
+  )
   
-  if (!is.null(covariate)) {
-    if (!(covariate %in% colnames(meta))) {
-      stop(paste("Covariate", covariate, "is not present in the metadata."))
-    }
-    # Design matrix including covariate
-    design <- model.matrix(~0 + eval(as.name(output_column)) + eval(as.name(covariate)), data = meta)
+  # Base plot for the first column in to_visualize_columns
+  base_plot <- combined_data |>
+    ggplot(aes(x = Set, fill = !!sym(to_visualize_columns[1]))) +
+    geom_bar(position = "fill") +
+    ylab("Proportion") +
+    ggtitle(paste("Distribution of", to_visualize_columns[1]))
+  
+  # If there are additional columns, create plots for them
+  if (length(to_visualize_columns) > 1) {
+    covariate_plots <- lapply(to_visualize_columns[-1], function(column) {
+      combined_data |>
+        ggplot(aes(x = Set, fill = !!sym(column))) +
+        geom_bar(position = "fill") +
+        ylab("Proportion") +
+        ggtitle(paste("Distribution of", column))
+    })
+    
+    # Combine all plots using patchwork
+    final_plot <- Reduce(`/`, c(list(base_plot), covariate_plots))
   } else {
-    # Design matrix without covariate
-    design <- model.matrix(~0 + eval(as.name(output_column)), data = meta)
+    # Only the base plot if no additional columns are specified
+    final_plot <- base_plot
   }
   
-  # Rename the columns of the design matrix
-  if (!is.null(covariate)) {
-    # Replace both output_column and covariate from column names
-    output_repl_str <- 'eval(as.name(output_column))'
-    covariate_repl_str <- 'eval(as.name(covariate))'
-    colnames(design) <- gsub(output_repl_str, '', colnames(design), fixed = TRUE)
-    colnames(design) <- gsub(covariate_repl_str, '', colnames(design), fixed = TRUE)
+  # Return the final patchwork plot
+  return(final_plot)
+}
+
+
+
+
+create_design <- function(output_column, meta, covariates = NULL) {
+  # Creates design matrix
+  # Supports means model with optional covariates.
+  # output_column: Condition to be calculated.
+  # covariates: Optional list of covariates to include.
+  
+  # Ensure all factor levels in `meta` are relevant (drop unused levels)
+  meta <- meta |> mutate(across(where(is.factor), droplevels))
+  
+  if (!is.null(covariates)) {
+    # Check that all covariates exist in the metadata
+    missing_covariates <- setdiff(covariates, colnames(meta))
+    if (length(missing_covariates) > 0) {
+      stop(paste("Covariates", paste(missing_covariates, collapse = ", "), "are not present in the metadata."))
+    }
+    
+    # Create the formula for the model matrix with multiple covariates
+    formula <- as.formula(paste("~0 +", output_column, "+", paste(covariates, collapse = " + ")))
+    design <- model.matrix(formula, data = meta)
   } else {
-    # Replace only output_column from column names
-    output_repl_str <- 'eval(as.name(output_column))'
-    colnames(design) <- gsub(output_repl_str, '', colnames(design), fixed = TRUE)
+    # Design matrix without covariates
+    formula <- as.formula(paste("~0 +", output_column))
+    design <- model.matrix(formula, data = meta)
+  }
+  
+  # Safely rename the columns of the design matrix
+  # Remove only prefixes for `output_column` and `covariates`, while leaving the rest intact
+  colnames(design) <- gsub(paste0("^", output_column, ""), "", colnames(design)) # Remove `output_column` prefix
+  
+  if (!is.null(covariates)) {
+    for (cov in covariates) {
+      if (is.factor(meta[[cov]])) {
+        # Remove factor variable name from column names (e.g., "covLevel1" -> "Level1")
+        colnames(design) <- gsub(paste0("^", cov, ""), "", colnames(design))
+      }
+    }
   }
   
   # Return the design matrix
   return(design)
 }
 
-create_contrast <- function(coef){
+# Create desing matrix with covariate if available
+# create_design <- function(output_column, meta, covariate = NULL) {
+#   # Creates design matrix
+#   # Supports means model with optional covariate.
+#   # output_column: Condition to be calculated.
+#   # covariate: Optional covariate to include.
+  
+#   if (!is.null(covariate)) {
+#     if (!(covariate %in% colnames(meta))) {
+#       stop(paste("Covariate", covariate, "is not present in the metadata."))
+#     }
+#     # Design matrix including covariate
+#     design <- model.matrix(~0 + eval(as.name(output_column)) + eval(as.name(covariate)), data = meta)
+#   } else {
+#     # Design matrix without covariate
+#     design <- model.matrix(~0 + eval(as.name(output_column)), data = meta)
+#   }
+  
+#   # Rename the columns of the design matrix
+#   if (!is.null(covariate)) {
+#     # Replace both output_column and covariate from column names
+#     output_repl_str <- 'eval(as.name(output_column))'
+#     covariate_repl_str <- 'eval(as.name(covariate))'
+#     colnames(design) <- gsub(output_repl_str, '', colnames(design), fixed = TRUE)
+#     colnames(design) <- gsub(covariate_repl_str, '', colnames(design), fixed = TRUE)
+#   } else {
+#     # Replace only output_column from column names
+#     output_repl_str <- 'eval(as.name(output_column))'
+#     colnames(design) <- gsub(output_repl_str, '', colnames(design), fixed = TRUE)
+#   }
+  
+#   # Return the design matrix
+#   return(design)
+# }
+
+create_contrast <- function(coef, conditions){
   # Creates contrast matrix.
-  # Compares the average of one condition to the average of all other.
   # coef: Coefficients of the design matrix.
+  # conditions: A vector of coefficient names that represent conditions of interest.
   
-  # Contrast matrix
-  coef1 <- coef
-  contrast.matrix <- matrix(0, ncol = length(coef1), nrow=length(coef1))
-  row.names(contrast.matrix) <- coef1
-  colnames(contrast.matrix) <- coef1
-  
-  cx <- coef1[1]
-  for(cx in coef1){
-    colx <- cx
-    # colx <- str_replace(cx, 'eval(as.name(setup$classification$output_column))', '')
-    contrast.matrix[coef1, colx] <- 1
-    contrast.matrix[row.names(contrast.matrix) != cx, colx] <- -1 * (1/(length(coef1)-1))
+  # Validate that conditions are a subset of coef
+  if (!all(conditions %in% coef)) {
+    stop("All conditions must be present in the coef vector.")
   }
-  # Return
-  contrast.matrix
+  
+  # Initialize the contrast matrix with zeros, with rows for all coefficients
+  contrast.matrix <- matrix(0, ncol = length(coef), nrow = length(coef))
+  
+  # Assign proper row and column names to the contrast matrix
+  row.names(contrast.matrix) <- coef
+  colnames(contrast.matrix) <- coef
+  
+  # Loop through each condition of interest and create the contrasts
+  for (cx in conditions) {
+    contrast.matrix[cx, cx] <- 1  # Set the contrast for the condition to 1
+    other_conditions <- setdiff(conditions, cx)  # Other conditions get -1
+    contrast.matrix[other_conditions, cx] <- -1 * (1 / length(other_conditions))
+  }
+  
+  # Ensure that all other coefficients not in conditions have their rows set to 0
+  remaining_coeffs <- setdiff(coef, conditions)
+  contrast.matrix[remaining_coeffs, ] <- 0
+
+  # Remove all columns with only zero values
+  contrast.matrix <- contrast.matrix[, colSums(contrast.matrix != 0) > 0]
+  
+  # Return the contrast matrix
+  return(contrast.matrix)
 }
+
+# create_contrast <- function(coef){
+#   # Creates contrast matrix.
+#   # Compares the average of one condition to the average of all other.
+#   # coef: Coefficients of the design matrix.
+  
+#   # Contrast matrix
+#   coef1 <- coef
+#   contrast.matrix <- matrix(0, ncol = length(coef1), nrow=length(coef1))
+#   row.names(contrast.matrix) <- coef1
+#   colnames(contrast.matrix) <- coef1
+  
+#   cx <- coef1[1]
+#   for(cx in coef1){
+#     colx <- cx
+#     # colx <- str_replace(cx, 'eval(as.name(setup$classification$output_column))', '')
+#     contrast.matrix[coef1, colx] <- 1
+#     contrast.matrix[row.names(contrast.matrix) != cx, colx] <- -1 * (1/(length(coef1)-1))
+#   }
+#   # Return
+#   contrast.matrix
+# }
 
 
 extract_results <- function(limmaFit){
@@ -299,7 +466,7 @@ permutation_test <- function(data, value_col, group_col) {
   # If any group has zero variance, return p-value of 1
   if (any(var_check$var_value == 0)) {
     message("One or more groups have identical values. Returning p-value of 1.")
-    return(1.000)  # Return the p-value of 1 directly
+    return(NA)  # Return the p-value of NA directly
   }
 
   # Quote the column names for later use in evaluation
@@ -432,6 +599,57 @@ perform_gsea <- function(dge_results, database_path, rank_by = "logFC") {
 }
 
 # Quality control
+classify_meta <- function(df, covariates) {
+  # Initialize lists to store continuous, discrete, and boolean covariates
+  classified_covariates <- list(
+    continuous = c(),
+    discrete = c(),
+    boolean = c()
+  )
+  
+  # Iterate through each covariate
+  for (covariate in covariates) {
+    # Skip covariates not present in the DataFrame
+    if (!covariate %in% colnames(df)) {
+      next
+    }
+    
+    # Extract the column data
+    col_data <- df[[covariate]]
+    unique_values <- length(unique(col_data))
+    
+    # Check if column contains string representations of boolean values (TRUE/FALSE)
+    if (is.character(col_data) || is.factor(col_data)) {
+      # Check if all values are variations of "TRUE" or "FALSE"
+      possible_boolean_values <- c("TRUE", "FALSE", "True", "False", "true", "false")
+      if (all(col_data %in% possible_boolean_values)) {
+        # Convert to logical type (TRUE/FALSE)
+        col_data <- col_data == "TRUE" | col_data == "True" | col_data == "true"
+        classified_covariates$boolean <- c(classified_covariates$boolean, covariate)
+      } else {
+        classified_covariates$discrete <- c(classified_covariates$discrete, covariate)
+      }
+    } else if (is.logical(col_data)) {
+      classified_covariates$boolean <- c(classified_covariates$boolean, covariate)
+    } else if (is.factor(col_data)) {
+      classified_covariates$discrete <- c(classified_covariates$discrete, covariate)
+    } else if (is.numeric(col_data)) {
+      # Heuristic: Numerical columns with <= 10 unique values are discrete
+      if (unique_values <= 10) {
+        classified_covariates$discrete <- c(classified_covariates$discrete, covariate)
+      } else {
+        classified_covariates$continuous <- c(classified_covariates$continuous, covariate)
+      }
+    } else {
+      # Treat other data types as discrete by default
+      classified_covariates$discrete <- c(classified_covariates$discrete, covariate)
+    }
+  }
+  
+  return(classified_covariates)
+}
+
+
 # PCA
 # Function to plot PCA combinations for a single condition
 plot_pca_for_condition <- function(pca_df, pca_result, condition, default_condition) {

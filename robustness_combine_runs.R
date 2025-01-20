@@ -33,7 +33,7 @@ if (length(args) > 0) {
 } else {
   print("Running interactive mode for development.")
   # Yaml file used for development (often an actual job script)
-  yaml_file <- "EUR_to_ASI_settings.yml"
+  yaml_file <- "PanCanAtlas_RSEM_covariates_subtype_age_EUR_to_EAS.yml"
   # 1. Check if it's a valid yaml file
   # 2. Load the yaml file
   is_yml_file(yaml_file)
@@ -55,7 +55,6 @@ if (length(args) > 0) {
   # Combination of components to create the 'match_pattern'
   # The 'match_pattern' is used as pattern to extract all folders in the vscratch dir
   match_pattern <- paste0(comparison, "_", analysis_name)
-
 }
 
 # Extracting all folders in the 'vscratch_dir_in' that match 'match_pattern'
@@ -106,15 +105,16 @@ summarized_dge <- tibble()
 summarized_ml <- tibble()
 for (prop in setup$proportion) {
   # Filter by proportion
-  filtered_dge <- metric_dge |> filter(proportion == prop)
-  filtered_ml  <- metric_ml |> filter(proportion == prop)
+  filtered_dge <- filter(metric_dge, Proportion == prop)
+  filtered_ml  <- filter(metric_ml, Proportion == prop)
 
   # Perform permutation testing (non-parametric)
   # dge
   p_pearson <- permutation_test(data = filtered_dge, group_col = "Status", value_col = "Pearson")
   p_spearman <- permutation_test(data = filtered_dge, group_col = "Status", value_col = "Spearman")
   # ml
-  p_roc <- permutation_test(data = filtered_ml, group_col = "Status", value_col = "ROC_AUC")
+  p_regression <- permutation_test(data = filtered_ml, group_col = "Status", value_col = "LogisticRegression")
+  p_forest <- permutation_test(data = filtered_ml, group_col = "Status", value_col = "RandomForestClassifier")
 
   # Summarize 'filtered_dge'
   summarized_filtered_dge <- filtered_dge |>
@@ -129,7 +129,7 @@ for (prop in setup$proportion) {
       Prediction, 
       Metric, 
       n_inf_ancestry, 
-      proportion
+      Proportion
     ) |>  
     summarize(
       n_seeds = n(),
@@ -143,17 +143,17 @@ for (prop in setup$proportion) {
     # Summarize 'filtered_ml'
     summarized_filtered_ml <- filtered_ml |>
       pivot_longer(
-        cols = c(ROC_AUC),
+        cols = c(LogisticRegression, RandomForestClassifier),
         values_to = "Value",
-        names_to = "Metric"
+        names_to = "Algorithm"
     ) |> 
       group_by(
         Ancestry, 
         Status,
         Prediction, 
-        Metric, 
+        Algorithm, 
         n_inf_ancestry, 
-        proportion
+        Proportion
       ) |>  
       summarize(
         n_seeds = n(),
@@ -162,7 +162,7 @@ for (prop in setup$proportion) {
         se_value = sd(Value, na.rm = TRUE) / sqrt(n())
       ) |>
       # Add p_value
-      mutate(p_value = p_roc)
+      mutate(p_value = ifelse(Algorithm == "LogisticRegression", p_regression, p_forest))
 
     # Combine data
     summarized_dge <- bind_rows(summarized_dge, summarized_filtered_dge)
@@ -205,7 +205,7 @@ fwrite(summarized_ml, file.path(path_to_save_location, "Summarized_metric_ml.csv
 ggplot_list_dge = list()
 for (prop in setup$proportion) {
   # Filter by proportion
-  filtered_dge <- summarized_dge |> filter(proportion == prop)
+  filtered_dge <- summarized_dge |> filter(Proportion == prop)
 
   # Create lable to showcase number of samples
   n_inf_label <- filtered_dge |>
@@ -271,15 +271,17 @@ for (prop in setup$proportion) {
 # Combine with patchwork 
 combined_dge_plot <- wrap_plots(ggplot_list_dge, ncol = 2)
 # Save the image
-ggsave(filename = "Plot_dge.pdf", plot = combined_dge_plot, 
-       path = path_to_save_location, width = 10, height = 10
+ggsave(filename = "Plot_dge.pdf", 
+       plot = combined_dge_plot, 
+       path = path_to_save_location, 
+       width = 10, height = 10
        )
 
 # ml 
 ggplot_list_ml = list()
 for (prop in setup$proportion) {
   # Filter by proportion
-  filtered_ml <- summarized_ml |> filter(proportion == prop)
+  filtered_ml <- summarized_ml |> filter(Proportion == prop)
 
   # Create lable to showcase number of samples
   n_inf_label <- filtered_ml |>
@@ -316,7 +318,7 @@ for (prop in setup$proportion) {
     ) +
     common_y +
     facet_grid(
-      # rows = vars(Metric),
+      rows = vars(Algorithm),
       col = vars(Ancestry),
       labeller = labeller(Ancestry = as_labeller(n_inf_label), 
                           Metric = label_value)
@@ -345,8 +347,10 @@ for (prop in setup$proportion) {
 # Combine with patchwork 
 combined_ml_plot <- wrap_plots(ggplot_list_ml, ncol = 2)
 # Save the image
-ggsave(filename = "Plot_ml.pdf", plot = combined_ml_plot, 
-       path = path_to_save_location, width = 10, height = 10
+ggsave(filename = "Plot_ml.pdf", 
+       plot = combined_ml_plot, 
+       path = path_to_save_location, 
+       width = 10, height = 10
        )
 
 

@@ -9,7 +9,7 @@ import numpy as np
 # 3. Output path
 molecular_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/RNA/brca_tcga_pan_can_atlas_2018.csv"
 meta_data_path = "data/downloads/cbioportal/rna_studies/tcga_pan_studies_with_rna.csv"
-path_to_save_location = "data/inputs/PanCanAtlas_BRCA_transcriptome_RSEM.h5ad"
+path_to_save_location = "data/inputs/PanCanAtlas_BRCA_RSEM_subtypeNAremoved.h5ad"
 # Load the data
 molecular_data = pd.read_csv(molecular_data_path)
 meta_data = pd.read_csv(meta_data_path)
@@ -39,6 +39,9 @@ columns_to_add = matched_meta_data.columns
 for column in columns_to_add:
     adata.obs[column] = pd.Categorical(matched_meta_data[column])
 
+# Convert age to numeric
+adata.obs["AGE"] = adata.obs["AGE"].cat.codes.astype(int)
+
 # Make all variable names lower case
 adata.obs.columns = map(str.lower, adata.obs.columns)
 # Replace spaces with '_'
@@ -50,6 +53,7 @@ column_mapping = {
     "cancer_type_detailed": "cancer_type_detailed",
     "studyid": "study_id",
     "sampleid": "sample_id",
+    "patientid": "patient_id",
     "cancertype_name": "cancer_type_name",
     "consensus_ancestry": "genetic_ancestry",
     "pooled_consensus_ancestry": "genetic_ancestry",
@@ -59,6 +63,16 @@ column_mapping = {
 }
 
 adata.obs = adata.obs.rename(columns=column_mapping)
+
+# Custom modifications
+# Remove all NAs
+adata = adata[adata.obs.dropna(subset="subtype").index]
+
+# Include subtype_pooled
+adata.obs["subtype_pooled"] = adata.obs["subtype"].apply(
+    lambda x: "basal" if x == "BRCA_Basal" else "non_basal"
+)
+
 
 # Save
 adata.write(path_to_save_location, compression="gzip")

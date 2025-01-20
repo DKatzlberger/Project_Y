@@ -9,8 +9,14 @@ import pickle
 import sys
 import argparse
 
+# Import library
+import importlib
+
 # Subprocess to run R
 import subprocess
+
+# Parellel library
+from joblib import Parallel, delayed
 
 # Machine learning libraries
 from sklearn.model_selection import StratifiedKFold
@@ -54,7 +60,7 @@ compatability = DataValidator(data=data, setup=setup)
 compatability.validate()
 
 # Get European data
-setup.log('Define ancestries')
+setup.log('Define ancestry')
 eur_data = data[data.obs[setup.classification['ancestry_column']] == setup.classification['train_ancestry']]
 
 # Define classification task 
@@ -94,7 +100,7 @@ with open(setup.out(save_str), 'w') as f:
 proportions = [1.0, 0.8, 0.4, 0.3, 0.2, 0.1, 0.05, 0.04, 0.03, 0.02]
 subset_list = sample_by_size(adata=sampling_split, 
                              props=proportions, 
-                             output_column=setup.classification['output_column'],
+                             output_column=setup.classification["output_column"],
                              seed=seed)
 
 # Save all the observations to load in the Rscript
@@ -115,7 +121,7 @@ settings_file = os.path.join(os.getcwd(), setup.output_directory, 'Settings.yml'
 # Uses files from the disk and writes to the disk
 # All files are strored in specified 'output_directory'
 setup.log('DGE')
-R.run_script(script_path=os.path.join(os.getcwd(), 'eur_subsetting.R'),
+R.run_script(script_path=os.path.join(os.getcwd(), 'eur_subsetting_dge.R'),
              args=[settings_file])
 
 # Subset features that are used in DGE
@@ -137,7 +143,6 @@ for subset in subset_list:
 
 # Machine learning
 setup.log('Sklearn data')
-setup.log('Normalization')
 # Encoding for the 'output_column'
 encoder = {}
 for i,j in enumerate(setup.classification['comparison']):
@@ -176,70 +181,131 @@ for i in zip(subset_X, subset_y):
     "Shapes of vectors do not align!"
 
 
-print('Starting machine learning.')
-setup.log('Model setup')
-# Algorithm (focusing on Logisitic Regression)
-algo = LogisticRegression(random_state=seed)
-# Cross-validation for hyperparameter search
-cv_hyp = StratifiedKFold(n_splits=setup.nfolds, shuffle=True, random_state=seed)
-# Search space
-search_space = setup.grid_search
+print("Starting machine learning.")
+setup.log("Machine learning")
+# How many cpus per algorithm
+total_jobs = setup.njobs  # Total jobs allowed
+num_algorithms = len(setup.algorithms)
+jobs_per_algorithm = total_jobs // num_algorithms
+# Settings in pickable form (Setup class is non pickable)
+pickable_settings = setup.return_settings()
 
-setup.log('Start training')
-grid_search = GridSearchCV(estimator=algo, param_grid=search_space,
-                           cv=cv_hyp, scoring='f1_weighted', 
-                           refit=True, n_jobs=setup.njobs
-                           )
+# Training (parallel)
+best_models = Parallel(n_jobs=num_algorithms)(
+    delayed(train_algorithm)(algo_name, pickable_settings, 
+                             constant_X, constant_y, 
+                             jobs_per_algorithm)
+    for algo_name in setup.algorithms
+)
 
-# Training the model
-grid_search.fit(constant_X, constant_y)
+# Evaluation
+metric_algo_list = []
+for algo_name, best_model in zip(setup.algorithms, best_models):
+    if best_model:
+        metric_combined = evaluate_algorithm_eur_subsetting(algo_name, setup, best_model, subset_X, subset_y)
+        metric_algo_list.append(metric_combined)
+    else:
+        print(f"Skipping evaluation for {algo_name} because training failed.")
 
-# Best model
-best_m = grid_search.best_estimator_ # is there a better version getter function
+# Join metric dataframes
+merged_df = metric_algo_list[0]
+# Iterate over the remaining dataframes and merge them
+for df in metric_algo_list[1:]:
+    merged_df = pd.merge(merged_df, df, on=["n_test_ancestry", "Metric"], how="outer")
 
-# Save hyperparameters 
-hyp = pd.DataFrame(grid_search.best_params_, index=[setup.id])
-hyp.to_csv(setup.out('Hyperparameters.csv'), index=False)
+# Add additional information
+merged_df["Ancestry"] = setup.classification['train_ancestry'].upper()
+merged_df["Seed"] = setup.seed
+merged_df["n_train_ancestry"] = constant_split.shape[0]
 
-# Save model
-if setup.save_model:
-    with open(setup.out(f'{setup.id}.pkl'), 'wb') as f:
-        pickle.dump(best_m, f, protocol=pickle.HIGHEST_PROTOCOL) # check if there is a better function
+# Save
+merged_df.to_csv(setup.out('Metric_ml.csv'), index=False)
 
-# Training fisnished
-print(f'Id: {setup.id} finished training.')
 
-# Test the model on all subsets
-setup.log('Testing')
-# Iterate over all X and y
-# 1. Calculate propabilities
-# 2. Calculate metric
-# Initialize lists to store intermediate results
-propabilities_list = []
-metrics_list = []
-for X, y in zip(subset_X, subset_y):
-    # Get predicted probabilities
-    test_y_hat = pd.DataFrame(best_m.predict_proba(X))
-    test_y_hat['y'] = y
-    test_y_hat['n'] = y.shape[0]
-    # Collect probabilities
-    propabilities_list.append(test_y_hat)
 
-    # Calculate metrics
-    props, labels = np.array(test_y_hat.iloc[:, 1]), np.array(test_y_hat['y'])
-    auc = roc_auc_score(y_true=labels, y_score=props)
-    metric = {'ROC_AUC': auc, 'n': y.shape[0]}
-    # Collect metrics
-    metrics_list.append(metric)
+# # Iterate over different algortihms
+# metric_algo_list = list()
+# for algo_name in setup.algorithms:
 
-# Concatenate collected results at once
-propabilities = pd.concat(propabilities_list, ignore_index=True)
-metric_combined = pd.DataFrame(metrics_list)
+#     setup.log(algo_name)
+#     # Load the sklearn class
+#     module_name = "sklearn.linear_model" if "LogisticRegression" in algo_name else "sklearn.ensemble"
+#     algo_class = getattr(importlib.import_module(module_name), algo_name)
+#     # Create instance of the algortihm
+#     algo_instance = algo_class(random_state=setup.seed)
 
-# Add information to the metric dataframe
-metric_combined['Ancestry'] = setup.classification['train_ancestry'].upper()
-metric_combined['Seed'] = setup.seed
+#     # Cross-validation for hyperparameter search
+#     cv_hyp = StratifiedKFold(n_splits=setup.nfolds, shuffle=True, random_state=seed)
+#     # Load the grid_search parameters
+#     search_space = setup.grid_search[algo_name]
 
-# Save both dataframes
-propabilities.to_csv(setup.out('Probabilities.csv'), index=False)
-metric_combined.to_csv(setup.out('Metric_eur_subsetting_ml.csv'), index=False)
+#     setup.log("Training")
+#     # Train with grid search and extract best model
+#     grid_search = GridSearchCV(estimator=algo_instance, param_grid=search_space,
+#                                cv=cv_hyp, scoring='f1_weighted', 
+#                                refit=True, n_jobs=setup.njobs
+#                                )
+#     grid_search.fit(constant_X, constant_y)
+#     best_m = grid_search.best_estimator_ 
+
+#     # Save hyperparameters 
+#     hyp = pd.DataFrame(grid_search.best_params_, index=[setup.id])
+#     hyp.to_csv(setup.out(f"Hyperparameters_{algo_name}.csv"), index=False)
+
+#     # Save model
+#     if setup.save_model:
+#         with open(setup.out(f"{algo_name}_{setup.id}.pkl"), 'wb') as f:
+#             pickle.dump(best_m, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+#     # Training finished
+#     print(f"{algo_name} training done.")
+
+#     # Test the model on all subsets
+#     setup.log('Testing')
+#     # Iterate over all X and y
+#     # 1. Calculate propabilities
+#     # 2. Calculate metric
+#     # Initialize lists to store intermediate results
+#     propability_list = []
+#     metric_list = []
+#     for X, y in zip(subset_X, subset_y):
+#         # Get predicted probabilities
+#         test_y_hat = pd.DataFrame(best_m.predict_proba(X))
+#         test_y_hat["y"] = y
+#         test_y_hat["n_test_ancestry"] = y.shape[0]
+#         # Collect probabilities
+#         propability_list.append(test_y_hat)
+
+#         # Calculate metrics
+#         test_probabilities, test_y = test_y_hat.iloc[:, 1].values, test_y_hat["y"].values
+#         auc = roc_auc_score(y_true=test_y, y_score=test_probabilities)
+#         metric = {algo_name: auc, "n_test_ancestry": y.shape[0], "Metric": "ROC_AUC"}
+#         # Collect metrics
+#         metric_list.append(metric)
+    
+#     # Validation finished
+#     print(f"{algo_name} validation done")
+
+#     # Combine probabilities and save 
+#     propabilities = pd.concat(propability_list, ignore_index=True)
+#     propabilities.to_csv(setup.out(f"Probabilities_{algo_name}.csv"), index=False)
+
+#     # Combine metric and add algo information
+#     metric_combined = pd.DataFrame(metric_list)
+
+#     # Add to algo_list
+#     metric_algo_list.append(metric_combined)
+
+# # Join metric dataframes
+# merged_df = metric_algo_list[0]
+# # Iterate over the remaining dataframes and merge them
+# for df in metric_algo_list[1:]:
+#     merged_df = pd.merge(merged_df, df, on=["n_test_ancestry", "Metric"], how="outer")
+
+# # Add additional information
+# merged_df["Ancestry"] = setup.classification['train_ancestry'].upper()
+# merged_df["Seed"] = setup.seed
+# merged_df["n_train_ancestry"] = constant_split.shape[0]
+
+# # Save
+# merged_df.to_csv(setup.out('Metric_ml.csv'), index=False)

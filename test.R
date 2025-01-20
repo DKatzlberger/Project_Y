@@ -37,16 +37,6 @@ if (length(match_vscratch_dir) == 0) {
   message("No matching folders found.")
 }
 
-# Save the results of the analysis
-# 'vscratch_dir_out' where summarized analysis are stored
-vscratch_dir_out  <- file.path("data", "combined_ancestries")
-path_to_save_location <- file.path(vscratch_dir_out, comparison)
-# Create the directory also parents (if it does not exist)
-# Create directory if it does not exists
-if (!dir.exists(path_to_save_location)) {
-  dir.create(path_to_save_location, recursive = TRUE)
-}
-
 # Combining metric csv files 
 # Each folder is one seed
 metric_dge <- data.frame()
@@ -63,6 +53,9 @@ for (folder in match_vscratch_dir){
     ml_data <- fread(ml_file) 
     metric_ml <- bind_rows(metric_ml, ml_data) 
 }
+# Remove SAS
+metric_dge <- filter(metric_dge, Ancestry != "SAS")
+metric_ml <- filter(metric_ml, Ancestry != "SAS")
 
 # Pvalue correction
 # dge
@@ -149,7 +142,12 @@ for (ancestry in ancestries){
       vjust = 2,   # Align text to the top (since we're using Inf for y)
       hjust = 0,   # Align text to the left (since we're using x = 0.5 for the first bar)
       inherit.aes = FALSE  
-  ) 
+  ) +
+  theme(text = element_text(size = 16),  # Base text size
+        axis.text = element_text(size = 14),  # Axis tick labels
+        axis.title = element_text(size = 16), # Axis titles
+        legend.text = element_text(size = 16),
+        plot.title = element_text(size = 18))
 
   # Add the plot to the list with a unique name
   ggplot_list_dge[[paste0("ancestry_", ancestry)]] <- plot
@@ -158,10 +156,10 @@ for (ancestry in ancestries){
 # Combine with patchwork 
 combined_dge_plot <- wrap_plots(ggplot_list_dge, ncol = 2)
 # Save the image
-ggsave(filename = "Plot_dge.pdf", 
+ggsave(filename = "Plot_dge_combined.pdf", 
        plot = combined_dge_plot, 
-       path = path_to_save_location, 
-       width = 10, height = 10)
+       path = "data/plots", 
+       width = 6, height = 6)
 
 # ml 
 ggplot_list_ml = list()
@@ -223,16 +221,83 @@ for (ancestry in ancestries) {
       vjust = 2,   # Align text to the top (since we're using Inf for y)
       hjust = 0,   # Align text to the left (since we're using x = 0.5 for the first bar)
       inherit.aes = FALSE  
-  ) 
+  ) +
+  theme(text = element_text(size = 16),  # Base text size
+        axis.text = element_text(size = 14),  # Axis tick labels
+        axis.title = element_text(size = 16), # Axis titles
+        legend.text = element_text(size = 16),
+        plot.title = element_text(size = 18))
 
   # Add the plot to the list with a unique name
   ggplot_list_ml[[paste0("ancestry_", ancestry)]] <- plot
 }
 
 # Combine with patchwork 
-combined_ml_plot <- wrap_plots(ggplot_list_ml, ncol = 2)
+combined_ml_plot <- wrap_plots(ggplot_list_ml, ncol = 2) 
+
 # Save the image
-ggsave(filename = "Plot_ml.pdf", 
+ggsave(filename = "Plot_ml_combined.pdf", 
        plot = combined_ml_plot, 
-       path = path_to_save_location, 
-       width = 10, height = 10)
+       path = "data/plots", 
+       width = 6, height = 6)
+
+
+
+
+analysis_suffix <- "interactions"
+match_pattern <- paste0(comparison, ".*", analysis_suffix, "$")
+
+# Extract files
+all_vscratch_dir_in <- list.dirs(vscratch_dir_in, full.names = TRUE, recursive = FALSE)
+match_vscratch_dir <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
+# Print the match folders
+print("Matched folders:")
+print(match_vscratch_dir)
+
+# Check if there were matching folders
+if (length(match_vscratch_dir) == 0) {
+  message("No matching folders found.")
+}
+
+# Combining metric csv files 
+# Each folder is one ancestry
+enrichment <- data.frame()
+for (folder in match_vscratch_dir){
+    enrich_file <- file.path(folder, "FGSEA_enrichment.csv")
+
+    # Load and append DGE data for each seed
+    enrich_data <- fread(enrich_file)  
+    enrichment <- bind_rows(enrichment, enrich_data) 
+}
+
+enrichment_plot <- enrichment |>
+  filter(Database == "MSigDB Hallmark 2020",
+         ranked_by == "logFC",
+         Top10 == TRUE) |>
+  ggplot(
+    aes(
+        x = Ancestry,
+        y = pathway,
+        color = NES,
+        size = -log10(padj)
+    )
+  ) +
+  geom_point() +
+  scale_color_gradient2(high = "red", 
+                        mid = "white", 
+                        low = "blue") +
+    labs(
+      y = "MSigDB Hallmark 2020 gene set",
+      x = "Interactions (with EUR)"
+    ) +
+  theme(text = element_text(size = 16),  # Base text size
+        axis.text = element_text(size = 14),  # Axis tick labels
+        axis.title = element_text(size = 16), # Axis titles
+        legend.text = element_text(size = 16),
+        plot.title = element_text(size = 18),
+        axis.text.x = element_text(angle = 90))
+
+ggsave(filename = "Interaction_enrichment.pdf", 
+       plot = enrichment_plot, 
+       path = "data/plots", 
+       width = 6, height = 6)

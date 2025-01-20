@@ -31,7 +31,7 @@ if (length(args) > 0) {
 } else {
   print("Running interactive mode for development.")
   # Yaml file used for development (often an actual job script)
-  yaml_file <- "EUR_to_ASI_settings.yml"
+  yaml_file <- "PanCanAtlas_RSEM_covariates_subtype_age_EUR_to_EAS.yml"
   # 1. Check if it's a valid yaml file
   # 2. Load the yaml file
   is_yml_file(yaml_file)
@@ -49,11 +49,10 @@ if (length(args) > 0) {
   # This often is modified depending which analysis
   train_ancestry <- toupper(setup$classification$train_ancestry)
   infer_ancestry <- toupper(setup$classification$infer_ancestry)
-  analysis_name  <-  paste0(train_ancestry, "_to_", infer_ancestry)
+  analysis_name  <- paste0(train_ancestry, "_to_", infer_ancestry, "_cross_ancestry")
   # Combination of components to create the 'match_pattern'
   # The 'match_pattern' is used as pattern to extract all folders in the vscratch dir
   match_pattern <- paste0(comparison, "_", analysis_name)
-
 }
 
 # Extracting all folders in the 'vscratch_dir_in' that match 'match_pattern'
@@ -96,6 +95,91 @@ for (folder in match_vscratch_dir){
     ml_data <- fread(ml_file) 
     metric_ml <- bind_rows(metric_ml, ml_data) 
 }
+
+# Similarity of obervations across seeds
+# Load observations
+subset_obs <- data.frame()
+for (folder in match_vscratch_dir){
+
+    obs_test_file <- file.path(folder, "Obs_test.yml")
+
+    # Load and append obs for each seed
+    obs_test_data <- yaml.load_file(obs_test_file)
+    # Seed
+    seed <- sub(".*_(\\d+)$", "\\1", folder)
+    # Make dataframe
+    obs_test_df <- data.frame(Samples = obs_test_data,
+                              Seed = seed)
+    # Combine
+    subset_obs <- bind_rows(subset_obs, obs_test_df)                   
+}
+
+# Group samples by seed
+seeds_samples <- subset_obs |>
+  group_by(Seed) |>
+  summarise(Samples = list(Samples), .groups = "drop")
+
+# Compute pairwise Jaccard indices and overlap coefficients
+pairwise_metrics <- combn(seeds_samples$Samples, 2, function(pair) {
+  intersection <- length(intersect(pair[[1]], pair[[2]]))
+  union <- length(union(pair[[1]], pair[[2]]))
+  min_size <- min(length(pair[[1]]), length(pair[[2]]))
+  
+  jaccard <- intersection / union
+  overlap <- intersection / min_size
+  
+  c(jaccard = jaccard, overlap = overlap)
+}, simplify = FALSE)
+
+# Convert pairwise metrics to a data frame
+metrics_df <- do.call(rbind, pairwise_metrics) |>
+  as.data.frame() |>
+  setNames(c("Jaccard", "Overlap"))
+
+# Compute average Jaccard Index and Overlap Coefficient
+average_jaccard <- mean(metrics_df$Jaccard)
+average_overlap <- mean(metrics_df$Overlap)
+
+# Visualization
+# Correlation axis from 0 to 1
+common_y <- scale_y_continuous(
+    limits = c(0, 1.1), 
+    breaks = c(0, 0.5, 1))
+
+# Create a dataframe for plotting
+metrics_summary <- data.frame(
+  Metric = c("Jaccard Index", "Overlap Coefficient"),
+  Value = c(average_jaccard, average_overlap)
+)
+
+# Plot
+sample_distribution_plot <- metrics_summary |>
+  ggplot(
+    aes(
+      x = Metric,
+      y = Value
+    )
+  ) +
+  geom_col() +
+  common_y + 
+  labs(
+    title = "Average pairwise overlap of subsets across seeds",
+    x = "Metric",
+    y = "Value"
+  ) +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    legend.position = "none"
+  )
+
+# Save
+ggsave(filename = "Observation_overlap_subset.pdf", 
+       plot = sample_distribution_plot, 
+       path = path_to_save_location, 
+       width = 5, height = 5
+       )
+
+
 # Add information to the dataframe
 # comparison = paste0(tag, "_", paste(setup$classification$comparison, collapse = "_vs_"))
 # metric_dge <- metric_dge |> mutate(Comparison = comparison)
@@ -153,7 +237,12 @@ summarized_dge <- metric_dge |>
         values_to = "Value",
         names_to = "Metric"
     ) |> 
-    group_by(Ancestry, Status, Prediction, Metric, n_inf_ancestry) |>  
+    group_by(Ancestry, 
+             Status, 
+             Prediction, 
+             Metric, 
+             n_inf_ancestry
+             ) |>  
     summarize(
       n_seeds = n(),
       mean_value = mean(Value, na.rm = TRUE),
@@ -163,35 +252,32 @@ summarized_dge <- metric_dge |>
   mutate(p_value = ifelse(Metric == "Pearson", p_pearson, p_spearman))
 
 # Machine learning:
-
-# Test difference in distribution of correlated logFC  
-# 1. with Kolmogorow-Smirnow
-# Non-parametric
-# H0: The samples come from the same probability distribution
-# H1: The samples are from different probability distribution
-# ks_roc <- ks_test(data = metric_ml, group_col = "Status", value_col = "ROC_AUC")
-
 # 2. with permutation testing
 # Non-parametric
 # Without assumption
-p_roc <- permutation_test(data = metric_ml, group_col = "Status", value_col = "ROC_AUC")
+p_regression <- permutation_test(data = metric_ml, group_col = "Status", value_col = "LogisticRegression")
+p_forest <- permutation_test(data = metric_ml, group_col = "Status", value_col = "RandomForestClassifier")
 
 # Prepare data format
 summarized_ml <- metric_ml |> 
-    # select(c(Status, Ancestry, Seed, Prediction, ROC_AUC)) |> 
     pivot_longer(
-        cols = c(ROC_AUC),
+        cols = c(LogisticRegression, RandomForestClassifier),
         values_to = "Value",
-        names_to = "Metric"
+        names_to = "Algorithm"
     ) |> 
-    group_by(Ancestry, Status, Prediction, Metric, n_inf_ancestry) |>  
+    group_by(Ancestry, 
+             Status, 
+             Prediction, 
+             Algorithm, 
+             n_inf_ancestry
+             ) |>  
     summarize(
       n_seeds = n(),
       mean_value = mean(Value, na.rm = TRUE),
       sd_value = sd(Value, na.rm = TRUE),
       se_value = sd(Value, na.rm = TRUE) / sqrt(n())
   ) |>
-  mutate(p_value = p_roc)
+  mutate(p_value = ifelse(Algorithm == "LogisticRegression", p_regression, p_forest))
 
 
 # Plot differential gene expression analysis and machine learning
@@ -204,11 +290,6 @@ ancestry_labels <- summarized_dge |>
   mutate(label = paste0(Ancestry, " (n = ", n_inf_ancestry, ")")) |>
   select(Ancestry, label) |>
   deframe()
-
-# Correlation axis from 0 to 1
-common_y <- scale_y_continuous(
-    limits = c(0, 1.1), 
-    breaks = c(0, 0.5, 1))
 
 # Plot of correlation 
 DGE_plot <- summarized_dge |> 
@@ -245,14 +326,17 @@ DGE_plot <- summarized_dge |>
     aes(
       x = 0.5,  # Align text to the left side of the first bar (0.5 is a bit to the left of the first bar)
       y = Inf,  # Position the text at the top of the plot
-      label = paste("Perm. test,", "p =", format(p_value, digits = 3)),  # Add text for the p-value source
+      label = ifelse(
+        is.na(p_value),  
+        paste("Perm. test,", "p = NA"),  
+        paste("Perm. test,", "p =", format(p_value, digits = 3))  # Otherwise, display the p-value
+      )
     ),
     size = 4,    # Adjust text size
     vjust = 2,   # Align text to the top (since we're using Inf for y)
     hjust = 0,   # Align text to the left (since we're using x = 0.5 for the first bar)
     inherit.aes = FALSE  # Don't inherit the default aesthetics
   ) 
-
 
 # Plot of ml
 ML_plot <- summarized_ml |> 
@@ -275,7 +359,7 @@ ML_plot <- summarized_ml |>
     ) +
     common_y +
     facet_grid(
-        # rows = vars(Metric),
+        rows = vars(Algorithm),
         col = vars(Ancestry),
         labeller = labeller(Ancestry = as_labeller(ancestry_labels))
     ) +
@@ -288,7 +372,11 @@ ML_plot <- summarized_ml |>
     aes(
       x = 0.5,  # Align text to the left side of the first bar (0.5 is a bit to the left of the first bar)
       y = Inf,  # Position the text at the top of the plot
-      label = paste("Perm. test,", "p =", format(p_value, digits = 3)),  # Add text for the p-value source
+      label = ifelse(
+        is.na(p_value),  
+        paste("Perm. test,", "p = NA"),  
+        paste("Perm. test,", "p =", format(p_value, digits = 3))  # Otherwise, display the p-value
+      )
     ),
     size = 4,    # Adjust text size
     vjust = 2,   # Align text to the top (since we're using Inf for y)
@@ -305,41 +393,45 @@ fwrite(summarized_dge, file.path(path_to_save_location, "Summarized_metric_dge.c
 fwrite(summarized_ml, file.path(path_to_save_location, "Summarized_metric_ml.csv"))
 # 3. Plots
 # Save the image
-ggsave(filename = "Plot_dge.pdf", plot = DGE_plot, 
-       path = path_to_save_location, width = 5, height = 5
+ggsave(filename = "Plot_dge.pdf", 
+       plot = DGE_plot, 
+       path = path_to_save_location, 
+       width = 5, height = 5
        )
 
-ggsave(filename = "Plot_ml.pdf", plot = ML_plot, 
-       path = path_to_save_location, width = 5, height = 5
+ggsave(filename = "Plot_ml.pdf", 
+       plot = ML_plot, 
+       path = path_to_save_location, 
+       width = 5, height = 5
        )
 
 
 # Combine model weights
 # Read the files 
-combined_weights <- data.frame()
+combined_regression_weights <- data.frame()
+combined_forest_weights <- data.frame()
 for (folder in match_vscratch_dir){
-    weights_file <- file.path(folder, "Weights.csv")
+    regression_file <- file.path(folder, "Feature_importance_LogisticRegression.csv")
+    forest_file <- file.path(folder, "Feature_importance_RandomForestClassifier.csv")
 
-    # Load and append DGE data
-    weights <- fread(weights_file) 
-    combined_weights <- bind_rows(combined_weights, weights) 
+    # Seed information
+    seed <- sub(".*_(\\d+)$", "\\1", folder)
+    seed <- as.numeric(seed)
+
+    # Regression
+    regression_weights <- fread(regression_file) 
+    regression_weights$Seed = seed
+    combined_regression_weights <- bind_rows(combined_regression_weights, regression_weights) 
+
+    # Forest
+    forest_weights <- fread(forest_file) 
+    forest_weights$Seed = seed
+    combined_forest_weights <- bind_rows(combined_forest_weights, forest_weights) 
 }
-# # Take the mean (summarize)
-# summarized_weights = as_tibble(colMeans(combined_weights), rownames = 'Feature')
-
-# # Function to calculate SEM
-# calculate_sem <- function(x) {
-#   return(sd(x) / sqrt(length(x)))  # Standard Error of the Mean (SEM)
-# }
-
-# # Calculate SEM for each column and convert to a tibble
-# sem_weights <- apply(combined_weights, 2, calculate_sem)
-
-# # Add SEM to summarized_weights
-# summarized_weights$se_value <- sem_weights
 
 # Save
-fwrite(combined_weights, file.path(path_to_save_location, "Weights.csv"))
+fwrite(combined_regression_weights, file.path(path_to_save_location, "Feature_importance_LogisticRegression.csv"))
+fwrite(combined_forest_weights, file.path(path_to_save_location, "Feature_importance_RandomForestClassifier.csv"))
 
 
 

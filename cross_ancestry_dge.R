@@ -20,7 +20,7 @@ suppressPackageStartupMessages(
 source("r_utils.R")
 
 # Here starts the script
-print("Evoking R.")
+print("Evoking R...")
 
 # Load command line arguments
 args <- commandArgs(trailingOnly = TRUE)
@@ -36,8 +36,6 @@ if (length(args) > 0) {
   yaml_file <- "dev_settings.yml"
   setup <- yaml.load_file(yaml_file)
 }
-
-print("Start differential gene expression analysis.")
 
 # Set seed (because why not)
 set.seed(setup$seed)
@@ -71,68 +69,70 @@ stopifnot(all(colnames(t(train_data$X)) ==
 inf_adata = adata[adata$obs[setup$classification$ancestry_column] == setup$classification$infer_ancestry]
 inf_adata = inf_adata[inf_adata$obs[[setup$classification$output_column]] %in% setup$classification$comparison]
 inf_adata_obs = inf_adata$obs_names
-stopifnot(all(inf_adata_obs == inf_idx))
+stopifnot(length(inf_adata_obs) == length(inf_idx))
 
 
-# Covariate
+# Covariate:
 # 1. Extract the covariate, if it exists and has a meaningful value
-# 2. Check if covariate is discrete or continues
-covariate <- if ("covariate" %in% names(setup$classification) && 
-                 !is.null(setup$classification$covariate) &&
-                 setup$classification$covariate != "") {
-  setup$classification$covariate
-} else {
-  NULL
-}
+covariate_list <- get_covariate(setup)
+# 2. Check if there are replicates and at least two levels for the covariate 
+if (!is.null(covariate_list)){
+  # Check covariate type
+  print("Checking covariates.")
+  covariate_types <- classify_covariates(train_data$obs, covariate_list)
+  # Check conditions "Discrete"
+  check_covariate_conditions(train_data$obs, covariates = covariate_types$discrete)
+  check_covariate_conditions(test_data$obs, covariates = covariate_types$discrete)
+  check_covariate_conditions(inf_data$obs, covariates = covariate_types$discrete)
 
-if (!is.null(covariate)){
-  # TODO - When age is available check if is continous
-  covariate_type <- check_covariate_type(train_data, covariate = covariate)
-
-  # Check conditions for 'covariate_type'
-  # Discrete:
-  if (covariate_type == "Discrete"){
-    # Possible values of the covariate
-    possible_values <- unique(train_data$obs[[covariate]])
-    # Check conditions
-    # 1. Check values of covariate
-    # 2. Ensure that there are 2 samples per value
-    # 3. The script gets terminated if conditions are not met
-    check_covariate_conditions(train_data, covariate = covariate, possible_values = possible_values)
-    check_covariate_conditions(test_data, covariate = covariate, possible_values = possible_values)
-    
-    # 'inf_data' doesn't change per seed
-    # If conditions don't met they will never met
-    check_covariate_conditions(inf_data, covariate = covariate, possible_values = possible_values)
+  # Visualize
+  if (setup$visual_val){
+  # Visualize all discrete columns
+  to_visualize_columns  <- c(setup$classification$output_column, covariate_types$discrete)
+  # Datasets to visualize
+  datasets <- list(
+  Train = train_data$obs,
+  Test = test_data$obs,
+  `Inf` = inf_data$obs
+    )
+  # Function that creates the plots
+  patchwork_plot <- create_stratification_plot(
+    datasets = datasets,
+    to_visualize_columns = to_visualize_columns
+    )
+  # Save
+  ggsave(
+    filename = "Validation_stratification.pdf",
+    plot = patchwork_plot,
+    path = setup$output_directory,
+    width = 5, height = 5
+    )
   }
-}
+} 
 
 # Create design matrix
 train_design <- create_design(setup$classification$output_column,
                               meta = train_data$obs,
-                              covariate = covariate)                            
+                              covariate = covariate_list)                                                       
 test_design <- create_design(setup$classification$output_column,
                              meta = test_data$obs,
-                             covariate = covariate)
+                             covariate = covariate_list)
 inf_design <- create_design(setup$classification$output_column,
                             meta = inf_data$obs,
-                            covariate = covariate)
+                            covariate = covariate_list)
 
-
-# Create contrast matrix (Only needs to be created once)
-# Used for hypothesis testing between groups
-contrast_matrix <- create_contrast(colnames(train_design))
 
 # Filter genes by expression (Use the train set)
 keeper_genes <- filterByExpr(t(train_data$X), train_design)
-# Subset
+# Subset features
 train_filtered <- train_data[, keeper_genes]
 test_filtered <- test_data[, keeper_genes]
 inf_filtered <- inf_data[, keeper_genes]
 
 # Save feature names (For use in ML)
-write_yaml(train_filtered$var_names,
-           file.path(setup$output_directory, "Features.yml"))
+write_yaml(train_filtered$var_names, 
+           file.path(setup$output_directory, "Features.yml")
+          )
 
 # Assertion: Check array
 # Same genes in all sets
@@ -140,10 +140,8 @@ stopifnot(all(train_data$var_names == test_data$var_names))
 # Dimensions
 stopifnot(table(keeper_genes)[2] == dim(train_filtered$X)[2])
 
-# TODO - DGEList object
-# TODO - CalcNormFactors
-
 # Limma workflow
+print("Start differential gene expression analysis.")
 # Normalization (logCPM)
 train_norm <- voom(t(train_filtered$X), train_design, plot = FALSE)
 test_norm <- voom(t(test_filtered$X), test_design, plot = FALSE)
@@ -173,10 +171,18 @@ fwrite(train_mean_res, file.path(setup$output_directory, "Means_train.csv"))
 fwrite(test_mean_res, file.path(setup$output_directory, "Means_test.csv"))
 fwrite(inf_mean_res, file.path(setup$output_directory, "Means_inf.csv"))
 
+# Create contrast matrix 
+print("Fit contrast matrix.")
+# Used for hypothesis testing between groups
+comparison <- setup$classification$comparison
+contrast_matrix_train <- create_contrast(colnames(train_design), conditions = comparison)
+contrast_matrix_test <- create_contrast(colnames(test_design), conditions = comparison)
+contrast_matrix_inf <- create_contrast(colnames(inf_design), conditions = comparison)
+
 # Fit contrast
-train_limma_fit_contrast <- contrasts.fit(train_limma_fit, contrast_matrix)
-test_limma_fit_contrast <- contrasts.fit(test_limma_fit, contrast_matrix)
-inf_limma_fit_contrast <- contrasts.fit(inf_limma_fit, contrast_matrix)
+train_limma_fit_contrast <- contrasts.fit(train_limma_fit, contrast_matrix_train)
+test_limma_fit_contrast <- contrasts.fit(test_limma_fit, contrast_matrix_test)
+inf_limma_fit_contrast <- contrasts.fit(inf_limma_fit, contrast_matrix_inf)
 
 # Ebayes
 train_limma_fit_contrast <- eBayes(train_limma_fit_contrast)
@@ -195,6 +201,11 @@ fwrite(test_contrast_res,
        file.path(setup$output_directory, "Contrast_test.csv"))
 fwrite(inf_contrast_res,
        file.path(setup$output_directory, "Contrast_inf.csv"))
+
+# Filter coef that are in comparison (only interested in those)
+train_contrast_res <- train_contrast_res |> filter(coef %in% setup$classification$comparison)
+test_contrast_res <- test_contrast_res |> filter(coef %in% setup$classification$comparison)
+inf_contrast_res <- inf_contrast_res |> filter(coef %in% setup$classification$comparison)
 
 # Visualization
 # Check if logFC of models align with signal in the data
@@ -240,6 +251,7 @@ if (setup$visual_val) {
 }
 
 # Calculate metric
+print("Correlation of logFCs")
 # Select and rename logFC columns from each data frame for clarity
 train_log_FC <- train_contrast_res |>
   select(coef, Feature, logFC) |>

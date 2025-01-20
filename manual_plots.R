@@ -14,7 +14,7 @@ suppressPackageStartupMessages(
 )
 
 # Load data
-adata <- read_h5ad("data/inputs/PanCanAtlas_BRCA_transcriptome_RSEM.h5ad")
+adata <- read_h5ad("data/inputs/PanCanAtlas_BRCA_RSEM_subtypeNAremoved.h5ad")
 meta  <- adata$obs
 meta |>
     ggplot(aes(x = cancer_type_detailed)) +

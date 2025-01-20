@@ -5,8 +5,9 @@ suppressPackageStartupMessages(
     library(yaml)
     library(tidyverse)
     library(data.table)
-    # Statistics 
-    library(coin)
+    # Visualization
+    library(patchwork)
+    library(ggrepel)
     }
 )
 # Source custom functions
@@ -22,16 +23,17 @@ if (length(args) > 0) {
   # 2. Load the yaml file
   is_yml_file(yaml_file)
   setup <- yaml.load_file(yaml_file)
+  # Vscratch directory
+  vscratch_dir_in = file.path("data", "runs")
   # When the script is run from the command line then 'output_directory' is given
   # The pattern to extract all matchin directories is extracted from 'output_directory'
   output_path = setup$output_directory
-  match_pattern <- gsub("_\\d+$", "", output_path)
-  # TODO - Check if regular expression also works for other approaches
+  match_pattern <- sub("_\\d+$", "", sub(".*/", "", output_path))
 
 } else {
   print("Running interactive mode for development.")
   # Yaml file used for development (often an actual job script)
-  yaml_file <- "job_settings.yml"
+  yaml_file <- "PanCanAtlas_RSEM_covariates_subtype_age_EUR_to_EAS.yml"
   # 1. Check if it's a valid yaml file
   # 2. Load the yaml file
   is_yml_file(yaml_file)
@@ -70,7 +72,7 @@ if (length(match_vsratch_dir) == 0) {
 # Save the results of the analysis: 'EUR_subsetting'
 # 'Vscratch_dir_out' where summarized analysis are stored
 vscratch_dir_out  <- "data/combined_runs"
-path_to_save_location <- file.path(vscratch_dir_out, comparison, analysis_name)
+path_to_save_location <- file.path(vscratch_dir_out, match_pattern)
 # Create the directory also parents (if it does not exist)
 # Create directory if it does not exists
 if (!dir.exists(path_to_save_location)) {
@@ -82,8 +84,8 @@ if (!dir.exists(path_to_save_location)) {
 metric_dge <- data.frame()
 metric_ml <- data.frame()
 for (folder in match_vsratch_dir){
-    dge_file <- file.path(folder, "Metric_eur_subsetting_dge.csv")
-    ml_file <- file.path(folder, "Metric_eur_subsetting_ml.csv")
+    dge_file <- file.path(folder, "Metric_dge.csv")
+    ml_file <- file.path(folder, "Metric_ml.csv")
 
     # Load and append DGE data for each seed
     dge_data <- fread(dge_file) 
@@ -93,9 +95,6 @@ for (folder in match_vsratch_dir){
     ml_data <- fread(ml_file) 
     metric_ml <- bind_rows(metric_ml, ml_data) 
 }
-
-# Check for outliers
-# TODO - Check for outliers per proportion of the subset using hampel filer 
 
 # Summarize metric across seeds
 # Calculate mean, sd, sem 
@@ -108,39 +107,52 @@ summarized_dge <- metric_dge |>
         names_to = "Metric"
     ) |> 
     # Dont use 'Seed' in 'group_by'
-    group_by(Metric, Ancestry, n) |>  
+    group_by(Metric, 
+             Ancestry, 
+             n_test_ancestry,
+             n_train_ancestry
+    ) |>  
     summarize(
         n_seeds = n(),
         mean_value = mean(Value, na.rm = TRUE),
         sd_value = sd(Value, na.rm = TRUE),
         se_value = sd(Value, na.rm = TRUE) / sqrt(n())
   ) |>
-  mutate(type = "DGE")
+  mutate(Algorithm = "limma")
 
 summarized_ml <- metric_ml |> 
     pivot_longer(
-        cols = ROC_AUC,
+        cols = c(LogisticRegression, RandomForestClassifier),
         values_to = "Value",
-        names_to = "Metric"
+        names_to = "Algorithm"
     ) |> 
     # Dont use 'Seed' in 'group_by'
-    group_by(Metric, Ancestry, n) |>  
+    group_by(Algorithm, 
+             Ancestry, 
+             n_test_ancestry,
+             n_train_ancestry,
+             Metric
+    ) |>  
     summarize(
         n_seeds = n(),
         mean_value = mean(Value, na.rm = TRUE),
         sd_value = sd(Value, na.rm = TRUE),
         se_value = sd(Value, na.rm = TRUE) / sqrt(n())
-  ) |>
-  mutate(type = "ML")
+  )
 
 # Combine DGE and ML 
 # Add 'Metric_Type' column
 combined_metric <- bind_rows(summarized_dge, summarized_ml) |>
-  mutate(Metric_Type = paste(Metric, " (", type, ")", sep = ""),
-         Metric_Type = factor(Metric_Type, 
-                              levels = c("ROC_AUC (ML)", "Pearson (DGE)", "Spearman (DGE)")
-                              )
-        )
+  mutate(Metric_type = paste0(Metric, " (", Algorithm, ")")) |>
+    mutate(
+    Metric_type = factor(Metric_type, 
+                         levels = c(
+                           "ROC_AUC (LogisticRegression)", 
+                           "ROC_AUC (RandomForestClassifier)", 
+                           "Spearman (limma)",
+                           "Pearson (limma)"
+                         ))
+  )
 
 # Save the combined metric
 fwrite(combined_metric, file.path(path_to_save_location, "Combined_metric.csv"))
@@ -149,36 +161,53 @@ fwrite(combined_metric, file.path(path_to_save_location, "Combined_metric.csv"))
 performance_plot <- combined_metric |>
   ggplot(
     aes(
-      x = n,
+      x = n_test_ancestry,
       y = mean_value,
-      color = Metric_Type,
-      group = Metric
+      color = Metric_type
     )
   ) +
-  geom_point() +
+  geom_point(size = 2) +
   geom_line() +
   geom_errorbar(
     aes(
       ymin = mean_value - sd_value, 
       ymax = mean_value + sd_value
       ), 
-    width = 0.2
+    width = 0.1
   ) +
   scale_y_continuous(
     limits = c(0, 1.1),
     breaks = c(0.0, 0.5, 1.0)
   ) +
-  facet_grid(
-    cols = vars(Ancestry)
-  ) + 
   labs(
-    x = "Sample Size (n)",
-    y = "Mean Value",
-    color = "Metric",
-    title = "Performance by sample size"
+    #title = "Performance per sample size",
+    x = "Test sample size (EUR)",
+    y = "Mean value",
+    color = "Method"
   )
 
+train_number_plot <- combined_metric |>
+  head(1) |>
+  ggplot(
+    aes(
+      x = Ancestry,
+      y = n_train_ancestry
+    )
+  ) +
+  geom_col() +
+  labs(
+    x = "Train ancestry",
+    y = "Sample size"
+  )
+
+# Combine plots
+combined_plot <- train_number_plot + performance_plot + plot_layout(widths = c(1, 4)) +
+  plot_annotation(title = "Performance per sample size")
+ 
 # Save
-ggsave(file.path(path_to_save_location, "Performance_by_sample_size.pdf"),
-        plot = performance_plot, height = 5, width = 8)
+ggsave(filename = "Performance_by_sample_size.pdf", 
+       plot = performance_plot, 
+       path = path_to_save_location, 
+       width = 5, height = 5
+       )
 

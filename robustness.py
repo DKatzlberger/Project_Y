@@ -13,8 +13,14 @@ import pickle
 import sys
 import argparse
 
+# Import library
+import importlib
+
 # Subprocess to run R
 import subprocess
+
+# Parellel library
+from joblib import Parallel, delayed
 
 # Machine learning libraries
 from sklearn.model_selection import StratifiedKFold
@@ -42,7 +48,6 @@ else:
     print('Running interactive mode for development.')
 
 # Here starts the script   
-
 
 # Load the settings
 # Don't need setup class?
@@ -109,15 +114,15 @@ proportions = setup.proportion
 # Downsample 'eur_data' by proportion
 setup.log('Downsample data')
 eur_downsampled_list = sample_by_size(adata=eur_data,
-                                     props=proportions,
-                                     output_column=setup.classification['output_column'],
-                                     seed=seed)
+                                      props=proportions,
+                                      output_column=setup.classification['output_column'],
+                                      seed=seed)
 
 # Downsample 'inf_data' by proportion
 inf_downsampled_list = sample_by_size(adata=inf_data,
-                                     props=proportions,
-                                     output_column=setup.classification['output_column'],
-                                     seed=seed)
+                                      props=proportions,
+                                      output_column=setup.classification['output_column'],
+                                      seed=seed)
 
 # Iterate over all downsampled datasets
 # 1. Create EUR-subset based on 'inf_downsampeld'
@@ -126,10 +131,21 @@ for downsampled_data in zip(eur_downsampled_list, inf_downsampled_list):
     eur_downsampled = eur_downsampled_list[downsampled_data[0]]
     inf_downsampled = inf_downsampled_list[downsampled_data[1]]
 
-    # Use class frequency to mimick inferred ancestry
-    freq = inf_downsampled.obs[setup.classification['output_column']].value_counts().to_dict()
+
+    # TODO - Covariant stuff
+    covariate_list = setup.classification.get("covariate", None)
+    if covariate_list:
+        covariate_types = classify_covariates(eur_data.obs, covariates=covariate_list)
+    else:
+        covariate_types = {'continuous': [], 'discrete': []}
+    
+    # Stratify based on output column and discrete covariates
+    to_stratify_columns = [setup.classification["output_column"]] + covariate_types["discrete"]
+    # Create dictionary with frequencies
+    frequencies = inf_downsampled.obs.groupby(to_stratify_columns, observed=False).size().to_dict()
+
     # Create 'train_data' and 'test_data' (EUR-subset)
-    train_data, test_data = stratified_subset(eur_downsampled, freq, setup.classification['output_column'], seed)
+    train_data, test_data = stratified_subset(eur_downsampled, group_columns=to_stratify_columns, freq_dict=frequencies, seed=seed)
     # Get observations 
     train_idx, test_idx, inf_idx = train_data.obs_names, test_data.obs_names, inf_downsampled.obs_names
 
@@ -172,26 +188,25 @@ R.run_script(script_path=os.path.join(os.getcwd(), script),
 
 # Iterate over all proportions and filter data
 setup.log(f"Machine learning")
-robustness_results = list()
+robustness_list = list()
 for prop in setup.proportion:
     # Filter data based on observations and features per proportion
-    prop = str(prop).replace(".", "_")
+    prop_ = str(prop).replace(".", "_")
 
     # Create file names for observations
     obs_file_train = os.path.join(setup.output_directory,
-                                  f"Obs_proportion_{prop}_train.yml")
+                                  f"Obs_proportion_{prop_}_train.yml")
     obs_file_test = os.path.join(setup.output_directory,
-                                 f"Obs_proportion_{prop}_test.yml")
+                                 f"Obs_proportion_{prop_}_test.yml")
     obs_file_inf = os.path.join(setup.output_directory,
-                                f"Obs_proportion_{prop}_inf.yml")
+                                f"Obs_proportion_{prop_}_inf.yml")
     # Load observations
     obs_train = yaml.safe_load(Path(obs_file_train).read_text())
     obs_test = yaml.safe_load(Path(obs_file_test).read_text())
     obs_inf = yaml.safe_load(Path(obs_file_inf).read_text())
 
     # Feature file name
-    feature_file = os.path.join(setup.output_directory,
-                                f"Features_{prop}.yml")
+    feature_file = os.path.join(setup.output_directory,f"Features_{prop_}.yml")
     # Load features
     dge_features = yaml.safe_load(Path(feature_file).read_text())
 
@@ -230,90 +245,165 @@ for prop in setup.proportion:
     assert_str = f'Dimensions of label vector ({train_y.shape[0]}) and feature matrix ({train_X.shape[0]}) do not align.'
     assert train_y.shape[0] == train_X.shape[0], assert_str
 
-    print('Starting machine learning.')
-    # Algorithm (focusing on Logisitic Regression)
-    algo = LogisticRegression(random_state=seed)
-    # Cross-validation for hyperparameter search
-    cv_hyp = StratifiedKFold(n_splits=setup.nfolds, shuffle=True, random_state=seed)
-    # Search space
-    search_space = setup.grid_search
+    print(f"Start machine learning proportion: {prop}")
+    # How many cpus per algorithm
+    total_jobs = setup.njobs  # Total jobs allowed
+    num_algorithms = len(setup.algorithms)
+    jobs_per_algorithm = total_jobs // num_algorithms
+    # Settings in pickable form (Setup class is non pickable)
+    pickable_settings = setup.return_settings()
 
-    # Training
-    grid_search = GridSearchCV(estimator=algo, param_grid=search_space,
-                           cv=cv_hyp, scoring='f1_weighted', 
-                           refit=True, n_jobs=setup.njobs
-                           )
-    # Training the model
-    grid_search.fit(train_X, train_y)
-    # Best model
-    best_m = grid_search.best_estimator_ 
+    # Training (parallel)
+    best_models = Parallel(n_jobs=num_algorithms)(
+        delayed(train_algorithm)(algo_name, pickable_settings, 
+                                 train_X, train_y, 
+                                 jobs_per_algorithm, 
+                                 prop=prop_)
+        for algo_name in setup.algorithms
+    )
 
-    # Save hyperparameters 
-    hyp = pd.DataFrame(grid_search.best_params_, index=[setup.id])
-    hyp.to_csv(setup.out(f'Hyperparameters_{prop}.csv'), index=False)
+    # Evaluation
+    # Feature names for interpretations
+    feature_names = train_data.var_names
+    metric_algo_list = []
+    for algo_name, best_model in zip(setup.algorithms, best_models):
+        if best_model:
+            metric_combined = evaluate_algorithm_robustness(algo_name, best_model, setup, test_X, test_y, inf_X, inf_y, feature_names, prop_)
+            metric_algo_list.append(metric_combined)
+        else:
+            print(f"Skipping evaluation for {algo_name} because training failed.")
 
-    # Save model
-    if setup.save_model:
-        with open(setup.out(f'{setup.id}.pkl'), 'wb') as f:
-            pickle.dump(best_m, f, protocol=pickle.HIGHEST_PROTOCOL)
+    # Join algorithm metric dataframes
+    merged_df = metric_algo_list[0]
+    # Iterate over the remaining dataframes and merge them
+    for df in metric_algo_list[1:]:
+        merged_df = pd.merge(merged_df, df, on=["Status", "Prediction"], how="outer")
 
-    # Validation of the model
-    # Test the model on eur subset
-    test_y_hat = pd.DataFrame(best_m.predict_proba(test_X))
-    # Save propabilities
-    test_y_hat['y'] = test_y
-    test_y_hat.to_csv(setup.out(f'Probabilities_{prop}_test.csv'), index=False)
+    # Add additional information 
+    merged_df = merged_df.assign(
+        Seed=seed,
+        n_inf_ancestry=len(obs_inf),
+        n_train_ancestry=len(obs_train),
+        Proportion=prop,
+        Ancestry=setup.classification["infer_ancestry"].upper()
+    )
 
-    # Test trained model on inferred ancestry 
-    # Trained model predicts inferred ancestry
-    inf_y_hat = pd.DataFrame(best_m.predict_proba(inf_X))
-    inf_y_hat['y'] = inf_y
-    # Save propabilities
-    inf_y_hat.to_csv(setup.out(f'Probabilities_{prop}_inf.csv'), index=False)
+    # Add to list 
+    robustness_list.append(merged_df)
 
-    # Model weights (interpretation)
-    feature_names = train_data.var_names # using train data because features got selected based on DE genes
-    feature_weights = best_m.coef_
-    feature_df = pd.DataFrame(data=feature_weights,
-                            columns=feature_names)
-    feature_df.to_csv(setup.out(f'Weights_{prop}.csv'), index=False)
-
-    # Calculate metric
-    # Test-set
-    props, labels = np.array(test_y_hat.iloc[:, 1]), np.array(test_y_hat['y'])
-    test_auc = roc_auc_score(y_true=labels, y_score=props)
-
-    # Inf-set
-    props, labels = np.array(inf_y_hat.iloc[:, 1]), np.array(inf_y_hat['y'])
-    inf_auc = roc_auc_score(y_true=labels, y_score=props)
-
-    # Metric dataframe
-    test_metric = pd.DataFrame({"ROC_AUC": test_auc,
-                                "Status": "Test",
-                                "Prediction": "Subset"
-                                },
-                                index=[0])
-    
-    inf_metric = pd.DataFrame({"ROC_AUC": inf_auc,
-                               "Status": "Inference",
-                               "Prediction": "Ancestry"
-                               },
-                               index=[0])
-    # Combine
-    metric_df = (pd.concat([test_metric, inf_metric])
-                 .assign(
-                       **{"n_inf_ancestry": len(obs_inf),
-                          "n_train_ancestry": len(obs_train),
-                          "proportion": prop.replace("_", "."),
-                          "Ancestry": setup.classification["infer_ancestry"].upper()
-                          }
-                 ))
-
-    robustness_results.append(metric_df)
-
-# Combine all dataframes and save 
-final_metric_df = pd.concat(robustness_results)
-final_metric_df.to_csv(os.path.join(setup['output_directory'], 'Metric_ml.csv'), index=False)
+# Combine all proportions
+robustness_results = pd.concat(robustness_list)
+# Save
+robustness_results.to_csv(setup.out("Metric_ml.csv"), index=False)
 
 
 
+
+
+
+
+
+
+#     # Loop over algorithms
+#     algo_list = list()
+#     for algo_name in setup.algorithms:
+
+#         setup.log(algo_name)
+#         # Load the sklearn class
+#         module_name = "sklearn.linear_model" if "LogisticRegression" in algo_name else "sklearn.ensemble"
+#         algo_class = getattr(importlib.import_module(module_name), algo_name)
+#         # Create instance of the algortihm
+#         algo_instance = algo_class(random_state=seed)
+
+#         # Cross-validation for hyperparameter search
+#         cv_hyp = StratifiedKFold(n_splits=setup.nfolds, shuffle=True, random_state=seed)
+#         # Load the grid_search parameters
+#         search_space = setup.grid_search[algo_name]
+
+#         setup.log("Training")
+#         # Train with grid search and extract best model
+#         grid_search = GridSearchCV(estimator=algo_instance, param_grid=search_space,
+#                                    cv=cv_hyp, scoring='f1_weighted', 
+#                                    refit=True, n_jobs=setup.njobs
+#                                     )
+#         grid_search.fit(train_X, train_y)
+#         best_m = grid_search.best_estimator_ 
+
+#         # Save hyperparameters 
+#         hyp = pd.DataFrame(grid_search.best_params_, index=[setup.id])
+#         hyp.to_csv(setup.out(f"Hyperparameters_{prop_}_{algo_name}.csv"), index=False)
+
+#         # Save model
+#         if setup.save_model:
+#             with open(setup.out(f"{algo_name}_{prop_}_{setup.id}.pkl"), 'wb') as f:
+#                 pickle.dump(best_m, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+#         # Training finished
+#         print(f"{algo_name} training done.")
+
+#         setup.log("Testing")
+#         # Validate prediction performance on EUR-subset
+#         test_y_hat = pd.DataFrame(best_m.predict_proba(test_X))
+#         test_y_hat["y"] = test_y
+#         # Save propabilities
+#         test_y_hat.to_csv(setup.out(f"Probabilities_{prop_}_{algo_name}_test.csv"), index=False)
+
+#         setup.log("Infering")
+#         # Validate prediction performance on ancestry
+#         inf_y_hat = pd.DataFrame(best_m.predict_proba(inf_X))
+#         inf_y_hat["y"] = inf_y
+#         # Save propabilities
+#         inf_y_hat.to_csv(setup.out(f"Probabilities_{prop_}_{algo_name}_inf.csv"), index=False)
+
+#         # Validation finished
+#         print(f"{algo_name} validation done")
+
+#         setup.log("Model interpretations")
+#         # Extract feature importances
+#         feature_names = train_data.var_names
+#         feature_importance = extract_feature_importance(best_m, feature_names)
+#         # Save feature importances
+#         feature_importance.to_csv(setup.out(f"Feature_importance_{prop_}_{algo_name}.csv"), index=False)
+
+#         # Calculate metric
+#         test_y, test_probabilities = test_y_hat.iloc[:, -1].values, test_y_hat.iloc[:,1].values
+#         inf_y, inf_probabilities = inf_y_hat.iloc[:,-1].values, inf_y_hat.iloc[:,1].values
+
+#         # Calculate ROC AUC
+#         test_auc_score = roc_auc_score(y_true=test_y, y_score=test_probabilities)
+#         inf_auc_score = roc_auc_score(y_true=inf_y, y_score=inf_probabilities)
+
+#         # Prepare data
+#         train_data_metric = {algo_name: test_auc_score, "Status": "Test","Prediction": "Subset"}
+#         inf_data_metric = {algo_name: inf_auc_score, "Status": "Inference","Prediction": "Ancestry"}
+#         # Create metric dataframes
+#         test_metric = pd.DataFrame(train_data_metric,index=[0])
+#         inf_metric = pd.DataFrame(inf_data_metric,index=[0])
+#         # Combine
+#         metric_df = pd.concat([test_metric, inf_metric])
+
+#         # Add to list
+#         algo_list.append(metric_df)
+
+#     # Join algorithm metric dataframes
+#     merged_df = algo_list[0]
+#     # Iterate over the remaining dataframes and merge them
+#     for df in algo_list[1:]:
+#         merged_df = pd.merge(merged_df, df, on=["Status", "Prediction"], how="outer")
+
+#     # Add additional information 
+#     merged_df = merged_df.assign(
+#         Seed=seed,
+#         n_inf_ancestry=len(obs_inf),
+#         n_train_ancestry=len(obs_train),
+#         Proportion=prop,
+#         Ancestry=setup.classification["infer_ancestry"].upper()
+#     )
+
+#     # Add to list 
+#     robustness_list.append(merged_df)
+
+# # Combine all proportions
+# robustness_results = pd.concat(robustness_list)
+# # Save
+# robustness_results.to_csv(setup.out("Metric_ml.csv"), index=False)

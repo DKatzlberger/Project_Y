@@ -47,7 +47,7 @@ set.seed(42)
 # Construction:
 # 'vscratch_dir_out' where summarized analysis are stored
 vscratch_dir_out = "data/combined_runs"
-analysis_name = "EUR_to_EAS_interactions"
+analysis_name = "EUR_to_AMR_interactions"
 
 tag <- setup$tag
 comparison <- paste0(tag, "_", paste(setup$classification$comparison, collapse = "_vs_"))
@@ -66,9 +66,6 @@ adata <- read_h5ad(setup$data_path)
 data <- adata[adata$obs[[setup$classification$output_column]]
               %in% setup$classification$comparison]
 
-# TODO- Quality control with all ancestries maybe              
-
-# Interactions ancestry wise
 # Filter by ancestry 
 to_analyse_ancestries <- c(setup$classification$train_ancestry,
                            setup$classification$infer_ancestry)
@@ -454,6 +451,12 @@ for (database in databases){
     height = 8
   )
 }
+
+# Save fgsea dataframe
+fgsea_enrichment <- fgsea_enrichment |>
+  mutate(Ancestry = toupper(setup$classification$infer_ancestry),
+         Interaction = paste(toupper(train_ancestry), "vs", toupper(setup$classification$infer_ancestry)))
+fwrite(fgsea_enrichment, file.path(path_to_save_location, "FGSEA_enrichment.csv"))
 
 
 # clusterProfiler

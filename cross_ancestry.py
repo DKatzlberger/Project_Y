@@ -15,6 +15,9 @@ import importlib
 # Subprocess to run R
 import subprocess
 
+# Parellel library
+from joblib import Parallel, delayed
+
 # Machine learning libraries
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import GridSearchCV
@@ -45,15 +48,16 @@ else:
 
 # Settings
 setup = Setup(YAML_FILE)
+# TODO - make create output directory a function
+
 with open(setup.out('Settings.yml'), 'w') as f:
     yaml.dump(setup.final_config, f)
 setup.log('Settings done')
 
 
-# Data setup
+# Data loading
 setup.log('Check data compatability')
 data = anndata.read_h5ad(setup.data_path)
-
 
 # Check if defined settings are present in the data
 compatability = DataValidator(data=data, setup=setup)
@@ -89,26 +93,33 @@ counts = inf_data.obs[setup.classification['output_column']].value_counts()
 assert_str = f'For DGE analysis of compared ancestry ({setup.classification['infer_ancestry'].upper()}) at least one replicate per class is needed.'
 assert (counts >= 2).all(), assert_str
 
+
 setup.log('Setting seed')
 # Seed is used to generate different European subsets
 seed = setup.seed
 np.random.seed(seed)
 os.environ['PYTHONHASHSEED'] = str(seed)
 
-setup.log('Create subset')
-# Proportions of output in inferred ancestry
-freq = (inf_data.obs[setup.classification['output_column']]
-        .value_counts()
-        .to_dict()
-        ) 
+
+setup.log("Create subset")
+# Classify covariates
+covariate_list = setup.classification.get("covariate", None)
+if covariate_list:
+    covariate_types = classify_covariates(eur_data.obs, covariates=covariate_list)
+else:
+    covariate_types = {'continuous': [], 'discrete': []}
+
+# Stratify based on output column and discrete covariates
+to_stratify_columns = [setup.classification["output_column"]] + covariate_types["discrete"]
+# Create dictionary with frequencies
+frequencies = inf_data.obs.groupby(to_stratify_columns, observed=False).size().to_dict()
+
 # Split the training data into train and test set (Based on frequency of compared ancestry)
-train_data, test_data = stratified_subset(eur_data, freq, setup.classification['output_column'], seed)
+train_data, test_data = stratified_subset(eur_data, group_columns=to_stratify_columns, freq_dict=frequencies, seed=seed)
 train_idx, test_idx, inf_idx = train_data.obs_names, test_data.obs_names, inf_data.obs_names
 # Assertion: Check for data leackage
 assert_str = f'Data leakage! Observation also occur in the testset.'
 assert not test_idx.isin(train_idx).all(), assert_str
-
-# TODO - Check setup.covariate
 
 # Save the samples that are used in train and test (use the same samples for 'stats')
 # Remaining Europeans
@@ -181,126 +192,29 @@ assert train_y.shape[0] == train_X.shape[0], assert_str
 
 print('Starting machine learning.')
 setup.log('Machine learning')
-# TODO - Use a non linear model e.g. Random Forest
-for algo_name in setup.algorithms:
+# How many cpus per algorithm
+total_jobs = setup.njobs  # Total jobs allowed
+num_algorithms = len(setup.algorithms)
+jobs_per_algorithm = total_jobs // num_algorithms
+# Settings in pickable form (Setup class is non pickable)
+pickable_settings = setup.return_settings()
 
-    setup.log(algo_name)
-    # Load the sklearn class
-    module_name = "sklearn.linear_model" if "LogisticRegression" in algo_name else "sklearn.ensemble"
-    algo_class = getattr(importlib.import_module(module_name), algo_name)
-    # Create instance of the algortihm
-    algo_instance = algo_class(random_state=seed)
+# Training (parallel)
+best_models = Parallel(n_jobs=num_algorithms)(
+    delayed(train_algorithm)(algo_name, pickable_settings, 
+                             train_X, train_y, 
+                             jobs_per_algorithm)
+    for algo_name in setup.algorithms
+)
 
-
-    # Cross-validation for hyperparameter search
-    cv_hyp = StratifiedKFold(n_splits=setup.nfolds, shuffle=True, random_state=seed)
-    # Load the grid_search parameters
-    search_space = setup.grid_search[algo_name]
-
-    setup.log("Training")
-    # Train with grid search and extract best model
-    grid_search = GridSearchCV(estimator=algo_instance, param_grid=search_space,
-                               cv=cv_hyp, scoring='f1_weighted', 
-                               refit=True, n_jobs=setup.njobs
-                               )
-    grid_search.fit(train_X, train_y)
-    best_m = grid_search.best_estimator_ 
-
-    # Save hyperparameters 
-    hyp = pd.DataFrame(grid_search.best_params_, index=[setup.id])
-    hyp.to_csv(setup.out(f"Hyperparameters_{algo_name}.csv"), index=False)
-
-    # Save model
-    if setup.save_model:
-        with open(setup.out(f"{algo_name}_{setup.id}.pkl"), 'wb') as f:
-            pickle.dump(best_m, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-    # Training finished
-    print(f"{algo_name} training done.")
-
-    setup.log("Testing")
-    # Validate prediction performance on EUR-subset
-    test_y_hat = pd.DataFrame(best_m.predict_proba(test_X))
-    test_y_hat["y"] = test_y
-    # Save propabilities
-    test_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_test.csv"), index=False)
-
-    setup.log("Infering")
-    # Validate prediction performance on ancestry
-    inf_y_hat = pd.DataFrame(best_m.predict_proba(inf_X))
-    inf_y_hat["y"] = inf_y
-    # Save propabilities
-    inf_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_inf.csv"), index=False)
-
-    # Validation finished
-    print(f"{algo_name} validation done")
-
-    setup.log("Model interpretations")
-    # Model feature importances
-    feature_names = train_data.var_names
-    feature_importance = extract_feature_importance(best_m, feature_names)
-    # Save
-    feature_importance.to_csv(setup.out(f"Feature_importance_{algo_name}.csv"), index=False)
-
-
-
-
-
-# Algorithm (focusing on Logisitic Regression)
-algo = LogisticRegression(random_state=seed)
-# Cross-validation for hyperparameter search
-cv_hyp = StratifiedKFold(n_splits=setup.nfolds, shuffle=True, random_state=seed)
-# Search space
-search_space = setup.grid_search
-
-setup.log('Start training')
-grid_search = GridSearchCV(estimator=algo, param_grid=search_space,
-                           cv=cv_hyp, scoring='f1_weighted', 
-                           refit=True, n_jobs=setup.njobs
-                           )
-# Training the model
-grid_search.fit(train_X, train_y)
-
-# Best model
-best_m = grid_search.best_estimator_ # is there a better version getter function
-
-# Save hyperparameters 
-hyp = pd.DataFrame(grid_search.best_params_, index=[setup.id])
-hyp.to_csv(setup.out('Hyperparameters.csv'), index=False)
-
-# Save model
-if setup.save_model:
-    with open(setup.out(f'{setup.id}.pkl'), 'wb') as f:
-        pickle.dump(best_m, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-# Training fisnished
-print(f'Id: {setup.id} finished training.')
-
-# Test the model on eur subset
-setup.log('Testing')
-test_y_hat = pd.DataFrame(best_m.predict_proba(test_X))
-# Save propabilities
-test_y_hat['y'] = test_y
-test_y_hat.to_csv(setup.out('Probabilities_test.csv'), index=False)
-
-
-# Test trained model on inferred ancestry 
-setup.log('Inference')
-# Trained model predicts inferred ancestry
-inf_y_hat = pd.DataFrame(best_m.predict_proba(inf_X))
-inf_y_hat['y'] = inf_y
-# Save propabilities
-inf_y_hat.to_csv(setup.out('Probabilities_inf.csv'), index=False)
-
-
-
-# Model weights (interpretation)
-feature_names = train_data.var_names # using train data because features got selected based on DE genes
-feature_weights = best_m.coef_
-feature_df = pd.DataFrame(data=feature_weights,
-                          columns=feature_names)
-feature_df.to_csv(setup.out('Weights.csv'), index=False)
-
+# Evaluation
+# Feature names for interpretations
+feature_names = train_data.var_names
+for algo_name, best_model in zip(setup.algorithms, best_models):
+    if best_model:
+          evaluate_algorithm_cross_ancestry(algo_name, best_model, setup, test_X, test_y, inf_X, inf_y, feature_names)
+    else:
+        print(f"Skipping evaluation for {algo_name} because training failed.")
 
 # Calculate metric
 # Multiclass calculation
@@ -321,3 +235,66 @@ if setup.visual_val:
     R.run_script(script_path=os.path.join(os.getcwd(), 'run_visualization.R'), 
                  args=[settings_file])
 
+
+
+
+# # Loop to train 
+# for algo_name in setup.algorithms:
+
+#     setup.log(algo_name)
+#     # Load the sklearn class
+#     module_name = "sklearn.linear_model" if "LogisticRegression" in algo_name else "sklearn.ensemble"
+#     algo_class = getattr(importlib.import_module(module_name), algo_name)
+#     # Create instance of the algortihm
+#     algo_instance = algo_class(random_state=setup.seed)
+
+
+#     # Cross-validation for hyperparameter search
+#     cv_hyp = StratifiedKFold(n_splits=setup.nfolds, shuffle=True, random_state=setup.seed)
+#     # Load the grid_search parameters
+#     search_space = setup.grid_search[algo_name]
+
+#     setup.log("Training")
+#     # Train with grid search and extract best model
+#     grid_search = GridSearchCV(estimator=algo_instance, param_grid=search_space,
+#                                cv=cv_hyp, scoring='f1_weighted', 
+#                                refit=True, n_jobs=setup.njobs
+#                                )
+#     grid_search.fit(train_X, train_y)
+#     best_m = grid_search.best_estimator_ 
+
+#     # Save hyperparameters 
+#     hyp = pd.DataFrame(grid_search.best_params_, index=[setup.id])
+#     hyp.to_csv(setup.out(f"Hyperparameters_{algo_name}.csv"), index=False)
+
+#     # Save model
+#     if setup.save_model:
+#         with open(setup.out(f"{algo_name}_{setup.id}.pkl"), 'wb') as f:
+#             pickle.dump(best_m, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+#     # Training finished
+#     print(f"{algo_name} training done.")
+
+#     setup.log("Testing")
+#     # Validate prediction performance on EUR-subset
+#     test_y_hat = pd.DataFrame(best_m.predict_proba(test_X))
+#     test_y_hat["y"] = test_y
+#     # Save propabilities
+#     test_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_test.csv"), index=False)
+
+#     setup.log("Infering")
+#     # Validate prediction performance on ancestry
+#     inf_y_hat = pd.DataFrame(best_m.predict_proba(inf_X))
+#     inf_y_hat["y"] = inf_y
+#     # Save propabilities
+#     inf_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_inf.csv"), index=False)
+
+#     # Validation finished
+#     print(f"{algo_name} validation done")
+
+#     setup.log("Model interpretations")
+#     # Extract feature importances
+#     feature_names = train_data.var_names
+#     feature_importance = extract_feature_importance(best_m, feature_names)
+#     # Save feature importances
+#     feature_importance.to_csv(setup.out(f"Feature_importance_{algo_name}.csv"), index=False)

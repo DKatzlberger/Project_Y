@@ -5,47 +5,7 @@ import numpy as np
 import os
 import sys
 # Metric calculation
-import sklearn.metrics as mc
-
-# Functions 
-def binary_metric_score(y_true, y_prob, thresholds=None, metric='accuracy'):
-     
-    metric_functions = {
-        'accuracy': mc.accuracy_score,
-        'f1': mc.f1_score,
-        'roc_auc': mc.roc_auc_score
-    }
-
-    # Check if metric is valid
-    if metric not in metric_functions:
-        raise ValueError("Invalid metric specified. Choose 'accuracy', 'f1' or ''roc_auc.")
-    
-    # Special handling for ROC AUC
-    if metric == 'roc_auc':
-        return mc.roc_auc_score(y_true, y_prob)
-    
-    # Check if thresholds are given
-    if thresholds is None:
-        raise ValueError('Thresholds must be provided for accuracy and F1 score calculations.')
-
-    # Select metric
-    func = metric_functions[metric]
-
-    # Dict for  scores
-    scores = {}
-    for thr in thresholds:
-        # Convert to class labels
-        y_hat = (y_prob >= thr).astype(int)
-
-        # Calculate metric
-        metric = func(y_true, y_hat)
-        scores[thr] = metric
-    
-    return scores
-
-
-# TODO - This is only availabe for binary classification
-# TODO- Make a bit more generalizable
+from sklearn.metrics import roc_auc_score
 
 # Load settings
 if len(sys.argv) > 1:
@@ -59,69 +19,67 @@ else:
         setup = yaml.safe_load(f)
     print('Running interactive mode for development.')
 
+# Here starts the script
 print('Start calculating metric.')
 
-# Test probabilities (European subset)
-test_p = pd.read_csv(os.path.join(setup['output_directory'], 'Probabilities_test.csv'))
-inf_p = pd.read_csv(os.path.join(setup['output_directory'], 'Probabilities_inf.csv'))
+# Vscratch_dir is the place where the files are stored
+vscratch_dir_in = setup["output_directory"]
 
-# Take probabilities for class 1
-test_y, test_p = np.array(test_p.iloc[:,-1]), np.array(test_p.iloc[:,1])
-inf_y, inf_p = np.array(inf_p.iloc[:,-1]), np.array(inf_p.iloc[:,1])
+# Number of samples
+file_path = os.path.join(vscratch_dir_in, "Obs_train.yml")
+with open(file_path, "r") as file:
+    n_train_ancestry = len(yaml.safe_load(file))
 
-# Sample number
-test_n = len(test_y)
-inf_n = len(inf_y)
+file_path = os.path.join(vscratch_dir_in, "Obs_inf.yml")
+with open(file_path, "r") as file:
+    n_inf_ancestry = len(yaml.safe_load(file))
 
-# Thresholds for thr dependent metric (accuracy, f1)
-thr = setup['thresholds'] # only available in default settings
+# Load the propabilities
+metric_list = list()
+for algo_name in setup["algorithms"]:
 
-# Metric calculation
-test_auc = binary_metric_score(test_y, test_p, metric='roc_auc')
-test_acc = binary_metric_score(test_y, test_p, thresholds=thr, metric='accuracy')
-test_f1 = binary_metric_score(test_y, test_p, thresholds=thr, metric='f1')
+    # Names of dataframes
+    test_df = f"Probabilities_{algo_name}_test.csv"
+    inf_df = f"Probabilities_{algo_name}_inf.csv"
 
-inf_auc = binary_metric_score(inf_y, inf_p, metric='roc_auc')
-inf_acc = binary_metric_score(inf_y, inf_p, thresholds=thr, metric='accuracy')
-inf_f1 = binary_metric_score(inf_y, inf_p, thresholds=thr, metric='f1')
+    # Load the propabilities
+    test_probabilities = pd.read_csv(os.path.join(vscratch_dir_in, test_df))
+    inf_probabilities = pd.read_csv(os.path.join(vscratch_dir_in, inf_df))
 
-# Make dataframe
-test_metric = (pd.concat(
-    [pd.DataFrame.from_dict(metric, orient='index', columns=[name])
-     for metric, name in zip([test_acc, test_f1], ['Accuracy', 'F1'])],
-    axis=1
+    # Filter for target/class 1
+    test_y, test_probabilities = test_probabilities.iloc[:,-1].values, test_probabilities.iloc[:,1].values
+    inf_y, inf_probabilities = inf_probabilities.iloc[:,-1].values, inf_probabilities.iloc[:,1].values
+
+    # Calculate ROC AUC
+    test_auc_score = roc_auc_score(y_true=test_y, y_score=test_probabilities)
+    inf_auc_score = roc_auc_score(y_true=inf_y, y_score=inf_probabilities)
+    
+    # Prepare data
+    train_data = {algo_name: test_auc_score, "Status": "Test", "Prediction": "Subset"}
+    inf_data = {algo_name: inf_auc_score, "Status": "Inference", "Prediction": "Ancestry"}
+    # Create metric dataframes
+    test_metric = pd.DataFrame(train_data,index=[0])
+    inf_metric = pd.DataFrame(inf_data,index=[0])
+    # Combine
+    metric_df = pd.concat([test_metric, inf_metric])
+
+    # Add to list
+    metric_list.append(metric_df)
+
+# Join metric dataframes
+merged_df = metric_list[0]
+# Iterate over the remaining dataframes and merge them
+for df in metric_list[1:]:
+    merged_df = pd.merge(merged_df, df, on=["Status", "Prediction"], how="outer")
+
+# Add additional information
+merged_df = merged_df.assign(
+    Seed=setup["seed"],
+    Ancestry=setup["classification"]["infer_ancestry"].upper(),
+    Metric="ROC_AUC",
+    n_inf_ancestry=n_inf_ancestry,
+    n_train_ancestry=n_train_ancestry
 )
-.reset_index(names='Threshold')
-.assign(
-    **{
-    'ROC_AUC': test_auc,
-    'Status': 'Test',
-    'Ancestry': setup['classification']['infer_ancestry'].upper(),  # infer ancestry needed for visualization
-    'Seed': setup['seed']
-    }
-))
 
-inf_metric = (pd.concat(
-    [pd.DataFrame.from_dict(metric, orient='index', columns=[name])
-     for metric, name in zip([inf_acc, inf_f1], ['Accuracy', 'F1'])],
-    axis=1
-)
-.reset_index(names='Threshold')
-.assign(
-    **{
-    'ROC_AUC': inf_auc,
-    'Status': 'Inference',
-    'Ancestry': setup['classification']['infer_ancestry'].upper(),
-    'Seed': setup['seed'],
-    }
-))
-
-# TODO - Combine inf and test
-metric_df = pd.concat([test_metric, inf_metric])
-metric_df['Prediction'] = metric_df['Status'].apply(lambda x: "Subset" if x == "Test" else 'Ancestry')
-# Add samples of ancestry
-metric_df['n_ancestry'] = inf_n
-
-# This Data frame is used in r
-# r_metric = pd.concat([test_metric, inf_metric]).reset_index(drop=True)
-metric_df.to_csv(os.path.join(setup['output_directory'], 'Metric_ml.csv'), index=False)
+# Save
+merged_df.to_csv(os.path.join(setup['output_directory'], 'Metric_ml.csv'), index=False)

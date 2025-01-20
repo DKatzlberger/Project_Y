@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import yaml
 import re
+import math
 
 import uuid
 import time
@@ -10,6 +11,10 @@ from pathlib import Path
 import psutil
 import os
 import subprocess
+import pickle
+import importlib
+from sklearn.model_selection import StratifiedKFold, GridSearchCV
+from sklearn.metrics import roc_auc_score
 
 # Data library
 import anndata as ad
@@ -49,6 +54,10 @@ class Setup(dict):
         required_settings = ['comparison', 'output_column', 'train_ancestry', 'infer_ancestry', 'ancestry_column']
         for i in required_settings:
              assert i in final_config['classification'], f'No {i} in classification but required!'
+        
+        # Check that covariate has to be a list
+        assert "covariate" not in final_config["classification"] or isinstance(final_config["classification"]["covariate"], list), \
+            "If covariate exists, it must be a list."
 
         # Check for classification task
         if len(final_config['classification']['comparison']) > 2:
@@ -117,8 +126,9 @@ class Setup(dict):
                 "\t" + 
                 time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()) + 
                 "\n")
-
-
+    
+    def return_settings(self):
+        return self.final_config
 
 class DataValidator():
     """
@@ -147,7 +157,12 @@ class DataValidator():
         output_column = self.setup['classification']['output_column']
         assert output_column in self.data.obs.columns, \
             f"Output column '{output_column}' not in the data."
-    
+        
+        # Check if there are any NA values 
+        has_na = self.data.obs[output_column].isnull().any()
+        assert not has_na, \
+            f"The covariate column '{output_column}' contains NA values. Please handle missing data before proceeding."
+
     def validate_class_labels(self):
         """
         Check that class labels of comparisons are present in the output column of the data.
@@ -167,6 +182,11 @@ class DataValidator():
         ancestry_column = self.setup['classification']['ancestry_column']
         assert ancestry_column in self.data.obs.columns, \
             f"Ancestry column '{ancestry_column}' not in the data."
+        
+        # Check if there are any NA values 
+        has_na = self.data.obs[ancestry_column].isnull().any()
+        assert not has_na, \
+            f"The covariate column '{ancestry_column}' contains NA values. Please handle missing data before proceeding."
     
     def validate_ancestry(self):
         """
@@ -183,15 +203,27 @@ class DataValidator():
 
     def validate_covariate_column(self):
         """
-        Check if covariate column is present in the data, if specified.
+        Check if covariate column(s) are present in the data, if specified.
+        Check that there are no NA values in the covariate column(s).
         """
         classification_settings = self.setup.get('classification', {})
         
         # Check if 'covariate' is provided in the classification settings
-        covariate = classification_settings.get('covariate')
-        if covariate:  # If covariate is specified
-            assert covariate in self.data.obs.columns, \
-                f"No '{covariate}' column in the data, can't be used as covariate."
+        covariates = classification_settings.get('covariate')
+        if covariates:  # If covariates are specified
+            if not isinstance(covariates, list):
+                covariates = [covariates]  # Ensure it's a list
+            
+            for covariate in covariates:
+                # Check if each covariate column exists in the data
+                assert covariate in self.data.obs.columns, \
+                    f"No '{covariate}' column in the data, can't be used as covariate."
+                
+                # Check if there are any NA values in the covariate column
+                has_na = self.data.obs[covariate].isnull().any()
+                assert not has_na, \
+                    f"The covariate column '{covariate}' contains NA values. Please handle missing data before proceeding."
+
         
     # Function that runs all validate functions
     def validate(self):
@@ -303,21 +335,74 @@ def encode_y(data, dictionary):
     y = np.array(y)
     return y
 
-def stratified_subset(data, proportion, output_column, seed): 
+def classify_covariates(df, covariates):
     """
-    Makes a subset from the training data (usually Europeans) mimicking a given frequency of classes.
-    data: Data in Anndata format.
-    Proportion: Frequences of classes.
-    output_column: On which label to apply.
-    """
-    # Check for correct instances
-    assert isinstance(proportion, dict), f'Proportion needs to be a dictionary'
+    Classifies the given covariates into continuous and discrete groups.
     
-    def get_sample(df, freq, seed):
-        sample_size = freq[df[output_column].iloc[0]]
-        return df.sample(sample_size, replace=False, random_state=seed)
+    Parameters:
+    - df: The DataFrame containing the data.
+    - covariates: List of covariates (column names) to classify.
+    
+    Returns:
+    - A dictionary with two keys: 'continuous' and 'discrete', each containing a list of covariates.
+    """
+    classified_covariates = {'continuous': [], 'discrete': []}
+    
+    for covariate in covariates:
+        if covariate not in df.columns:
+            continue  # Skip covariates not found in the DataFrame
+        
+        col_data = df[covariate]
+        unique_values = col_data.nunique()
+        
+        # Check for categorical dtype
+        if pd.api.types.is_categorical_dtype(col_data):
+            classified_covariates['discrete'].append(covariate)
+        elif np.issubdtype(col_data.dtype, np.number):
+            # Heuristic: Consider numerical columns with few unique values as discrete
+            if unique_values <= 10:  # You can adjust this threshold
+                classified_covariates['discrete'].append(covariate)
+            else:
+                classified_covariates['continuous'].append(covariate)
+        else:
+            # Non-numerical columns (e.g., strings) are discrete
+            classified_covariates['discrete'].append(covariate)
+    
+    return classified_covariates
 
-    idx = data.obs.groupby(output_column, group_keys=False, observed=False).apply(lambda x: get_sample(x,proportion, seed)).index
+
+
+def stratified_subset(data, freq_dict, group_columns, seed):
+    """
+    Sample from the DataFrame based on the provided sample_sizes dictionary.
+    
+    Parameters:
+    - df: DataFrame with the data to sample from.
+    - sample_sizes: Dictionary with the sample sizes for each unique combination of the group_columns.
+    - group_columns: List of column names to group by.
+    
+    Returns:
+    - A DataFrame containing the sampled rows.
+    """
+    
+    # Function to sample based on the provided dictionary
+    def sample_groups(group, sample_sizes, group_columns, seed):
+            # Create a key based on the group columns
+            if len(group_columns) == 1:
+                group_key = group[group_columns[0]].iloc[0]  # Scalar for single-column group
+            else:
+                group_key = tuple(group[col].iloc[0] for col in group_columns)  # Tuple for multi-column group
+            
+            # Get the sample size for this group
+            sample_size = sample_sizes.get(group_key, 0)
+            
+            if sample_size > 0:
+                return group.sample(n=sample_size, replace=False, random_state=seed)  # Sample without replacement
+            else:
+                return pd.DataFrame() 
+
+    # Apply the sampling function to each group based on the dictionary and group_columns
+    idx = data.obs.groupby(group_columns, group_keys=False, observed=False).apply(sample_groups, sample_sizes=freq_dict, group_columns=group_columns, seed=seed).index
     # Check that index is unique
     assert len(idx) == len(idx.unique())
 
@@ -325,7 +410,372 @@ def stratified_subset(data, proportion, output_column, seed):
     test_data = data[data.obs_names.isin(idx)]
     return train_data, test_data
 
-# EUR Subsetting
+
+# def stratified_subset(data, proportion, output_column, seed): 
+#     """
+#     Makes a subset from the training data (usually Europeans) mimicking a given frequency of classes.
+#     data: Data in Anndata format.
+#     Proportion: Frequences of classes.
+#     output_column: On which label to apply.
+#     """
+#     # Check for correct instances
+#     assert isinstance(proportion, dict), f'Proportion needs to be a dictionary'
+    
+#     def get_sample(df, freq, seed):
+#         sample_size = freq[df[output_column].iloc[0]]
+#         return df.sample(sample_size, replace=False, random_state=seed)
+
+#     idx = data.obs.groupby(output_column, group_keys=False, observed=False).apply(lambda x: get_sample(x,proportion, seed)).index
+#     # Check that index is unique
+#     assert len(idx) == len(idx.unique())
+
+#     train_data = data[~data.obs_names.isin(idx)]
+#     test_data = data[data.obs_names.isin(idx)]
+#     return train_data, test_data
+
+def train_algorithm(algo_name, setup, train_X, train_y, available_jobs, prop=None):
+    """
+    Train the model using GridSearchCV and save the model and hyperparameters.
+    All parameters need to be pickable.
+
+    Parameters:
+        algo_name (str): Name of the algorithm to be trained.
+        setup (dict): Dictionary with settings.
+        train_X (np.array): Training feature matrix.
+        train_y (np.array): Training target vector.
+        available_jobs (int): Number of CPUs to use.
+
+    Returns:
+        best_model (sklearn model): The best-trained model from GridSearchCV.
+    """
+    try:
+
+        # Dynamically load the appropriate scikit-learn module based on algorithm name
+        module_name = "sklearn.linear_model" if "LogisticRegression" in algo_name else "sklearn.ensemble"
+        algo_class = getattr(importlib.import_module(module_name), algo_name)
+
+        # Create an instance of the algorithm with the provided random seed
+        algo_instance = algo_class(random_state=setup["seed"])
+
+        # Define cross-validation strategy
+        cv_hyp = StratifiedKFold(n_splits=setup["nfolds"], shuffle=True, random_state=setup["seed"])
+
+        # Load hyperparameter search space for the algorithm
+        search_space = setup["grid_search"][algo_name]
+
+        # Perform hyperparameter tuning using GridSearchCV
+        grid_search_jobs = max(1, math.floor(available_jobs))
+        grid_search = GridSearchCV(
+            estimator=algo_instance,
+            param_grid=search_space,
+            cv=cv_hyp,
+            scoring="f1_weighted",
+            refit=True,
+            n_jobs=grid_search_jobs,  # Parallel jobs for GridSearchCV
+        )
+        grid_search.fit(train_X, train_y)  # Train the model on the training data
+        best_model = grid_search.best_estimator_  # Extract the best model from the grid search
+
+        # Save the best hyperparameters to a CSV file
+        hyp = pd.DataFrame(grid_search.best_params_, index=[setup["id"]])
+        if prop is not None:
+            hyp.to_csv(os.path.join(setup["output_directory"], f"Hyperparameters_{prop}_{algo_name}.csv"), index=False)
+            # Optionally save the trained model to a pickle file
+            if setup["save_model"]:
+                with open(os.path.join(setup["output_directory"], f"{algo_name}_{prop}_{setup["id"]}.pkl"), "wb") as f:
+                    pickle.dump(best_model, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+        else:
+            hyp.to_csv(os.path.join(setup["output_directory"], f"Hyperparameters_{algo_name}.csv"), index=False)
+            # Optionally save the trained model to a pickle file
+            if setup["save_model"]:
+                with open(os.path.join(setup["output_directory"], f"{algo_name}_{setup["id"]}.pkl"), "wb") as f:
+                    pickle.dump(best_model, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+        # Training complete
+        print(f"{algo_name} training done.")
+        return best_model
+
+    except Exception as e:
+        # Handle and log any exceptions that occur during training
+        print(f"Error occurred during training for {algo_name}: {e}")
+        return None
+    
+
+def evaluate_algorithm_cross_ancestry(algo_name, best_model, setup, test_X, test_y, inf_X, inf_y, feature_names):
+    """
+    Evaluate the trained model on test and inference datasets, saving results and feature importances.
+
+    Parameters:
+        algo_name (str): Name of the algorithm being evaluated.
+        setup (object): Custom setup object containing configuration like grid search, output paths, and seeds.
+        best_model (sklearn model): The trained model to be evaluated.
+        test_X (np.array): Test feature matrix.
+        test_y (np.array): Test target vector.
+        inf_X (np.array): Inference feature matrix for a separate subset.
+        inf_y (np.array): Inference target vector.
+        feature_names (list): List of feature names.
+
+    Returns:
+        None
+    """
+    try:
+        # Log the start of testing
+        setup.log("Testing")
+
+        # Generate predictions on the test set and save probabilities
+        test_y_hat = pd.DataFrame(best_model.predict_proba(test_X))
+        test_y_hat["y"] = test_y
+        test_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_test.csv"), index=False)
+
+        # Log the start of inference
+        setup.log("Infering")
+
+        # Generate predictions on the inference set and save probabilities
+        inf_y_hat = pd.DataFrame(best_model.predict_proba(inf_X))
+        inf_y_hat["y"] = inf_y
+        inf_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_inf.csv"), index=False)
+
+        # Inference complete
+        print(f"{algo_name} validation done.")
+
+        # Log the start of model interpretation
+        setup.log("Model interpretations")
+
+        # Extract feature importances (if supported by the model)
+        feature_importance = extract_feature_importance(best_model, feature_names)
+
+        # Save feature importances to a CSV file
+        feature_importance.to_csv(setup.out(f"Feature_importance_{algo_name}.csv"), index=False)
+
+    except Exception as e:
+        # Handle and log any exceptions that occur during evaluation
+        print(f"Error occurred during evaluation for {algo_name}: {e}")
+
+
+def evaluate_algorithm_eur_subsetting(algo_name, setup, best_model, subset_X, subset_y):
+    """
+    Evaluate the trained model on test subsets and return probabilities and metrics.
+    """
+    try:
+        propability_list = []
+        metric_list = []
+        
+        # Iterate over all subsets (X, y)
+        for X, y in zip(subset_X, subset_y):
+            # Get predicted probabilities
+            test_y_hat = pd.DataFrame(best_model.predict_proba(X))
+            test_y_hat["y"] = y
+            test_y_hat["n_test_ancestry"] = y.shape[0]
+            
+            # Collect probabilities
+            propability_list.append(test_y_hat)
+
+            # Calculate metrics
+            test_probabilities, test_y = test_y_hat.iloc[:, 1].values, test_y_hat["y"].values
+            auc = roc_auc_score(y_true=test_y, y_score=test_probabilities)
+            metric = {algo_name: auc, "n_test_ancestry": y.shape[0], "Metric": "ROC_AUC"}
+            
+            # Collect metrics
+            metric_list.append(metric)
+
+        # Combine probabilities and save
+        propabilities = pd.concat(propability_list, ignore_index=True)
+        propabilities.to_csv(setup.out(f"Probabilities_{algo_name}.csv"), index=False)
+
+        # Combine metric and add algo information
+        metric_combined = pd.DataFrame(metric_list)
+
+        # Finished validation
+        print(f"{algo_name} validation done.")
+
+        return metric_combined
+    
+    except Exception as e:
+        print(f"Error occurred during evaluation for {algo_name}: {e}")
+
+
+
+def evaluate_algorithm_robustness(algo_name, best_model, setup, test_X, test_y, inf_X, inf_y, feature_names, prop):
+    """
+    Evaluate the trained model, save probabilities, calculate metrics, and return results.
+    """
+    try:
+        setup.log("Testing")
+        # Testing on the test set
+        test_y_hat = pd.DataFrame(best_model.predict_proba(test_X))
+        test_y_hat["y"] = test_y
+        test_y_hat.to_csv(setup.out(f"Probabilities_{prop}_{algo_name}_test.csv"), index=False)
+
+        setup.log("Infering")
+        # Testing on the inference set
+        inf_y_hat = pd.DataFrame(best_model.predict_proba(inf_X))
+        inf_y_hat["y"] = inf_y
+        inf_y_hat.to_csv(setup.out(f"Probabilities_{prop}_{algo_name}_inf.csv"), index=False)
+
+        print(f"{algo_name} validation done.")
+        
+        # Feature importance extraction
+        setup.log("Model interpretations")
+        feature_importance = extract_feature_importance(best_model, feature_names)
+        feature_importance.to_csv(setup.out(f"Feature_importance_{prop}_{algo_name}.csv"), index=False)
+
+        # Calculate metrics
+        test_probabilities, test_y = test_y_hat.iloc[:, 1].values, test_y_hat["y"].values
+        inf_probabilities, inf_y = inf_y_hat.iloc[:, 1].values, inf_y_hat["y"].values
+
+        # Calculate AUC scores
+        test_auc_score = roc_auc_score(y_true=test_y, y_score=test_probabilities)
+        inf_auc_score = roc_auc_score(y_true=inf_y, y_score=inf_probabilities)
+
+        # Prepare dataframes for metrics
+        train_data_metric = {algo_name: test_auc_score, "Status": "Test", "Prediction": "Subset"}
+        inf_data_metric = {algo_name: inf_auc_score, "Status": "Inference", "Prediction": "Ancestry"}
+        
+        # Combine metrics
+        test_metric = pd.DataFrame(train_data_metric, index=[0])
+        inf_metric = pd.DataFrame(inf_data_metric, index=[0])
+        metric_df = pd.concat([test_metric, inf_metric])
+
+        return metric_df
+
+    except Exception as e:
+        print(f"Error occurred during evaluation for {algo_name}: {e}")
+
+
+# def run_algorithm(algo_name, setup, train_X, train_y, test_X, test_y, inf_X, inf_y, feature_names, available_jobs):
+#     """
+#     Train, validate, and save results for a given algorithm in parallel.
+
+#     Parameters:
+#         algo_name (str): Name of the algorithm to be used (e.g., 'LogisticRegression').
+#         setup (object): Custom setup object containing configuration like grid search, output paths, and seeds.
+#         train_X (np.array): Training feature matrix.
+#         train_y (np.array): Training target vector.
+#         test_X (np.array): Test feature matrix.
+#         test_y (np.array): Test target vector.
+#         inf_X (np.array): Inference feature matrix for a separate subset.
+#         inf_y (np.array): Inference target vector.
+#         feature_names (list): List of feature names.
+#         available_jobs (int): Number of cpus to use.
+
+#     Returns:
+#         None
+#     """
+#     try:
+#         # Log the algorithm being processed
+#         setup.log(algo_name)
+
+#         # Dynamically load the appropriate scikit-learn module based on algorithm name
+#         module_name = "sklearn.linear_model" if "LogisticRegression" in algo_name else "sklearn.ensemble"
+#         algo_class = getattr(importlib.import_module(module_name), algo_name)
+
+#         # Create an instance of the algorithm with the provided random seed
+#         algo_instance = algo_class(random_state=setup.seed)
+
+#         # Define cross-validation strategy
+#         cv_hyp = StratifiedKFold(n_splits=setup.nfolds, shuffle=True, random_state=setup.seed)
+
+#         # Load hyperparameter search space for the algorithm
+#         search_space = setup.grid_search[algo_name]
+
+#         # Log the start of training
+#         setup.log("Training")
+
+#         # Perform hyperparameter tuning using GridSearchCV
+#         grid_search_jobs = max(1, math.floor(available_jobs))
+#         grid_search = GridSearchCV(
+#             estimator=algo_instance,
+#             param_grid=search_space,
+#             cv=cv_hyp,
+#             scoring="f1_weighted",
+#             refit=True,
+#             n_jobs=grid_search_jobs,  # Parallel jobs for GridSearchCV
+#         )
+#         grid_search.fit(train_X, train_y)  # Train the model on the training data
+#         best_m = grid_search.best_estimator_  # Extract the best model from the grid search
+
+#         # Save the best hyperparameters to a CSV file
+#         hyp = pd.DataFrame(grid_search.best_params_, index=[setup.id])
+#         hyp.to_csv(setup.out(f"Hyperparameters_{algo_name}.csv"), index=False)
+
+#         # Optionally save the trained model to a pickle file
+#         if setup.save_model:
+#             with open(setup.out(f"{algo_name}_{setup.id}.pkl"), "wb") as f:
+#                 pickle.dump(best_m, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+#         # Training complete
+#         print(f"{algo_name} training done.")
+
+#         # Log the start of testing
+#         setup.log("Testing")
+
+#         # Generate predictions on the test set and save probabilities
+#         test_y_hat = pd.DataFrame(best_m.predict_proba(test_X))
+#         test_y_hat["y"] = test_y
+#         test_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_test.csv"), index=False)
+
+#         # Log the start of inference
+#         setup.log("Infering")
+
+#         # Generate predictions on the inference set and save probabilities
+#         inf_y_hat = pd.DataFrame(best_m.predict_proba(inf_X))
+#         inf_y_hat["y"] = inf_y
+#         inf_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_inf.csv"), index=False)
+
+#         # Inference complete
+#         print(f"{algo_name} validation done.")
+
+#         # Log the start of model interpretation
+#         setup.log("Model interpretations")
+
+#         # Extract feature importances (if supported by the model)
+#         feature_importance = extract_feature_importance(best_m, feature_names)
+
+#         # Save feature importances to a CSV file
+#         feature_importance.to_csv(setup.out(f"Feature_importance_{algo_name}.csv"), index=False)
+
+#     except Exception as e:
+#         # Handle and log any exceptions that occur during the process
+#         print(f"Error occurred while processing {algo_name}: {e}")
+
+
+
+# A function to extract feature importance
+def extract_feature_importance(model, feature_names):
+    """
+    Extract feature importance from a given model.
+    
+    Parameters:
+        model: Trained sklearn model
+        feature_names: List of feature names (columns)
+    
+    Returns:
+        DataFrame with feature importance scores
+    """
+    if hasattr(model, "feature_importances_"):  # Tree-based models
+        importance = model.feature_importances_
+    elif hasattr(model, "coef_"):  # Linear models
+        importance = model.coef_.flatten()
+    else:
+        raise ValueError(f"Model {type(model).__name__} does not support feature importance extraction.")
+    
+    # Normalize importance scores to sum to 1 (optional)
+    importance = importance / np.sum(importance)
+    
+    # Create a DataFrame for readability
+    importance_df = pd.DataFrame({
+        "Feature": feature_names,
+        "Importance": importance
+    }).sort_values(by="Importance", ascending=False)
+    
+    return importance_df
+
+
+
+
+
+# EUR Subsetting / Robustness
 def sample_by_size(adata, props, seed, output_column):
     # Set seed for reproducibility
     np.random.seed(seed)  
@@ -369,36 +819,6 @@ def sample_by_size(adata, props, seed, output_column):
     
     return samples
 
-
-# Afunction to extract feature importance
-def extract_feature_importance(model, feature_names):
-    """
-    Extract feature importance from a given model.
-    
-    Parameters:
-        model: Trained sklearn model
-        feature_names: List of feature names (columns)
-    
-    Returns:
-        DataFrame with feature importance scores
-    """
-    if hasattr(model, "feature_importances_"):  # Tree-based models
-        importance = model.feature_importances_
-    elif hasattr(model, "coef_"):  # Linear models
-        importance = model.coef_
-    else:
-        raise ValueError(f"Model {type(model).__name__} does not support feature importance extraction.")
-    
-    # Normalize importance scores to sum to 1 (optional)
-    importance = importance / np.sum(importance)
-    
-    # Create a DataFrame for readability
-    importance_df = pd.DataFrame({
-        "Feature": feature_names,
-        "Importance": importance
-    }).sort_values(by="Importance", ascending=False)
-    
-    return importance_df
 
 
 
