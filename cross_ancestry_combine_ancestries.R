@@ -21,7 +21,7 @@ vscratch_dir_in = file.path("data", "combined_runs")
 # 2. With 'match_pattern' extract matching folders
 
 # Create pattern
-comparison <- "PanCanAtlas_Breast_Invasive_Ductal_Carcinoma_vs_Breast_Invasive_Lobular_Carcinoma"
+comparison <- "PanCanAtlas_RSEM_basal_vs_non_basal"
 analysis_suffix <- "cross_ancestry"
 match_pattern <- paste0(comparison, ".*", analysis_suffix, "$")
 
@@ -55,13 +55,25 @@ for (folder in match_vscratch_dir){
     dge_file <- file.path(folder, "Summarized_metric_dge.csv")
     ml_file <- file.path(folder, "Summarized_metric_ml.csv")
 
-    # Load and append DGE data for each seed
-    dge_data <- fread(dge_file) 
-    metric_dge <- bind_rows(metric_dge, dge_data) 
+    # Check if files exists
+    if (file.exists(dge_file)) {
+      # Read data
+      dge_data <- fread(dge_file)
+      # Append data
+      metric_dge <- bind_rows(metric_dge, dge_data)
+    } else {
+      warning("File does not exist: ", dge_file)
+    }
 
-    # Load and append ML data for each seed
-    ml_data <- fread(ml_file) 
-    metric_ml <- bind_rows(metric_ml, ml_data) 
+    # Check if file exists
+    if (file.exists(ml_file)) {
+      # Read data
+      ml_data <- fread(ml_file)
+      # Append data
+      metric_ml <- bind_rows(metric_ml, ml_data)
+    } else {
+      warning("File does not exist: ", ml_file)
+    }
 }
 
 # Pvalue correction
@@ -86,10 +98,11 @@ metric_ml <- metric_ml |>
    mutate(p_adjusted = p_adjusted_named_ml[as.character(p_value)])
 
 # Save the metric data frames
-fwrite(metric_dge, file.path(path_to_save_location, "Metric_dge.csv"))
-fwrite(metric_ml, file.path(path_to_save_location, "Metric_ml.csv"))
+fwrite(metric_dge, file.path(path_to_save_location, "Summarized_metric_dge.csv"))
+fwrite(metric_ml, file.path(path_to_save_location, "Summarized_metric_ml.csv"))
 
 # Visualization:
+# Bar plots
 ancestries <- unique(metric_dge$Ancestry)
 # dge
 ggplot_list_dge = list()
@@ -98,8 +111,8 @@ for (ancestry in ancestries){
   # Create lable to showcase number of samples
   n_inf_label <- filtered_metric |>
     ungroup() |>  
-    distinct(Ancestry, n_ancestry) |>
-    mutate(label = paste0(Ancestry, " (n = ", n_ancestry, ")")) |>
+    distinct(Ancestry, n_inf_ancestry) |>
+    mutate(label = paste0(Ancestry, " (n = ", n_inf_ancestry, ")")) |>
     select(Ancestry, label) |>
     deframe()
 
@@ -143,7 +156,7 @@ for (ancestry in ancestries){
       aes(
         x = 0.5,  # Align text to the left side of the first bar (0.5 is a bit to the left of the first bar)
         y = Inf,  # Position the text at the top of the plot
-        label = paste("Perm. test,", "p =", format(p_adjusted, digits = 3))
+        label = paste("Perm. test,", "p.adj =", format(p_adjusted, digits = 3))
         ),
       size = 4,    
       vjust = 2,   # Align text to the top (since we're using Inf for y)
@@ -156,12 +169,13 @@ for (ancestry in ancestries){
 }
 
 # Combine with patchwork 
-combined_dge_plot <- wrap_plots(ggplot_list_dge, ncol = 2)
+combined_dge_bar_plot <- wrap_plots(ggplot_list_dge, ncol = 2) 
+
 # Save the image
-ggsave(filename = "Plot_dge.pdf", 
-       plot = combined_dge_plot, 
+ggsave(filename = "Plot_bar_dge.pdf", 
+       plot = combined_dge_bar_plot, 
        path = path_to_save_location, 
-       width = 10, height = 10)
+       width = 8, height = 8)
 
 # ml 
 ggplot_list_ml = list()
@@ -171,8 +185,8 @@ for (ancestry in ancestries) {
   # Create lable to showcase number of samples
   n_inf_label <- filtered_metric |>
     ungroup() |>  
-    distinct(Ancestry, n_ancestry) |>
-    mutate(label = paste0(Ancestry, " (n = ", n_ancestry, ")")) |>
+    distinct(Ancestry, n_inf_ancestry) |>
+    mutate(label = paste0(Ancestry, " (n = ", n_inf_ancestry, ")")) |>
     select(Ancestry, label) |>
     deframe()
   
@@ -203,10 +217,10 @@ for (ancestry in ancestries) {
     ) +
     common_y +
     facet_grid(
-      # rows = vars(Metric),
+      rows = vars(Algorithm),
       col = vars(Ancestry),
       labeller = labeller(Ancestry = as_labeller(n_inf_label), 
-                          Metric = label_value)
+                          Algorithm = label_value)
     ) +
     labs(
         # title = paste(gsub("_", " ", comparison)),
@@ -217,7 +231,7 @@ for (ancestry in ancestries) {
       aes(
         x = 0.5,  # Align text to the left side of the first bar (0.5 is a bit to the left of the first bar)
         y = Inf,  # Position the text at the top of the plot
-        label = paste("Perm. test,", "p =", format(p_adjusted, digits = 3))
+        label = paste("Perm. test,", "p.adj =", format(p_adjusted, digits = 3))
         ),
       size = 4,    
       vjust = 2,   # Align text to the top (since we're using Inf for y)
@@ -230,9 +244,175 @@ for (ancestry in ancestries) {
 }
 
 # Combine with patchwork 
-combined_ml_plot <- wrap_plots(ggplot_list_ml, ncol = 2)
+combined_ml_bar_plot <- wrap_plots(ggplot_list_ml, ncol = 2)
 # Save the image
-ggsave(filename = "Plot_ml.pdf", 
-       plot = combined_ml_plot, 
+ggsave(filename = "Plot_bar_ml.pdf", 
+       plot = combined_ml_bar_plot, 
        path = path_to_save_location, 
-       width = 10, height = 10)
+       width = 8, height = 8)
+
+
+
+# Density
+metric_dge <- data.frame()
+metric_ml <- data.frame()
+for (folder in match_vscratch_dir){
+    dge_file <- file.path(folder, "Metric_dge.csv")
+    ml_file <- file.path(folder, "Metric_ml.csv")
+
+    # Check if files exists
+    if (file.exists(dge_file)) {
+      # Read data
+      dge_data <- fread(dge_file)
+      # Append data
+      metric_dge <- bind_rows(metric_dge, dge_data)
+    } else {
+      warning("File does not exist: ", dge_file)
+    }
+
+    # Check if file exists
+    if (file.exists(ml_file)) {
+      # Read data
+      ml_data <- fread(ml_file)
+      # Append data
+      metric_ml <- bind_rows(metric_ml, ml_data)
+    } else {
+      warning("File does not exist: ", ml_file)
+    }
+}
+
+# Save the metric data frames
+fwrite(metric_dge, file.path(path_to_save_location, "Metric_dge.csv"))
+fwrite(metric_ml, file.path(path_to_save_location, "Metric_ml.csv"))
+
+
+# Visualization:
+# Density plots
+ancestries <- unique(metric_dge$Ancestry)
+# dge
+ggplot_list_dge = list()
+for (ancestry in ancestries){
+  filtered_metric <- filter(metric_dge, Ancestry == ancestry)
+  # Create lable to showcase number of samples
+  n_inf_label <- filtered_metric |>
+    ungroup() |>  
+    distinct(Ancestry, n_inf_ancestry) |>
+    mutate(label = paste0(Ancestry, " (n = ", n_inf_ancestry, ")")) |>
+    select(Ancestry, label) |>
+    deframe()
+  
+  # Correlation axis from 0 to 1
+  common_x <- scale_x_continuous(
+    limits = c(0.5, 1.2), 
+    breaks = c(0.5, 1))
+
+  # Plot
+  plot <- filtered_metric |>
+    pivot_longer(
+    cols = c(Pearson, Spearman), 
+    names_to = "Metric", 
+    values_to = "Value"
+    ) |>
+    ggplot(
+      aes(
+        x = Value,
+        fill = fct_rev(Prediction)
+      )
+    ) +
+    geom_density(
+      alpha = 0.5
+    ) +
+    common_x +
+    facet_grid(
+      rows = vars(Metric),
+      col = vars(Ancestry),
+      labeller = labeller(Ancestry = as_labeller(ancestry_labels), 
+                          Metric = label_value),
+      scales = "free"
+    ) +
+    labs(
+      x = "Correlation coefficient",
+      y = "Density",
+      fill = "Prediction"
+    ) +
+    theme(
+      legend.position = "bottom",
+      legend.direction = "horizontal"
+    )
+  
+  # Add the plot to the list with a unique name
+  ggplot_list_dge[[paste0("ancestry_", ancestry)]] <- plot
+}
+# Combine with patchwork 
+combined_dge_density_plot <- wrap_plots(ggplot_list_dge, ncol = 2)
+# Save the plot
+ggsave(filename = "Plot_density_dge.pdf", 
+       plot = combined_dge_density_plot, 
+       path = path_to_save_location, 
+       width = 8, height = 8)
+
+
+
+# ml
+ggplot_list_ml = list()
+for (ancestry in ancestries){
+  filtered_metric <- filter(metric_ml, Ancestry == ancestry)
+  # Create lable to showcase number of samples
+  n_inf_label <- filtered_metric |>
+    ungroup() |>  
+    distinct(Ancestry, n_inf_ancestry) |>
+    mutate(label = paste0(Ancestry, " (n = ", n_inf_ancestry, ")")) |>
+    select(Ancestry, label) |>
+    deframe()
+  
+  # Correlation axis from 0 to 1
+  common_x <- scale_x_continuous(
+    limits = c(0.5, 1.2), 
+    breaks = c(0.5, 1))
+
+  # Plot
+  plot <- filtered_metric |>
+    pivot_longer(
+      cols = c(LogisticRegression, RandomForestClassifier), 
+      names_to = "Algorithm", 
+      values_to = "Value"
+    ) |>
+    mutate(
+      Value = Value + rnorm(n(), mean = 0, sd = 0.01) # Adding small random noise
+    ) |>
+    ggplot(
+      aes(
+        x = Value,
+        fill = fct_rev(Prediction)
+      )
+    ) +
+    geom_density(
+      alpha = 0.5
+    ) +
+    common_x +
+    facet_grid(
+      rows = vars(Algorithm),
+      col = vars(Ancestry),
+      labeller = labeller(Ancestry = as_labeller(n_inf_label)),
+      scales = "free"
+    ) +
+    labs(
+      x = "ROC AUC",
+      y = "Density",
+      fill = "Prediction"
+    ) +
+    theme(
+      legend.position = "bottom",
+      legend.direction = "horizontal"
+    )
+  
+  # Add the plot to the list with a unique name
+  ggplot_list_ml[[paste0("ancestry_", ancestry)]] <- plot
+}
+# Combine with patchwork 
+combined_ml_density_plot <- wrap_plots(ggplot_list_ml, ncol = 2)
+# Save the plot
+ggsave(filename = "Plot_density_ml.pdf", 
+       plot = combined_ml_density_plot, 
+       path = path_to_save_location, 
+       width = 8, height = 8)

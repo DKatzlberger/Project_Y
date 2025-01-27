@@ -41,27 +41,39 @@ if len(sys.argv) > 1:
     YAML_FILE = args.settings_yml
 else:
     # Dev settings 
-    YAML_FILE = 'dev_settings.yml'
-    print('Running interactive mode for development.')
+    YAML_FILE = "dev_settings.yml"
+    print("Running interactive mode for development.")
 
 # Here starts the script   
 
-# Settings
+# Initalize settings class
 setup = Setup(YAML_FILE)
-# TODO - make create output directory a function
-
+# Create output directory
+setup.make_output_directory()
+# Load settings
 with open(setup.out('Settings.yml'), 'w') as f:
     yaml.dump(setup.final_config, f)
+# Log
 setup.log('Settings done')
 
+# Error handler
+error_file = setup.out("Error.log")
+error_handler = ErrorHandler(log_file=error_file)
 
 # Data loading
-setup.log('Check data compatability')
+setup.log("Loading data")
 data = anndata.read_h5ad(setup.data_path)
 
+
+setup.log("Check data")
+data_validator = DataValidator(data=data, setup=setup, error_handler=error_handler)
 # Check if defined settings are present in the data
-compatability = DataValidator(data=data, setup=setup)
-compatability.validate()
+data_validator.data_settings_compatibility()
+# Check for NAs in molecular data
+data_validator.validate_na_counts()
+# Check for negative counts in molecular data
+data_validator.validate_negative_counts()
+
 
 # Define training and inferred ancestry
 setup.log('Define ancestries')
@@ -78,21 +90,13 @@ inf_data = (inf_data[inf_data.obs[setup.classification['output_column']]
                      .isin(setup.classification['comparison'])]
                      )
 
-# Assertion: Check for enough samples per class
-# 1. Check for enough samples in the training ancestries (EUR)
-# 2. Check for enough samples in inferred ancestry
-counts = eur_data.obs[setup.classification['output_column']].value_counts()
-          
-assert_str = f'Prerequisite is a train sample size of {setup.sample_cutoff} per class.'
-assert (counts > setup.sample_cutoff).all(), assert_str
-
-# Check compared ancestry (infer_ancestry) if there are replicates
-# Limma eBayes needs at least one replicate per class
-counts = inf_data.obs[setup.classification['output_column']].value_counts()
-
-assert_str = f'For DGE analysis of compared ancestry ({setup.classification['infer_ancestry'].upper()}) at least one replicate per class is needed.'
-assert (counts >= 2).all(), assert_str
-
+# Assertion: Check min sample sizes per class
+data_validator.check_min_samples_per_class(
+    data=eur_data.obs,
+    column=setup.classification['output_column'],
+    min_samples=setup.sample_cutoff,
+    data_name="European data"
+    )
 
 setup.log('Setting seed')
 # Seed is used to generate different European subsets
@@ -117,9 +121,39 @@ frequencies = inf_data.obs.groupby(to_stratify_columns, observed=False).size().t
 # Split the training data into train and test set (Based on frequency of compared ancestry)
 train_data, test_data = stratified_subset(eur_data, group_columns=to_stratify_columns, freq_dict=frequencies, seed=seed)
 train_idx, test_idx, inf_idx = train_data.obs_names, test_data.obs_names, inf_data.obs_names
-# Assertion: Check for data leackage
-assert_str = f'Data leakage! Observation also occur in the testset.'
-assert not test_idx.isin(train_idx).all(), assert_str
+
+# Assertion: Check for data leakage
+data_validator.check_data_leakage(train_idx, test_idx)
+# Assertion: Check min sample size per class
+# Train data
+data_validator.check_min_samples_per_class(
+    data=train_data.obs,
+    column=setup.classification['output_column'],
+    min_samples=2,
+    data_name="Train data"
+    )
+# Test data
+data_validator.check_min_samples_per_class(
+    data=test_data.obs,
+    column=setup.classification['output_column'],
+    min_samples=2,
+    data_name="Test data"
+    )
+# Inf data
+data_validator.check_min_samples_per_class(
+    data=inf_data.obs,
+    column=setup.classification['output_column'],
+    min_samples=2,
+    data_name="Inf data"
+    )
+
+# TODO - Assertion: Covariate
+# data_validator.check_covariate(
+#     data=inf_data.obs,
+#     column=setup.classification['output_column'],
+#     min_samples=2,
+#     data_name="Inf data"
+#     )
 
 # Save the samples that are used in train and test (use the same samples for 'stats')
 # Remaining Europeans

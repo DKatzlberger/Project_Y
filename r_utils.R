@@ -16,6 +16,16 @@ make.dir <- function(fp, overwrite = FALSE) {
   }
 } 
 
+is_yml_file <- function(file_path) {
+  # Check if the file exists and if the file has a .yml extension
+  if (!file.exists(file_path)) {
+    stop('Error: The file does not exist.')
+  }
+  if (tolower(tools::file_ext(file_path)) != 'yml') {
+    stop('Error: The file is not a YML file.')
+  }
+}
+
 normalize_log <- function(X, e = 0.01){
   # Log normalization.
   # X: Vector or Matrix to be transformed.
@@ -146,8 +156,7 @@ create_stratification_plot <- function(datasets, to_visualize_columns) {
 }
 
 
-
-
+# Function to create design matrix
 create_design <- function(output_column, meta, covariates = NULL) {
   # Creates design matrix
   # Supports means model with optional covariates.
@@ -411,15 +420,6 @@ visual_validation <- function(meta,
   validation_plot
 }
 
-is_yml_file <- function(file_path) {
-  # Check if the file exists and if the file has a .yml extension
-  if (!file.exists(file_path)) {
-    stop('Error: The file does not exist.')
-  }
-  if (tolower(tools::file_ext(file_path)) != 'yml') {
-    stop('Error: The file is not a YML file.')
-  }
-}
 
 compute_correlation <- function(data, method = "spearman") {
   # Compute correlation matrix from DGE results
@@ -436,24 +436,87 @@ compute_correlation <- function(data, method = "spearman") {
   return(melted_correlation)
 }
 
-# Calculate Kolmogorow-Smirnow
-ks_test <- function(data, group_col, value_col, group1 = "Test", group2 = "Inference") {
+
+# Function to calculate the mean response per output_column and Feature
+calculate_observed_mean_response <- function(data, meta, output_column) {
   
-  # Filter the data for the two groups and pull the corresponding values
-  group_data <- data |>
-    filter(!!sym(group_col) %in% c(group1, group2)) |>
-    select(!!sym(group_col), !!sym(value_col))
+  # Combine the data and metadata
+  combined_data <- data |>
+    left_join(meta, by = "patient_id") |>
+    pivot_longer(cols = -c(all_of(output_column), patient_id), 
+                 names_to = "Feature", 
+                 values_to = "Value")
   
-  # Extract the values for the two groups to compare
-  group1_values <- group_data |> filter(!!sym(group_col) == group1) |> pull(!!sym(value_col))
-  group2_values <- group_data |> filter(!!sym(group_col) == group2) |> pull(!!sym(value_col))
+  # Calculate mean responses per feature and cancer type
+  mean_responses <- combined_data |>
+    group_by(!!sym(output_column), Feature) |>
+    summarise(mean_response = mean(Value), .groups = "drop")
   
-  # Perform Kolmogorov-Smirnov test
-  ks_result <- ks.test(group1_values, group2_values)
-  
-  # Return the result of the KS test
-  return(ks_result)
+  return(mean_responses)
 }
+
+
+# Function to calculate contrast for each feature and format output
+calculate_observed_contrast <- function(mean_responses, output_column, cancer_types = NULL) {
+  
+  # Calculate the mean response for each cancer_type and Feature
+  mean_responses_grouped <- mean_responses |>
+    group_by(Feature, !!sym(output_column)) |>
+    summarise(mean_response = mean(mean_response), .groups = "drop")
+  
+  # If no specific cancer types are provided, use the unique cancer types from the data
+  if (is.null(cancer_types)) {
+    cancer_types <- unique(mean_responses[[output_column]])
+  }
+  
+  # Initialize a list to store the contrast results
+  contrast_results <- list()
+  
+  # Loop over all features to calculate contrasts
+  for (feature in unique(mean_responses$Feature)) {
+    
+    # Subset the data for the specific feature
+    feature_data <- mean_responses_grouped |> filter(Feature == feature)
+    
+    # Calculate the contrast for each pair of cancer types
+    for (i in 1:(length(cancer_types) - 1)) {
+      for (j in (i + 1):length(cancer_types)) {
+        type1 <- cancer_types[i]
+        type2 <- cancer_types[j]
+        
+        # Get the mean response for each cancer type
+        mean1 <- feature_data$mean_response[feature_data[[output_column]] == type1]
+        mean2 <- feature_data$mean_response[feature_data[[output_column]] == type2]
+        
+        # Compute the contrast (e.g., Type1 - Type2)
+        contrast_1 <- mean1 - mean2
+        contrast_2 <- mean2 - mean1  # Inverse comparison
+        
+        # Store the result in a tibble with comparison, feature, and contrast
+        contrast_results[[paste(feature, type1, "vs", type2)]] <- tibble(
+          Comparison = paste(type1),
+          Feature = feature,
+          Observed_contrast = contrast_1
+        )
+        
+        contrast_results[[paste(feature, type2, "vs", type1)]] <- tibble(
+          Comparison = paste(type2),
+          Feature = feature,
+          Observed_contrast = contrast_2
+        )
+      }
+    }
+  }
+  
+  # Combine all results into one data frame
+  contrast_df <- bind_rows(contrast_results) |>
+    arrange(Comparison)
+  
+  # Return the contrast data frame
+  return(contrast_df)
+}
+
+
 
 # Permutation test
 permutation_test <- function(data, value_col, group_col) {
@@ -465,7 +528,7 @@ permutation_test <- function(data, value_col, group_col) {
   
   # If any group has zero variance, return p-value of 1
   if (any(var_check$var_value == 0)) {
-    message("One or more groups have identical values. Returning p-value of 1.")
+    message("One or more groups have identical values. Returning `NA`.")
     return(NA)  # Return the p-value of NA directly
   }
 
@@ -552,6 +615,62 @@ sample_by_size <- function(data, sizes, seed, class_column) {
   
   return(samples)
 }
+
+# Function to perform a stratified train/test split
+train_test_split <- function(adata, train_size = 0.8, seed, class_column) {
+  # Set seed for reproducibility
+  set.seed(seed)
+  
+  # Extract the class labels from the AnnData object (assumed to be in metadata)
+  class_labels <- adata$obs[[class_column]]
+  
+  # Ensure class_labels is a factor
+  class_labels <- as.factor(class_labels)
+  
+  # Perform a stratified split based on the class_column
+  train_indices <- NULL
+  test_indices <- NULL
+  
+  # Stratified sampling: For each class, sample train/test indices proportionally
+  for (class in levels(class_labels)) {
+    # Get the indices of the samples belonging to the current class
+    class_indices <- which(class_labels == class)
+    
+    # Number of samples in this class
+    class_size <- length(class_indices)
+    
+    # Calculate the train and test sizes
+    train_class_size <- floor(train_size * class_size)
+    test_class_size <- class_size - train_class_size
+    
+    # Shuffle the class indices and split them
+    set.seed(seed)  # Ensure reproducibility within each class
+    shuffled_indices <- sample(class_indices, class_size, replace = FALSE)
+    
+    # Assign train/test indices
+    train_indices <- c(train_indices, shuffled_indices[1:train_class_size])
+    test_indices <- c(test_indices, shuffled_indices[(train_class_size + 1):(train_class_size + test_class_size)])
+  }
+  
+  # Create the train and test AnnData objects
+  train_adata <- adata[train_indices, ]
+  test_adata <- adata[test_indices, ]
+  
+  # Return the train and test AnnData objects
+  return(list(train = train_adata, test = test_adata))
+}
+
+
+
+
+
+
+
+
+
+
+
+
 
 # Functional analysis
 
@@ -652,7 +771,7 @@ classify_meta <- function(df, covariates) {
 
 # PCA
 # Function to plot PCA combinations for a single condition
-plot_pca_for_condition <- function(pca_df, pca_result, condition, default_condition) {
+plot_pca_for_condition <- function(pca_df, pca_result, condition, default_condition = NULL) {
   # Check if the condition column exists in pca_df
   if (!(condition %in% colnames(pca_df))) {
     stop(paste("Condition", condition, "not found in pca_df."))
@@ -680,17 +799,21 @@ plot_pca_for_condition <- function(pca_df, pca_result, condition, default_condit
     x_var <- round(pc_variances[x_pc] * 100, 2)
     y_var <- round(pc_variances[y_pc] * 100, 2)
     
-    # Create a ggplot for the given PC combination
-    p <- ggplot(pca_df, aes(x = !!sym(x_pc), y = !!sym(y_pc), 
-                            color = !!sym(condition),
-                            shape = !!sym(default_condition)
-                            )
-      ) +
-      geom_point(size = 3) +
+    # Dynamically handle the shape aesthetic if default_condition is not provided
+    p <- ggplot(pca_df, aes(x = !!sym(x_pc), y = !!sym(y_pc), color = !!sym(condition))) +
+      geom_point() +
       labs(
         x = paste0(x_pc, " (", x_var, "% Variance)"),
         y = paste0(y_pc, " (", y_var, "% Variance)")
       )
+    
+    # Add the shape aesthetic only if default_condition is provided
+    if (!is.null(default_condition)) {
+      if (!(default_condition %in% colnames(pca_df))) {
+        stop(paste("Default condition", default_condition, "not found in pca_df."))
+      }
+      p <- p + aes(shape = !!sym(default_condition))
+    }
   
     # Add the plot to the list
     plot_list[[paste(x_pc, y_pc, sep = "_")]] <- p
@@ -701,7 +824,7 @@ plot_pca_for_condition <- function(pca_df, pca_result, condition, default_condit
 
 
 # Function to generate a list of t-SNE plots with different perplexities
-generate_tsne_plots <- function(data, meta, condition, perplexity_range, default_condition, seed = 42) {
+generate_tsne_plots <- function(data, meta, condition, perplexity_range, default_condition = NULL, seed = 42) {
   # Set the seed for reproducibility
   set.seed(seed)
   
@@ -727,16 +850,22 @@ generate_tsne_plots <- function(data, meta, condition, perplexity_range, default
     # Create a ggplot for this perplexity value
     tsne_plot <- ggplot(tsne_data, aes(x = TSNE1, 
                                        y = TSNE2, 
-                                      color = !!sym(condition),
-                                      shape = !!sym(default_condition))
-      ) +
+                                       color = !!sym(condition))) +
       geom_point() +
-      facet_grid(cols = vars(Perplexity))
+      facet_grid(cols = vars(Perplexity)) +
       labs(
         x = "t-SNE1",
         y = "t-SNE2"
-      ) 
+      )
     
+    # Add the shape aesthetic only if default_condition is provided
+    if (!is.null(default_condition)) {
+      if (!(default_condition %in% colnames(tsne_data))) {
+        stop(paste("Default condition", default_condition, "not found in meta data."))
+      }
+      tsne_plot <- tsne_plot + aes(shape = !!sym(default_condition))
+    }
+  
     # Add the plot to the list
     plot_list[[paste("Perplexity", perplexity)]] <- tsne_plot
   }

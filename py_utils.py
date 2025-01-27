@@ -5,14 +5,19 @@ import yaml
 import re
 import math
 
+# Os library
+import sys
 import uuid
 import time
 from pathlib import Path
 import psutil
 import os
 import subprocess
+
 import pickle
 import importlib
+
+# Machine learning
 from sklearn.model_selection import StratifiedKFold, GridSearchCV
 from sklearn.metrics import roc_auc_score
 
@@ -78,9 +83,10 @@ class Setup(dict):
         # Check all the settings
         self.check_settings()
 
+    def make_output_directory(self):
         # Create output directory
-        Path(final_config['output_directory']).mkdir(parents=True, exist_ok=self.overwrite)
-        save_location = os.path.join(os.getcwd(), final_config['output_directory'])
+        Path(self.final_config['output_directory']).mkdir(parents=True, exist_ok=self.overwrite)
+        save_location = os.path.join(os.getcwd(), self.final_config['output_directory'])
         # Print tatement to inform about save location
         print(f'Output will be saved to {save_location}')
 
@@ -130,112 +136,271 @@ class Setup(dict):
     def return_settings(self):
         return self.final_config
 
+
+class ErrorHandler():
+    def __init__(self, log_file):
+        """
+        Initializes the error handler.
+
+        :param log_file: Path to the log file.
+        """
+        self.log_file = log_file
+
+    def handle_error(self, error):
+        """
+        Handles an exception by logging it, printing it, and terminating the script.
+
+        :param error: The exception instance to handle.
+        """
+        error_message = f"Error: {str(error)}"
+
+        # Log the error
+        self._log_to_file(error_message)
+
+        # If running in an interactive session, do not terminate the session
+        if not self._is_interactive():
+            raise error  # Raise the error to maintain stack trace
+            sys.exit(1)  # Terminate the script with a non-zero exit code
+
+        raise error
+
+    def _is_interactive(self):
+        """
+        Determines if the script is being run in an interactive environment.
+
+        :return: True if running interactively, False otherwise.
+        """
+        return hasattr(sys, 'ps1') or 'IPython' in sys.modules
+
+    def _log_to_file(self, message):
+        """
+        Logs a message to the specified log file.
+
+        :param message: The message to log.
+        """
+        try:
+            with open(self.log_file, "a") as file:
+                file.write(message + "\n")
+        except Exception as log_error:
+            print(f"Failed to write to log file: {str(log_error)}", file=sys.stderr)
+
+
+
 class DataValidator():
     """
-    Checks if data and setttings are compatible.
+    Checks if data and settings are compatible.
         
     :param data: AnnData object containing the data.
     :param setup: Setup object containing settings.
+    :param error_handler: An instance of ErrorHandler to manage errors.
     """
-    def __init__(self, data: ad.AnnData, setup: Setup):
-
+    def __init__(self, data: ad.AnnData, setup: Setup, error_handler: ErrorHandler):
         self.data = data
         self.setup = setup
+        self.error_handler = error_handler
 
     def validate_features(self):
         """
         Check that features are unique.
         """
-        # Ensure that the number of unique features is equal to the total number of features
-        assert self.data.var.index.shape[0] == len(set(self.data.var.index)), \
-            'Features not unique.'
-    
+        try:
+            assert self.data.var.index.shape[0] == len(set(self.data.var.index)), \
+                'Features not unique.'
+        except AssertionError as e:
+            self.error_handler.handle_error(e)
+
     def validate_output_column(self):
         """
         Check that output column is in the data.
         """
-        output_column = self.setup['classification']['output_column']
-        assert output_column in self.data.obs.columns, \
-            f"Output column '{output_column}' not in the data."
-        
-        # Check if there are any NA values 
-        has_na = self.data.obs[output_column].isnull().any()
-        assert not has_na, \
-            f"The covariate column '{output_column}' contains NA values. Please handle missing data before proceeding."
+        try:
+            output_column = self.setup['classification']['output_column']
+            assert output_column in self.data.obs.columns, \
+                f"Output column '{output_column}' not in the data."
+            
+            has_na = self.data.obs[output_column].isnull().any()
+            assert not has_na, \
+                f"The output column '{output_column}' contains NA values. Please handle missing data before proceeding."
+        except AssertionError as e:
+            self.error_handler.handle_error(e)
 
     def validate_class_labels(self):
         """
         Check that class labels of comparisons are present in the output column of the data.
         """
-        required_labels = self.setup['classification']['comparison']
-        output_column = self.setup['classification']['output_column']
-        
-        # Ensure that each comparison label is found in the output column
-        for label in required_labels:
-            assert self.data.obs[output_column].str.contains(label).any(), \
-                f"No '{label}' in output column: '{output_column}', choose different comparison in settings."
+        try:
+            required_labels = self.setup['classification']['comparison']
+            output_column = self.setup['classification']['output_column']
+            
+            for label in required_labels:
+                assert self.data.obs[output_column].str.contains(label).any(), \
+                    f"No '{label}' in output column: '{output_column}', choose different comparison in settings."
+        except AssertionError as e:
+            self.error_handler.handle_error(e)
             
     def validate_ancestry_column(self):
         """
         Check if the ancestry column is present in the data.
         """
-        ancestry_column = self.setup['classification']['ancestry_column']
-        assert ancestry_column in self.data.obs.columns, \
-            f"Ancestry column '{ancestry_column}' not in the data."
-        
-        # Check if there are any NA values 
-        has_na = self.data.obs[ancestry_column].isnull().any()
-        assert not has_na, \
-            f"The covariate column '{ancestry_column}' contains NA values. Please handle missing data before proceeding."
-    
+        try:
+            ancestry_column = self.setup['classification']['ancestry_column']
+            assert ancestry_column in self.data.obs.columns, \
+                f"Ancestry column '{ancestry_column}' not in the data."
+            
+            has_na = self.data.obs[ancestry_column].isnull().any()
+            assert not has_na, \
+                f"The ancestry column '{ancestry_column}' contains NA values. Please handle missing data before proceeding."
+        except AssertionError as e:
+            self.error_handler.handle_error(e)
+
     def validate_ancestry(self):
         """
-        Check if ancestries are present in ancetsry column.
+        Check if ancestries are present in ancestry column.
         """
-        ancestry_column = self.setup['classification']['ancestry_column']
-        train_ancestry = self.setup['classification']['train_ancestry']
-        inf_ancestry = self.setup['classification']['infer_ancestry']
+        try:
+            ancestry_column = self.setup['classification']['ancestry_column']
+            train_ancestry = self.setup['classification']['train_ancestry']
+            inf_ancestry = self.setup['classification']['infer_ancestry']
 
-        assert self.data.obs[ancestry_column].str.contains(train_ancestry).any(), \
-            f"No '{train_ancestry}' in ancestry_column: '{ancestry_column}'."
-        assert self.data.obs[ancestry_column].str.contains(inf_ancestry).any(), \
-            f"No '{inf_ancestry}' in ancestry_column: '{ancestry_column}'."
+            assert self.data.obs[ancestry_column].str.contains(train_ancestry).any(), \
+                f"No '{train_ancestry}' in ancestry_column: '{ancestry_column}'."
+            assert self.data.obs[ancestry_column].str.contains(inf_ancestry).any(), \
+                f"No '{inf_ancestry}' in ancestry_column: '{ancestry_column}'."
+        except AssertionError as e:
+            self.error_handler.handle_error(e)
 
     def validate_covariate_column(self):
         """
         Check if covariate column(s) are present in the data, if specified.
         Check that there are no NA values in the covariate column(s).
         """
-        classification_settings = self.setup.get('classification', {})
-        
-        # Check if 'covariate' is provided in the classification settings
-        covariates = classification_settings.get('covariate')
-        if covariates:  # If covariates are specified
-            if not isinstance(covariates, list):
-                covariates = [covariates]  # Ensure it's a list
-            
-            for covariate in covariates:
-                # Check if each covariate column exists in the data
-                assert covariate in self.data.obs.columns, \
-                    f"No '{covariate}' column in the data, can't be used as covariate."
+        try:
+            classification_settings = self.setup.get('classification', {})
+            covariates = classification_settings.get('covariate')
+            if covariates:  
+                if not isinstance(covariates, list):
+                    covariates = [covariates]  
                 
-                # Check if there are any NA values in the covariate column
-                has_na = self.data.obs[covariate].isnull().any()
-                assert not has_na, \
-                    f"The covariate column '{covariate}' contains NA values. Please handle missing data before proceeding."
+                for covariate in covariates:
+                    assert covariate in self.data.obs.columns, \
+                        f"No '{covariate}' column in the data, can't be used as covariate."
+                    
+                    has_na = self.data.obs[covariate].isnull().any()
+                    assert not has_na, \
+                        f"The covariate column '{covariate}' contains NA values. Please handle missing data before proceeding."
+        except AssertionError as e:
+            self.error_handler.handle_error(e)
 
+    def validate_na_counts(self):
+        """
+        Check if there are NA values in the count matrix (.X) and provide detailed information, 
+        including the proportion of NA values in the error message.
+        """
+        try:
+            if hasattr(self.data.X, "toarray"):  
+                dense_matrix = self.data.X.toarray()  # Convert sparse matrix to dense if needed
+            else:
+                dense_matrix = self.data.X  # Already a dense matrix
+
+            # Calculate the total number of elements in the matrix
+            total_elements = dense_matrix.size
+
+            # Count how many NA (NaN) values are in the matrix
+            na_elements = np.sum(np.isnan(dense_matrix))
+
+            # Calculate the proportion of NA values
+            proportion_na = na_elements / total_elements
+
+            # Identify rows and columns with NA values
+            rows_with_all_na = np.where(np.isnan(dense_matrix).all(axis=1))[0]
+            obs_with_all_na = self.data.obs.index[rows_with_all_na].tolist()
+
+            cols_with_any_na = np.where(np.isnan(dense_matrix).any(axis=0))[0]
+            var_with_any_na = self.data.var.index[cols_with_any_na].tolist()
+
+            # Raise error if there are NA values, including the proportion of NA values in the message
+            if len(obs_with_all_na) > 0 or len(var_with_any_na) > 0:
+                raise ValueError(
+                    f"NA values found in the count matrix. Proportion of NA values: {proportion_na:.4f}. "
+                    f"There are {len(obs_with_all_na)} observations with all NA values and "
+                    f"{len(var_with_any_na)} columns with any NA values.\n"
+                    f"Please check the data preprocessing steps."
+                )
+
+        except ValueError as e:
+            self.error_handler.handle_error(e)
+    
+    def validate_negative_counts(self):
+        """
+        Check if there are any negative values in the count matrix (.X).
+        Raise an error with the proportion of negative values if present.
+        """
+        try:
+            if hasattr(self.data.X, "toarray"):  
+                dense_matrix = self.data.X.toarray()  # Convert sparse matrix to dense if needed
+            else:
+                dense_matrix = self.data.X  # Already a dense matrix
+
+            # Calculate the total number of elements in the matrix
+            total_elements = dense_matrix.size
+
+            # Count how many negative values are in the matrix
+            negative_elements = np.sum(dense_matrix < 0)
+
+            # Calculate the proportion of negative values
+            proportion_negative = negative_elements / total_elements
+
+            # Raise error if there are any negative values and include the proportion in the error message
+            if negative_elements > 0:
+                raise ValueError(f"Negative values found in the count matrix. " 
+                                 f"Proportion of negative values: {proportion_negative:.4f}.\n"
+                                 f"Please check the data preprocessing steps.")
         
-    # Function that runs all validate functions
-    def validate(self):
+        except ValueError as e:
+            self.error_handler.handle_error(e)
+
+    def check_min_samples_per_class(self, data, column, min_samples, data_name):
+        """
+        Check if classes in a specified column have at least a minimum number of samples.
+        """
+        try:
+            counts = data[column].value_counts()
+            failing_classes = counts[counts < min_samples]
+            assert failing_classes.empty, (
+                f"Minimum sample size of {min_samples} per class is required. "
+                f"The following classes in '{data_name}' fail to meet the requirement:\n{failing_classes}"
+            )
+        except AssertionError as e:
+            self.error_handler.handle_error(e)
+
+    def check_data_leakage(self, train_idx, test_idx):
+        """
+        Check for data leakage between training and test sets.
+        """
+        try:
+            overlapping_indices = test_idx[test_idx.isin(train_idx)]
+            assert overlapping_indices.empty, (
+                "Data leakage detected! Some observations in the test set also occur in the training set."
+            )
+        except AssertionError as e:
+            self.error_handler.handle_error(e)
+
+    def data_settings_compatibility(self):
         """
         Run all validation checks on the data.
         """
-        self.validate_features()
-        self.validate_output_column()
-        self.validate_class_labels()
-        self.validate_ancestry_column()
-        self.validate_ancestry()
-        self.validate_covariate_column()
+        try:
+            self.validate_features()
+            self.validate_output_column()
+            self.validate_class_labels()
+            self.validate_ancestry_column()
+            self.validate_ancestry()
+            self.validate_covariate_column()
+        except AssertionError as e:
+            self.error_handler.handle_error(e)
+
+
+
 
 
 class ScriptRunner():
@@ -772,11 +937,17 @@ def extract_feature_importance(model, feature_names):
     return importance_df
 
 
-
-
-
 # EUR Subsetting / Robustness
 def sample_by_size(adata, props, seed, output_column):
+    """
+    Sample subsets of data based on proportions while ensuring that each class has at least two samples.
+
+    :param adata: The data to sample from (AnnData or similar).
+    :param props: The list of proportions to sample.
+    :param seed: Random seed for reproducibility.
+    :param output_column: The column to group by for stratification.
+    :param error_handler: An instance of the ErrorHandler class to manage errors.
+    """
     # Set seed for reproducibility
     np.random.seed(seed)  
     
@@ -800,8 +971,6 @@ def sample_by_size(adata, props, seed, output_column):
         for class_name, class_data in class_groups:
             if len(class_data) >= 2:
                 selected_indices += class_data.sample(n=2, random_state=seed).index.tolist()
-            else:
-                raise ValueError(f"Class {class_name} has fewer than 2 samples, cannot guarantee at least 2 per class.")
         
         # Remaining size to sample after ensuring 2 samples per class
         remaining_size = total_size - len(selected_indices)
@@ -818,6 +987,50 @@ def sample_by_size(adata, props, seed, output_column):
         samples[sample_name] = adata[selected_indices]
     
     return samples
+
+# # EUR Subsetting / Robustness
+# def sample_by_size(adata, props, seed, output_column):
+#     # Set seed for reproducibility
+#     np.random.seed(seed)  
+    
+#     # List to store the sampled subsets
+#     samples = {}
+    
+#     # Ensure each class has at least two samples
+#     class_groups = adata.obs.groupby(output_column, observed=False)
+    
+#     for prop in props:
+#         # Name for the subset
+#         sample_name = f"proportion_{str(prop).replace('.', '_')}"
+        
+#         # Calculate the total number of samples for this proportion
+#         total_size = int(len(adata) * prop)
+        
+#         # Initialize storage for indices
+#         selected_indices = []
+        
+#         # First, ensure at least 2 samples per class
+#         for class_name, class_data in class_groups:
+#             if len(class_data) >= 2:
+#                 selected_indices += class_data.sample(n=2, random_state=seed).index.tolist()
+#             else:
+#                 raise ValueError(f"Class {class_name} has fewer than 2 samples, cannot guarantee at least 2 per class.")
+        
+#         # Remaining size to sample after ensuring 2 samples per class
+#         remaining_size = total_size - len(selected_indices)
+        
+#         if remaining_size > 0:
+#             # Create a DataFrame excluding the already selected indices
+#             remaining_data = adata[~adata.obs.index.isin(selected_indices)]
+            
+#             # Randomly sample remaining indices
+#             additional_indices = remaining_data.obs.sample(n=remaining_size, random_state=seed).index.tolist()
+#             selected_indices += additional_indices
+        
+#         # Store the sampled subset
+#         samples[sample_name] = adata[selected_indices]
+    
+#     return samples
 
 
 

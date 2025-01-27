@@ -45,19 +45,36 @@ else:
 
 # Here starts the script   
 
-# Load the settings
-# Don't need setup class?
+# Initalize settings class
 setup = Setup(YAML_FILE)
+# Create output directory
+setup.make_output_directory()
+# Load settings
 with open(setup.out('Settings.yml'), 'w') as f:
     yaml.dump(setup.final_config, f)
+# Log
 setup.log('Settings done')
 
-# Load the data
+
+# Error handler
+error_file = setup.out("Error.log")
+error_handler = ErrorHandler(log_file=error_file)
+
+# Data loading
+setup.log("Loading data")
 data = anndata.read_h5ad(setup.data_path)
 
+
+setup.log("Check data")
+data_validator = DataValidator(data=data, setup=setup, error_handler=error_handler)
 # Check if defined settings are present in the data
-compatability = DataValidator(data=data, setup=setup)
-compatability.validate()
+data_validator.data_settings_compatibility()
+# Check for NAs in molecular data
+data_validator.validate_na_counts()
+# Check for negative counts in molecular data
+data_validator.validate_negative_counts()
+
+
 
 # Get European data
 setup.log('Define ancestry')

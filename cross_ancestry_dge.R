@@ -54,13 +54,14 @@ test_n = length(test_idx)
 inf_n = length(inf_idx)
 
 # Subset the data by the indexes create in python
-train_data <- adata[adata$obs_names %in% train_idx, ]
-test_data <- adata[adata$obs_names %in% test_idx, ]
-inf_data <- adata[adata$obs_names %in% inf_idx, ]
+train_data <- adata[train_idx, ]
+test_data <- adata[test_idx, ]
+inf_data <- adata[inf_idx, ]
 
 # Assertion: Check arrays
 # Dimensions
 stopifnot(length(train_idx) == length(train_data$obs_names))
+stopifnot(nrow(test_data) == nrow(inf_data))
 # Order
 stopifnot(all(colnames(t(train_data$X)) ==
                 row.names(train_data$obs[colnames(t(train_data$X)), ])))
@@ -76,39 +77,63 @@ stopifnot(length(inf_adata_obs) == length(inf_idx))
 # 1. Extract the covariate, if it exists and has a meaningful value
 covariate_list <- get_covariate(setup)
 # 2. Check if there are replicates and at least two levels for the covariate 
-if (!is.null(covariate_list)){
-  # Check covariate type
+if (!is.null(covariate_list)) {
+  # Covariate processing
   print("Checking covariates.")
   covariate_types <- classify_covariates(train_data$obs, covariate_list)
-  # Check conditions "Discrete"
+
+  # Check conditions for "Discrete" covariates
   check_covariate_conditions(train_data$obs, covariates = covariate_types$discrete)
   check_covariate_conditions(test_data$obs, covariates = covariate_types$discrete)
   check_covariate_conditions(inf_data$obs, covariates = covariate_types$discrete)
 
-  # Visualize
-  if (setup$visual_val){
-  # Visualize all discrete columns
-  to_visualize_columns  <- c(setup$classification$output_column, covariate_types$discrete)
-  # Datasets to visualize
-  datasets <- list(
-  Train = train_data$obs,
-  Test = test_data$obs,
-  `Inf` = inf_data$obs
+  # Visualization when covariates exist
+  if (setup$visual_val) {
+    # Visualize all discrete columns
+    to_visualize_columns <- c(setup$classification$output_column, covariate_types$discrete)
+    # Datasets to visualize
+    datasets <- list(
+      Train = train_data$obs,
+      Test = test_data$obs,
+      `Inf` = inf_data$obs
     )
-  # Function that creates the plots
-  patchwork_plot <- create_stratification_plot(
-    datasets = datasets,
-    to_visualize_columns = to_visualize_columns
+    # Create and save the plot
+    patchwork_plot <- create_stratification_plot(
+      datasets = datasets,
+      to_visualize_columns = to_visualize_columns
     )
-  # Save
-  ggsave(
-    filename = "Validation_stratification.pdf",
-    plot = patchwork_plot,
-    path = setup$output_directory,
-    width = 5, height = 5
+    ggsave(
+      filename = "Validation_stratification.pdf",
+      plot = patchwork_plot,
+      path = setup$output_directory,
+      width = 5, height = 5
     )
   }
-} 
+} else {
+  # Visualization when no covariates but visual_val is TRUE
+  if (setup$visual_val) {
+    # Visualize only the output column
+    to_visualize_columns <- setup$classification$output_column
+    # Datasets to visualize
+    datasets <- list(
+      Train = train_data$obs,
+      Test = test_data$obs,
+      `Inf` = inf_data$obs
+    )
+    # Create and save the plot
+    patchwork_plot <- create_stratification_plot(
+      datasets = datasets,
+      to_visualize_columns = to_visualize_columns
+    )
+    ggsave(
+      filename = "Validation_stratification_no_covariates.pdf",
+      plot = patchwork_plot,
+      path = setup$output_directory,
+      width = 5, height = 5
+    )
+  }
+}
+
 
 # Create design matrix
 train_design <- create_design(setup$classification$output_column,
@@ -139,6 +164,8 @@ write_yaml(train_filtered$var_names,
 stopifnot(all(train_data$var_names == test_data$var_names))
 # Dimensions
 stopifnot(table(keeper_genes)[2] == dim(train_filtered$X)[2])
+
+
 
 # Limma workflow
 print("Start differential gene expression analysis.")
@@ -251,7 +278,7 @@ if (setup$visual_val) {
 }
 
 # Calculate metric
-print("Correlation of logFCs")
+print("Correlation of logFCs.")
 # Select and rename logFC columns from each data frame for clarity
 train_log_FC <- train_contrast_res |>
   select(coef, Feature, logFC) |>
@@ -285,9 +312,77 @@ metric_df <- inner_join(pearson, spearman, by = c("V1", "V2")) |>
     n_inf_ancestry = inf_n,
   )
 
-# Save metric Dataframe
-fwrite(metric_df, file.path(setup$output_directory, "Metric_dge.csv"))
 
+# Predicting Regression
+print("Predicting regression.")
+
+# Predicted contrast (train set)
+predicted_contrast_train <- train_contrast_res |> 
+  select(coef, Feature, logFC) |>
+  rename(Comparison = coef, Predicted_contrast = logFC) |>
+  arrange(Comparison, Feature)
+
+# Contrast (test set, inf set)
+# Observed response
+meta <- as_tibble(test_filtered$obs, rownames = "patient_id") |> select(patient_id, setup$classification$output_column)
+observed_response_test <- calculate_observed_mean_response(as_tibble(t(test_norm$E), rownames = "patient_id"), 
+                                                           meta = meta,
+                                                           output_column = setup$classification$output_column)
+
+meta <- as_tibble(inf_filtered$obs, rownames = "patient_id") |> select(patient_id, setup$classification$output_column)
+observed_response_inf <- calculate_observed_mean_response(as_tibble(t(inf_norm$E), rownames = "patient_id"), 
+                                                          meta = meta,
+                                                          output_column = setup$classification$output_column)
+
+# Observed contrast
+observed_contrast_test <- calculate_observed_contrast(observed_response_test, 
+                                                      output_column = setup$classification$output_column)
+
+observed_contrast_inf <- calculate_observed_contrast(observed_response_inf, 
+                                                     output_column = setup$classification$output_column) |>
+  mutate(Status = "Inference")
+
+# Metric
+test_prediction <- observed_contrast_test |>
+  left_join(predicted_contrast_train, by = c("Comparison", "Feature")) |>
+  group_by(Comparison) |>
+  summarise(
+    # Calculate the MAE
+    MAE = mean(abs(Observed_contrast - Predicted_contrast)),
+    # Calculate the RMSE
+    RMSE = sqrt(mean((Observed_contrast - Predicted_contrast)^2)),
+    # Calculate the R-squared
+    SS_residual = sum((Observed_contrast - Predicted_contrast)^2),  
+    SS_total = sum((Observed_contrast - mean(Observed_contrast))^2), 
+    R2 = 1 - (SS_residual / SS_total),
+    .groups = "drop"
+  ) |>
+  mutate(Status = "Test")
+
+inf_prediction <-  observed_contrast_inf |>
+  left_join(predicted_contrast_train, by = c("Comparison", "Feature")) |>
+  group_by(Comparison) |>
+  summarise(
+    # Calculate the MAE
+    MAE = mean(abs(Observed_contrast - Predicted_contrast)),
+    # Calculate the RMSE
+    RMSE = sqrt(mean((Observed_contrast - Predicted_contrast)^2)),
+    # Calculate the R-squared
+    SS_residual = sum((Observed_contrast - Predicted_contrast)^2),  
+    SS_total = sum((Observed_contrast - mean(Observed_contrast))^2), 
+    R2 = 1 - (SS_residual / SS_total),
+    .groups = "drop"
+  ) |>
+  mutate(Status = "Inference")
+
+# Combine
+metric_prediction <- bind_rows(test_prediction, inf_prediction) |>
+  select(-Comparison) |>
+  left_join(metric_df, by = "Status")
+
+
+# Save metric Dataframe
+fwrite(metric_prediction, file.path(setup$output_directory, "Metric_dge.csv"))
 
 # Print statement to switch back to python script
 print("Switching back to Python.")

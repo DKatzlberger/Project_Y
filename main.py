@@ -121,7 +121,7 @@ def submit_seed_jobs(settings_file,
     # Calculate available CPUs
     available_cpus = get_available_cpus(hostname, save_cpus)
     cpus_per_job = max(1, available_cpus // len(seeds))
-    settings['n_jobs'] = cpus_per_job
+    settings["njobs"] = cpus_per_job
 
     # Define paths and constants
     tmp_dir = os.path.join("data", "tmp")
@@ -244,11 +244,13 @@ if __name__ == "__main__":
     # Fixed arguments
     SINGULARITY = "data/ancestry_dk.sif"
     HOSTNAME = "merida.came.sbg.ac.at"
-    SEEDS = np.arange(1, 4)
+    SEEDS = np.arange(1, 11)
 
     # Ancestry specific settings
     SETTINGS_FILES = [
-        "PanCanAtlas_RSEM_covariates_subtype_age_EUR_to_EAS.yml"
+        "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_ADMIX.yml",
+        "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_AFR.yml",
+        "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_EAS.yml"
     ]
     # Pattern to extract 'eur_to_region'
     pattern = r"EUR_to_[A-Z]+"
@@ -258,10 +260,10 @@ if __name__ == "__main__":
         match = re.search(pattern, SETTINGS_FILE)
         eur_to_region = match.group()
 
-        # 'eur_subsetting' analysis
-        SCRIPT_NAME = "eur_subsetting.py"
-        COMBINE_SCRIPT_NAME = "eur_subsetting_combine_runs.R"
-        CUSTOM_ANALYSIS_NAME = "EUR_subsetting"
+        # 'cross_ancestry' analysis
+        SCRIPT_NAME = "cross_ancestry.py"
+        COMBINE_SCRIPT_NAME = "cross_ancestry_combine_runs.R"
+        CUSTOM_ANALYSIS_NAME = f"{eur_to_region}_cross_ancestry"
 
         # Submit seed jobs and retrieve the job names
         job_name_list, tmp_settings = submit_seed_jobs(
@@ -282,33 +284,7 @@ if __name__ == "__main__":
             CUSTOM_ANALYSIS_NAME,
             SINGULARITY
         )
-        print(f"Combine job submitted: {combine_job_name}")
-
-        # 'cross_ancestry' analysis
-        SCRIPT_NAME = "cross_ancestry.py"
-        COMBINE_SCRIPT_NAME = "cross_ancestry_combine_runs.R"
-        CUSTOM_ANALYSIS_NAME = f"{eur_to_region}_cross_ancestry"
-
-        # Submit seed jobs and retrieve the job names
-        job_name_list, tmp_settings = submit_seed_jobs(
-            tmp_settings,
-            SEEDS,
-            HOSTNAME,
-            SINGULARITY,
-            SCRIPT_NAME,
-            CUSTOM_ANALYSIS_NAME,
-            save_cpus=10
-        )
-
-        # Submit combine job that depends on seed jobs
-        combine_job_name = submit_single_job(
-            tmp_settings,
-            job_name_list,
-            COMBINE_SCRIPT_NAME,
-            CUSTOM_ANALYSIS_NAME,
-            SINGULARITY
-        )
-        print(f"Combine job submitted: {combine_job_name}")
+        print(f"Combine job submitted: {combine_job_name}\n")
 
         # TODO - Eventually wait for other analysis to be finished
 
@@ -337,3 +313,31 @@ if __name__ == "__main__":
             SINGULARITY
         )
         print(f"Combine job submitted: {combine_job_name}")
+
+    # This analysis only needs to run once
+    # and is not dependent on the compared ancestry
+    # 'eur_subsetting' analysis
+    SCRIPT_NAME = "eur_subsetting.py"
+    COMBINE_SCRIPT_NAME = "eur_subsetting_combine_runs.R"
+    CUSTOM_ANALYSIS_NAME = "EUR_subsetting"
+
+    # Submit seed jobs and retrieve the job names
+    job_name_list, tmp_settings = submit_seed_jobs(
+        SETTINGS_FILE,
+        SEEDS,
+        HOSTNAME,
+        SINGULARITY,
+        SCRIPT_NAME,
+        CUSTOM_ANALYSIS_NAME,
+        save_cpus=10
+    )
+
+    # Submit combine job that depends on seed jobs
+    combine_job_name = submit_single_job(
+        tmp_settings,
+        job_name_list,
+        COMBINE_SCRIPT_NAME,
+        CUSTOM_ANALYSIS_NAME,
+        SINGULARITY
+    )
+    print(f"Combine job submitted: {combine_job_name}")

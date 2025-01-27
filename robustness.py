@@ -49,27 +49,42 @@ else:
 
 # Here starts the script   
 
-# Load the settings
-# Don't need setup class?
+# Initalize settings class
 setup = Setup(YAML_FILE)
+# Create output directory
+setup.make_output_directory()
+# Load settings
 with open(setup.out('Settings.yml'), 'w') as f:
     yaml.dump(setup.final_config, f)
+# Log
 setup.log('Settings done')
 
-# Load the data
+# Error handler
+error_file = setup.out("Error.log")
+error_handler = ErrorHandler(log_file=error_file)
+
+# Data loading
+setup.log("Loading data")
 data = anndata.read_h5ad(setup.data_path)
 
+
+setup.log("Check data")
+data_validator = DataValidator(data=data, setup=setup, error_handler=error_handler)
 # Check if defined settings are present in the data
-compatability = DataValidator(data=data, setup=setup)
-compatability.validate()
+data_validator.data_settings_compatibility()
+# Check for NAs in molecular data
+data_validator.validate_na_counts()
+# Check for negative counts in molecular data
+data_validator.validate_negative_counts()
+
 
 # Define training and inferred ancestry
-setup.log('Define ancestries')
+setup.log("Define ancestries")
 eur_data = data[data.obs[setup.classification['ancestry_column']] == setup.classification['train_ancestry']]
 inf_data = data[data.obs[setup.classification['ancestry_column']] == setup.classification['infer_ancestry']]
 
 # Define classification task 
-setup.log('Define classification')
+setup.log("Define classification")
 # Check that classification
 eur_data = (eur_data[eur_data.obs[setup.classification['output_column']]
                      .isin(setup.classification['comparison'])]
@@ -78,23 +93,15 @@ inf_data = (inf_data[inf_data.obs[setup.classification['output_column']]
                      .isin(setup.classification['comparison'])]
                      )
 
-# Validate classification task
-# Assertion: Check for enough samples per class
-# 1. Check for enough samples in the training ancestries (EUR)
-# 2. Check for enough samples in inferred ancestry
-counts = eur_data.obs[setup.classification['output_column']].value_counts()
-          
-assert_str = f'Prerequisite is a train sample size of {setup.sample_cutoff} per class.'
-assert (counts > setup.sample_cutoff).all(), assert_str
+# Assertion: Check min sample sizes per class
+data_validator.check_min_samples_per_class(
+    data=eur_data.obs,
+    column=setup.classification['output_column'],
+    min_samples=setup.sample_cutoff,
+    data_name="European data"
+    )
 
-# Check compared ancestry (infer_ancestry) if there are replicates
-# Limma eBayes needs at least one replicate per class
-counts = inf_data.obs[setup.classification['output_column']].value_counts()
-
-assert_str = f'For DGE analysis of compared ancestry ({setup.classification['infer_ancestry'].upper()}) at least one replicate per class is needed.'
-assert (counts >= 2).all(), assert_str
-
-setup.log('Setting seed')
+setup.log("Setting seed")
 # Seed is used to generate different European subsets
 # Subsets are sampled randomly
 seed = setup.seed
@@ -149,10 +156,30 @@ for downsampled_data in zip(eur_downsampled_list, inf_downsampled_list):
     # Get observations 
     train_idx, test_idx, inf_idx = train_data.obs_names, test_data.obs_names, inf_downsampled.obs_names
 
-    # Assertion: 
-    # Check for data leackage
-    assert_str = f'Data leakage! Observation also occur in the testset.'
-    assert not test_idx.isin(train_idx).all(), assert_str
+    # Assertion: Check for data leakage
+    data_validator.check_data_leakage(train_idx, test_idx)
+    # Assertion: Check min sample size per class
+    # Train data
+    data_validator.check_min_samples_per_class(
+        data=train_data.obs,
+        column=setup.classification['output_column'],
+        min_samples=2,
+        data_name="Train data"
+        )
+    # Test data
+    data_validator.check_min_samples_per_class(
+        data=test_data.obs,
+        column=setup.classification['output_column'],
+        min_samples=2,
+        data_name="Test data"
+        )
+    # Inf data
+    data_validator.check_min_samples_per_class(
+        data=inf_downsampled.obs,
+        column=setup.classification['output_column'],
+        min_samples=2,
+        data_name="Inf data"
+        )
 
     # Check for correct downsampling
     assert_str = f"Train and test set do not add up to complete data."

@@ -31,7 +31,7 @@ if (length(args) > 0) {
 } else {
   print("Running interactive mode for development.")
   # Yaml file used for development (often an actual job script)
-  yaml_file <- "PanCanAtlas_RSEM_covariates_subtype_age_EUR_to_EAS.yml"
+  yaml_file <- "PanCanAtlas_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml"
   # 1. Check if it's a valid yaml file
   # 2. Load the yaml file
   is_yml_file(yaml_file)
@@ -95,6 +95,9 @@ for (folder in match_vscratch_dir){
     ml_data <- fread(ml_file) 
     metric_ml <- bind_rows(metric_ml, ml_data) 
 }
+# Save
+fwrite(metric_dge, file.path(path_to_save_location, "Metric_dge.csv"))
+fwrite(metric_ml, file.path(path_to_save_location, "Metric_ml.csv"))
 
 # Similarity of obervations across seeds
 # Load observations
@@ -247,7 +250,8 @@ summarized_dge <- metric_dge |>
       n_seeds = n(),
       mean_value = mean(Value, na.rm = TRUE),
       sd_value = sd(Value, na.rm = TRUE),
-      se_value = sd(Value, na.rm = TRUE) / sqrt(n())
+      se_value = sd(Value, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop"
   ) |>
   mutate(p_value = ifelse(Metric == "Pearson", p_pearson, p_spearman))
 
@@ -275,13 +279,16 @@ summarized_ml <- metric_ml |>
       n_seeds = n(),
       mean_value = mean(Value, na.rm = TRUE),
       sd_value = sd(Value, na.rm = TRUE),
-      se_value = sd(Value, na.rm = TRUE) / sqrt(n())
+      se_value = sd(Value, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop"
   ) |>
   mutate(p_value = ifelse(Algorithm == "LogisticRegression", p_regression, p_forest))
 
+# Save
+fwrite(summarized_dge, file.path(path_to_save_location, "Summarized_metric_dge.csv"))
+fwrite(summarized_ml, file.path(path_to_save_location, "Summarized_metric_ml.csv"))
 
-# Plot differential gene expression analysis and machine learning
-# Space for some shared variables (plotting)
+# Visualization
 
 # Labeller to annotate number of samples per ancestry
 ancestry_labels <- summarized_dge |>
@@ -291,8 +298,17 @@ ancestry_labels <- summarized_dge |>
   select(Ancestry, label) |>
   deframe()
 
-# Plot of correlation 
-DGE_plot <- summarized_dge |> 
+# Axis
+common_y <- scale_y_continuous(
+  limits = c(0, 1.2), 
+  breaks = c(0, 0.5, 1))
+
+common_x <- scale_x_continuous(
+  limits = c(-1.2, 1.2), 
+  breaks = c(-1,-0.5,0, 0.5, 1))
+
+# Bar plot dge
+DGE_bar_plot <- summarized_dge |> 
    ggplot(
         aes(
             x = fct_rev(Prediction),
@@ -338,8 +354,56 @@ DGE_plot <- summarized_dge |>
     inherit.aes = FALSE  # Don't inherit the default aesthetics
   ) 
 
-# Plot of ml
-ML_plot <- summarized_ml |> 
+# Save the plot
+ggsave(filename = "Plot_bar_dge.pdf", 
+       plot = DGE_bar_plot, 
+       path = path_to_save_location, 
+       width = 5, height = 5
+       )
+
+# Density plot
+DGE_density_plot <- metric_dge |>
+  pivot_longer(
+    cols = c(Pearson, Spearman), 
+    names_to = "Metric", 
+    values_to = "Value"
+  ) |>
+  ggplot(
+    aes(
+      x = Value,
+      fill = fct_rev(Prediction)
+    )
+  ) +
+  geom_density(
+    alpha = 0.5
+  ) +
+  common_x +
+  facet_grid(
+    rows = vars(Metric),
+    col = vars(Ancestry),
+    labeller = labeller(Ancestry = as_labeller(ancestry_labels), 
+                        Metric = label_value)
+  ) +
+  labs(
+    x = "Correlation coefficient",
+    y = "Density",
+    fill = "Prediction"
+  ) +
+  theme(
+    legend.position = "bottom",
+    legend.direction = "horizontal"
+  )
+
+# Save the plot
+ggsave(filename = "Plot_density_dge.pdf", 
+       plot = DGE_density_plot, 
+       path = path_to_save_location, 
+       width = 5, height = 5
+       )
+
+
+# Bar plot ml
+ML_bar_plot <- summarized_ml |> 
         ggplot(
         aes(
             x = fct_rev(Prediction),
@@ -383,27 +447,55 @@ ML_plot <- summarized_ml |>
     hjust = 0,   # Align text to the left (since we're using x = 0.5 for the first bar)
     inherit.aes = FALSE  # Don't inherit the default aesthetics
   )
-
-# Save DGE and ML approach
-# 1. Metric
-fwrite(metric_dge, file.path(path_to_save_location, "Metric_dge.csv"))
-fwrite(metric_ml, file.path(path_to_save_location, "Metric_ml.csv"))
-# 2. Summarized metric
-fwrite(summarized_dge, file.path(path_to_save_location, "Summarized_metric_dge.csv"))
-fwrite(summarized_ml, file.path(path_to_save_location, "Summarized_metric_ml.csv"))
-# 3. Plots
-# Save the image
-ggsave(filename = "Plot_dge.pdf", 
-       plot = DGE_plot, 
+# Save 
+ggsave(filename = "Plot_bar_ml.pdf", 
+       plot = ML_bar_plot, 
        path = path_to_save_location, 
        width = 5, height = 5
        )
 
-ggsave(filename = "Plot_ml.pdf", 
-       plot = ML_plot, 
+# Density plot
+ML_density_plot <- metric_ml |>
+  pivot_longer(
+    cols = c(LogisticRegression, RandomForestClassifier), 
+    names_to = "Algorithm", 
+    values_to = "Value"
+  ) |>
+  mutate(
+    Value = Value + rnorm(n(), mean = 0, sd = 0.01) # Adding small random noise
+  ) |>
+  ggplot(
+    aes(
+      x = Value,
+      fill = fct_rev(Prediction)
+    )
+  ) +
+  geom_density(
+    alpha = 0.5
+  ) +
+  common_x +
+  facet_grid(
+    rows = vars(Algorithm),
+    col = vars(Ancestry),
+    labeller = labeller(Ancestry = as_labeller(ancestry_labels))
+  ) +
+  labs(
+    x = "ROC AUC",
+    y = "Density",
+    fill = "Prediction"
+  ) +
+  theme(
+    legend.position = "bottom",
+    legend.direction = "horizontal"
+  )
+
+# Save the plot
+ggsave(filename = "Plot_density_ml.pdf", 
+       plot = ML_density_plot, 
        path = path_to_save_location, 
        width = 5, height = 5
        )
+
 
 
 # Combine model weights

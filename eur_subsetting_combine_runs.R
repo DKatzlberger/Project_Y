@@ -108,15 +108,14 @@ summarized_dge <- metric_dge |>
     ) |> 
     # Dont use 'Seed' in 'group_by'
     group_by(Metric, 
-             Ancestry, 
              n_test_ancestry,
-             n_train_ancestry
     ) |>  
     summarize(
         n_seeds = n(),
         mean_value = mean(Value, na.rm = TRUE),
         sd_value = sd(Value, na.rm = TRUE),
-        se_value = sd(Value, na.rm = TRUE) / sqrt(n())
+        se_value = sd(Value, na.rm = TRUE) / sqrt(n()),
+        .groups = "drop"
   ) |>
   mutate(Algorithm = "limma")
 
@@ -128,16 +127,15 @@ summarized_ml <- metric_ml |>
     ) |> 
     # Dont use 'Seed' in 'group_by'
     group_by(Algorithm, 
-             Ancestry, 
              n_test_ancestry,
-             n_train_ancestry,
              Metric
     ) |>  
     summarize(
         n_seeds = n(),
         mean_value = mean(Value, na.rm = TRUE),
         sd_value = sd(Value, na.rm = TRUE),
-        se_value = sd(Value, na.rm = TRUE) / sqrt(n())
+        se_value = sd(Value, na.rm = TRUE) / sqrt(n()),
+        .groups = "drop"
   )
 
 # Combine DGE and ML 
@@ -208,6 +206,6 @@ combined_plot <- train_number_plot + performance_plot + plot_layout(widths = c(1
 ggsave(filename = "Performance_by_sample_size.pdf", 
        plot = performance_plot, 
        path = path_to_save_location, 
-       width = 5, height = 5
+       width = 10, height = 5
        )
 

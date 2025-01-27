@@ -131,4 +131,7 @@ ggsave(filename = "Plot_dge.pdf",
        width = 5, height = 5)
 
 
+dge_metric |>
+    select(Value)
+
 

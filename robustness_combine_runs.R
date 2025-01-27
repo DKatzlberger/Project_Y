@@ -33,7 +33,7 @@ if (length(args) > 0) {
 } else {
   print("Running interactive mode for development.")
   # Yaml file used for development (often an actual job script)
-  yaml_file <- "PanCanAtlas_RSEM_covariates_subtype_age_EUR_to_EAS.yml"
+  yaml_file <- "PanCanAtlas_RSEM_basal_vs_non-basal_EUR_to_EAS.yml"
   # 1. Check if it's a valid yaml file
   # 2. Load the yaml file
   is_yml_file(yaml_file)
@@ -135,7 +135,8 @@ for (prop in setup$proportion) {
       n_seeds = n(),
       mean_value = mean(Value, na.rm = TRUE),
       sd_value = sd(Value, na.rm = TRUE),
-      se_value = sd(Value, na.rm = TRUE) / sqrt(n())
+      se_value = sd(Value, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop"
     ) |>
     # Add p_value
     mutate(p_value = ifelse(Metric == "Pearson", p_pearson, p_spearman))
@@ -159,7 +160,8 @@ for (prop in setup$proportion) {
         n_seeds = n(),
         mean_value = mean(Value, na.rm = TRUE),
         sd_value = sd(Value, na.rm = TRUE),
-        se_value = sd(Value, na.rm = TRUE) / sqrt(n())
+        se_value = sd(Value, na.rm = TRUE) / sqrt(n()),
+        .groups = "drop"
       ) |>
       # Add p_value
       mutate(p_value = ifelse(Algorithm == "LogisticRegression", p_regression, p_forest))
@@ -217,7 +219,7 @@ for (prop in setup$proportion) {
   
   # Correlation axis from 0 to 1
   common_y <- scale_y_continuous(
-    limits = c(0, 1.1), 
+    limits = c(0, 1.2), 
     breaks = c(0, 0.5, 1))
   
   # Create plot
@@ -256,7 +258,7 @@ for (prop in setup$proportion) {
       aes(
         x = 0.5,  # Align text to the left side of the first bar (0.5 is a bit to the left of the first bar)
         y = Inf,  # Position the text at the top of the plot
-        label = paste("Perm. test,", "p =", format(p_adjusted, digits = 3))
+        label = paste("Perm. test,", "p.adj =", format(p_adjusted, digits = 3))
         ),
       size = 4,    
       vjust = 2,   # Align text to the top (since we're using Inf for y)
@@ -269,13 +271,14 @@ for (prop in setup$proportion) {
 }
 
 # Combine with patchwork 
-combined_dge_plot <- wrap_plots(ggplot_list_dge, ncol = 2)
+combined_dge_bar_plot <- wrap_plots(ggplot_list_dge, ncol = 2)
 # Save the image
-ggsave(filename = "Plot_dge.pdf", 
-       plot = combined_dge_plot, 
+ggsave(filename = "Plot_bar_dge.pdf", 
+       plot = combined_dge_bar_plot, 
        path = path_to_save_location, 
        width = 10, height = 10
        )
+
 
 # ml 
 ggplot_list_ml = list()
@@ -293,7 +296,7 @@ for (prop in setup$proportion) {
   
   # Correlation axis from 0 to 1
   common_y <- scale_y_continuous(
-    limits = c(0, 1.1), 
+    limits = c(0, 1.2), 
     breaks = c(0, 0.5, 1))
   
   # Create plot
@@ -332,7 +335,7 @@ for (prop in setup$proportion) {
       aes(
         x = 0.5,  # Align text to the left side of the first bar (0.5 is a bit to the left of the first bar)
         y = Inf,  # Position the text at the top of the plot
-        label = paste("Perm. test,", "p =", format(p_adjusted, digits = 3))
+        label = paste("Perm. test,", "p.adj =", format(p_adjusted, digits = 3))
         ),
       size = 4,    
       vjust = 2,   # Align text to the top (since we're using Inf for y)
@@ -345,12 +348,149 @@ for (prop in setup$proportion) {
 }
 
 # Combine with patchwork 
-combined_ml_plot <- wrap_plots(ggplot_list_ml, ncol = 2)
+combined_ml_bar_plot <- wrap_plots(ggplot_list_ml, ncol = 2)
 # Save the image
-ggsave(filename = "Plot_ml.pdf", 
-       plot = combined_ml_plot, 
+ggsave(filename = "Plot_bar_ml.pdf", 
+       plot = combined_ml_bar_plot, 
        path = path_to_save_location, 
        width = 10, height = 10
        )
+
+
+# Density
+# dge
+ggplot_list_dge = list()
+for (prop in setup$proportion) {
+  # Filter by proportion
+  filtered_dge <- filter(metric_dge, Proportion == prop)
+
+  # Create lable to showcase number of samples
+  n_inf_label <- filtered_dge |>
+    ungroup() |>  
+    distinct(Ancestry, n_inf_ancestry) |>
+    mutate(label = paste0(Ancestry, " (n = ", n_inf_ancestry, ")")) |>
+    select(Ancestry, label) |>
+    deframe()
+  
+  # Common axis
+  common_x <- scale_x_continuous(
+    limits = c(-1.2, 1.2), 
+    breaks = c(-1,-0.5,0, 0.5, 1))
+  
+  # Create plot
+  prop_plot <- filtered_dge |>
+    pivot_longer(
+      cols = c(Pearson, Spearman), 
+      names_to = "Metric", 
+      values_to = "Value"
+    ) |>
+    ggplot(
+      aes(
+        x = Value,
+        fill = fct_rev(Prediction)
+      )
+    ) +
+    geom_density(
+      alpha = 0.5
+    ) +
+    common_x +
+    facet_grid(
+      rows = vars(Metric),
+      col = vars(Ancestry),
+      labeller = labeller(Ancestry = as_labeller(n_inf_label), 
+                          Metric = label_value)
+    ) +
+    labs(
+      x = "Correlation coefficient",
+      y = "Density",
+      fill = "Prediction"
+    ) +
+    theme(
+      legend.position = "bottom",
+      legend.direction = "horizontal"
+    )
+
+  # Add the plot to the list with a unique name
+  ggplot_list_dge[[paste0("prop_", prop)]] <- prop_plot
+}
+
+# Combine with patchwork 
+combined_dge_density_plot <- wrap_plots(ggplot_list_dge, ncol = 2)
+# Save the image
+ggsave(filename = "Plot_density_dge.pdf", 
+       plot = combined_dge_density_plot, 
+       path = path_to_save_location, 
+       width = 10, height = 10
+       )
+
+
+# ml
+ggplot_list_ml = list()
+for (prop in setup$proportion) {
+  # Filter by proportion
+  filtered_ml <- filter(metric_ml, Proportion == prop)
+
+  # Create lable to showcase number of samples
+  n_inf_label <- filtered_ml |>
+    ungroup() |>  
+    distinct(Ancestry, n_inf_ancestry) |>
+    mutate(label = paste0(Ancestry, " (n = ", n_inf_ancestry, ")")) |>
+    select(Ancestry, label) |>
+    deframe()
+  
+  # Common axis
+  common_x <- scale_x_continuous(
+    limits = c(-1.2, 1.2), 
+    breaks = c(-1,-0.5,0, 0.5, 1))
+  
+  # Create plot
+  prop_plot <- filtered_ml |>
+    pivot_longer(
+      cols = c(LogisticRegression, RandomForestClassifier), 
+      names_to = "Algorithm", 
+      values_to = "Value"
+    ) |>
+    mutate(
+      Value = Value + rnorm(n(), mean = 0, sd = 0.01) # Adding small random noise
+    ) |>
+    ggplot(
+      aes(
+        x = Value,
+        fill = fct_rev(Prediction)
+      )
+    ) +
+    geom_density(
+      alpha = 0.5
+    ) +
+    common_x +
+    facet_grid(
+      rows = vars(Algorithm),
+      col = vars(Ancestry),
+      labeller = labeller(Ancestry = as_labeller(n_inf_label))
+    ) +
+    labs(
+      x = "ROC AUC",
+      y = "Density",
+      fill = "Prediction"
+    ) +
+    theme(
+      legend.position = "bottom",
+      legend.direction = "horizontal"
+    )
+
+  # Add the plot to the list with a unique name
+  ggplot_list_ml[[paste0("prop_", prop)]] <- prop_plot
+}
+
+# Combine with patchwork 
+combined_ml_density_plot <- wrap_plots(ggplot_list_ml, ncol = 2)
+# Save the image
+ggsave(filename = "Plot_density_ml.pdf", 
+       plot = combined_ml_density_plot, 
+       path = path_to_save_location, 
+       width = 10, height = 10
+       )
+
+
 
 
