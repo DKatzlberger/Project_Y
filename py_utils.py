@@ -667,7 +667,15 @@ def train_algorithm(algo_name, setup, train_X, train_y, available_jobs, prop=Non
         return None
     
 
-def evaluate_algorithm_cross_ancestry(algo_name, best_model, setup, test_X, test_y, inf_X, inf_y, feature_names):
+def evaluate_algorithm_cross_ancestry(algo_name, 
+                                      best_model, 
+                                      setup, 
+                                      test_X, 
+                                      test_y, 
+                                      inf_X, 
+                                      inf_y, 
+                                      feature_names,
+                                      encoder):
     """
     Evaluate the trained model on test and inference datasets, saving results and feature importances.
 
@@ -690,16 +698,32 @@ def evaluate_algorithm_cross_ancestry(algo_name, best_model, setup, test_X, test
 
         # Generate predictions on the test set and save probabilities
         test_y_hat = pd.DataFrame(best_model.predict_proba(test_X))
+        test_y_hat = test_y_hat.rename(columns=encoder)
         test_y_hat["y"] = test_y
-        test_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_test.csv"), index=False)
+        # Additional information
+        test_y_hat["Algorithm"] = algo_name
+        test_y_hat["Status"] = "Test"
+        test_y_hat["Prediction"] = "Subset"
+        # test_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_test.csv"), index=False)
 
         # Log the start of inference
         setup.log("Infering")
 
         # Generate predictions on the inference set and save probabilities
         inf_y_hat = pd.DataFrame(best_model.predict_proba(inf_X))
+        inf_y_hat = inf_y_hat.rename(columns=encoder)
         inf_y_hat["y"] = inf_y
-        inf_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_inf.csv"), index=False)
+        # Additional information
+        inf_y_hat["Algorithm"] = algo_name
+        inf_y_hat["Status"] = "Inference"
+        inf_y_hat["Prediction"] = "Ancestry"
+        # inf_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_inf.csv"), index=False)
+        
+        # Combine propabilities
+        y_hat = pd.concat([test_y_hat, inf_y_hat])
+        y_hat["Seed"] = setup.seed
+        # Save
+        # y_hat.to_csv(setup.out(f"Probabilities_{algo_name}.csv"), index=False)
 
         # Inference complete
         print(f"{algo_name} validation done.")
@@ -712,6 +736,8 @@ def evaluate_algorithm_cross_ancestry(algo_name, best_model, setup, test_X, test
 
         # Save feature importances to a CSV file
         feature_importance.to_csv(setup.out(f"Feature_importance_{algo_name}.csv"), index=False)
+
+        return y_hat
 
     except Exception as e:
         # Handle and log any exceptions that occur during evaluation

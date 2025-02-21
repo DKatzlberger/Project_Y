@@ -72,6 +72,12 @@ inf_adata = inf_adata[inf_adata$obs[[setup$classification$output_column]] %in% s
 inf_adata_obs = inf_adata$obs_names
 stopifnot(length(inf_adata_obs) == length(inf_idx))
 
+# Number of samples per condition
+condition_count <- inf_adata$obs |>
+ group_by(!!sym(setup$classification$output_column)) |>
+ count()
+
+
 
 # Covariate:
 # 1. Extract the covariate, if it exists and has a meaningful value
@@ -166,7 +172,6 @@ stopifnot(all(train_data$var_names == test_data$var_names))
 stopifnot(table(keeper_genes)[2] == dim(train_filtered$X)[2])
 
 
-
 # Limma workflow
 print("Start differential gene expression analysis.")
 # Normalization (logCPM)
@@ -194,12 +199,12 @@ stopifnot(all(dim(train_mean_res)[1] / length(unique(train_mean_res$coef)) ==
                 table(keeper_genes)[2]))
 
 # Save results
-fwrite(train_mean_res, file.path(setup$output_directory, "Means_train.csv"))
-fwrite(test_mean_res, file.path(setup$output_directory, "Means_test.csv"))
-fwrite(inf_mean_res, file.path(setup$output_directory, "Means_inf.csv"))
+fwrite(train_mean_res, file.path(setup$output_directory, "Limma_means_train.csv"))
+fwrite(test_mean_res, file.path(setup$output_directory, "Limma_means_test.csv"))
+fwrite(inf_mean_res, file.path(setup$output_directory, "Limma_means_inf.csv"))
 
 # Create contrast matrix 
-print("Fit contrast matrix.")
+print("Fit contrast.")
 # Used for hypothesis testing between groups
 comparison <- setup$classification$comparison
 contrast_matrix_train <- create_contrast(colnames(train_design), conditions = comparison)
@@ -223,18 +228,19 @@ inf_contrast_res <- extract_results(inf_limma_fit_contrast)
 
 # Save results
 fwrite(train_contrast_res,
-       file.path(setup$output_directory, "Contrast_train.csv"))
+       file.path(setup$output_directory, "Limma_contrast_train.csv"))
 fwrite(test_contrast_res,
-       file.path(setup$output_directory, "Contrast_test.csv"))
+       file.path(setup$output_directory, "Limma_contrast_test.csv"))
 fwrite(inf_contrast_res,
-       file.path(setup$output_directory, "Contrast_inf.csv"))
+       file.path(setup$output_directory, "Limma_contrast_inf.csv"))
 
 # Filter coef that are in comparison (only interested in those)
 train_contrast_res <- train_contrast_res |> filter(coef %in% setup$classification$comparison)
 test_contrast_res <- test_contrast_res |> filter(coef %in% setup$classification$comparison)
 inf_contrast_res <- inf_contrast_res |> filter(coef %in% setup$classification$comparison)
 
-# Visualization
+
+# Visualization (Validation of models) -----------------------------------------------------------------------------------------
 # Check if logFC of models align with signal in the data
 if (setup$visual_val) {
   # Get genes for validation
@@ -277,6 +283,40 @@ if (setup$visual_val) {
          plot = i, height = 6, width = 12)
 }
 
+
+# Raw logFC
+train_log_FC <- train_contrast_res |>
+  select(coef, Feature, logFC) |>
+  mutate(
+    Status = "Train",
+    Ancestry = toupper(setup$classification$train_ancestry),
+  )
+
+test_log_FC <- test_contrast_res |>
+  select(coef, Feature, logFC) |>
+  mutate(
+    Status = "Test",
+    Ancestry = toupper(setup$classification$train_ancestry),
+  )
+
+inf_log_FC <- inf_contrast_res |>
+  select(coef, Feature, logFC) |>
+  mutate(
+    Status = "Inference",
+    Ancestry = toupper(setup$classification$infer_ancestry)
+  )
+
+# Combine
+raw_logFC <- bind_rows(train_log_FC, test_log_FC, inf_log_FC) |>
+  mutate(
+    Seed = setup$seed,
+    n_train_ancestry = train_n,
+    n_inf_ancestry = inf_n,
+  )
+
+# Save
+fwrite(raw_logFC, file.path(setup$output_directory, "LogFCs.csv"))
+
 # Calculate metric
 print("Correlation of logFCs.")
 # Select and rename logFC columns from each data frame for clarity
@@ -297,7 +337,7 @@ merged_log_FC <- train_log_FC |>
   inner_join(test_log_FC, by = c("coef", "Feature")) |>
   inner_join(inf_log_FC, by = c("coef", "Feature"))
 
-# Correlation
+# Correlation summarized across genes
 pearson <- head(compute_correlation(data = merged_log_FC, method = "pearson"), 2)
 spearman <- head(compute_correlation(data = merged_log_FC, method = "spearman"), 2)
 
@@ -312,79 +352,266 @@ metric_df <- inner_join(pearson, spearman, by = c("V1", "V2")) |>
     n_inf_ancestry = inf_n,
   )
 
+# Save
+fwrite(metric_df, file.path(setup$output_directory, "Contrast_metric_dge.csv"))
 
-# Predicting Regression
-print("Predicting regression.")
 
-# Predicted contrast (train set)
-predicted_contrast_train <- train_contrast_res |> 
-  select(coef, Feature, logFC) |>
-  rename(Comparison = coef, Predicted_contrast = logFC) |>
-  arrange(Comparison, Feature)
 
-# Contrast (test set, inf set)
-# Observed response
-meta <- as_tibble(test_filtered$obs, rownames = "patient_id") |> select(patient_id, setup$classification$output_column)
-observed_response_test <- calculate_observed_mean_response(as_tibble(t(test_norm$E), rownames = "patient_id"), 
-                                                           meta = meta,
-                                                           output_column = setup$classification$output_column)
+# # Predicting logFC ---------------------------------------------------------------------------------------------
+# print("Predicting logFC.")
 
-meta <- as_tibble(inf_filtered$obs, rownames = "patient_id") |> select(patient_id, setup$classification$output_column)
-observed_response_inf <- calculate_observed_mean_response(as_tibble(t(inf_norm$E), rownames = "patient_id"), 
-                                                          meta = meta,
-                                                          output_column = setup$classification$output_column)
+# # Predicted contrast (train set)
+# predicted_contrast_train <- train_contrast_res |> 
+#   select(coef, Feature, logFC) |>
+#   rename(Comparison = coef, Predicted_contrast = logFC) |>
+#   arrange(Comparison, Feature)
 
-# Observed contrast
-observed_contrast_test <- calculate_observed_contrast(observed_response_test, 
-                                                      output_column = setup$classification$output_column)
+# # Contrast (test set, inf set)
+# # Observed response
+# meta <- as_tibble(test_filtered$obs, rownames = "patient_id")  |> select(patient_id, setup$classification$output_column)
+# observed_response_test <- calculate_observed_mean_response(as_tibble(t(test_norm$E), rownames = "patient_id"), 
+#                                                            meta = meta,
+#                                                            output_column = setup$classification$output_column)
 
-observed_contrast_inf <- calculate_observed_contrast(observed_response_inf, 
-                                                     output_column = setup$classification$output_column) |>
-  mutate(Status = "Inference")
+# meta <- as_tibble(inf_filtered$obs, rownames = "patient_id") |> select(patient_id, setup$classification$output_column)
+# observed_response_inf <- calculate_observed_mean_response(as_tibble(t(inf_norm$E), rownames = "patient_id"), 
+#                                                           meta = meta,
+#                                                           output_column = setup$classification$output_column)
 
-# Metric
-test_prediction <- observed_contrast_test |>
-  left_join(predicted_contrast_train, by = c("Comparison", "Feature")) |>
-  group_by(Comparison) |>
+# # Observed contrast
+# observed_contrast_test <- calculate_observed_contrast(observed_response_test, 
+#                                                       output_column = setup$classification$output_column)
+
+# observed_contrast_inf <- calculate_observed_contrast(observed_response_inf, 
+#                                                      output_column = setup$classification$output_column) 
+
+# # ---- Per gene metric ----
+# # Test
+# test_gene_error <- observed_contrast_test |>
+#   left_join(predicted_contrast_train, by = c("Comparison", "Feature")) |>
+#   group_by(Comparison, Feature) |>
+#   summarise(
+#     RMSE = sqrt(mean((Observed_contrast - Predicted_contrast)^2)),  
+#     # MAE  = mean(abs(Observed_contrast - Predicted_contrast)),
+#     # R2 = 1 - sum((Observed_contrast - Predicted_contrast)^2) / sum((Observed_contrast - mean(Observed_contrast))^2),
+#     .groups = "drop"
+#   ) |>
+#   mutate(
+#     Status = "Test",
+#     Prediction = "Subset"
+#   )
+
+# # Inf
+# inf_gene_error <- observed_contrast_inf |>
+#   left_join(predicted_contrast_train, by = c("Comparison", "Feature")) |>
+#   group_by(Comparison, Feature) |>
+#   summarise(
+#     RMSE = sqrt(mean((Observed_contrast - Predicted_contrast)^2)),  
+#     # MAE  = mean(abs(Observed_contrast - Predicted_contrast)),
+#     # R2 = 1 - sum((Observed_contrast - Predicted_contrast)^2) / sum((Observed_contrast - mean(Observed_contrast))^2),
+#     .groups = "drop"
+#   ) |>
+#   mutate(
+#     Status = "Inference",
+#     Prediction = "Ancestry"
+#   )
+
+# # Combine
+# contrast_per_gene_metric <- bind_rows(test_gene_error, inf_gene_error) |>
+#   mutate(
+#     Seed = setup$seed,
+#     Ancestry = toupper(setup$classification$infer_ancestry),
+#     n_train_ancestry = train_n,
+#     n_inf_ancestry = inf_n,
+#   )
+
+# # Save
+# fwrite(contrast_per_gene_metric, file.path(setup$output_directory, "Metric_contrast_per_gene.csv"))
+
+# # ---- Summarized metric ----
+# test_prediction <- observed_contrast_test |>
+#   left_join(predicted_contrast_train, by = c("Comparison", "Feature")) |>
+#   group_by(Comparison) |>
+#   summarise(
+#     # Calculate the MAE
+#     MAE = mean(abs(Observed_contrast - Predicted_contrast)),
+#     # Calculate the RMSE
+#     RMSE = sqrt(mean((Observed_contrast - Predicted_contrast)^2)),
+#     # Calculate the R-squared
+#     SS_residual = sum((Observed_contrast - Predicted_contrast)^2),  
+#     SS_total = sum((Observed_contrast - mean(Observed_contrast))^2), 
+#     R2 = 1 - (SS_residual / SS_total),
+#     .groups = "drop"
+#   ) |>
+#   mutate(Status = "Test")
+
+# inf_prediction <-  observed_contrast_inf |>
+#   left_join(predicted_contrast_train, by = c("Comparison", "Feature")) |>
+#   group_by(Comparison) |>
+#   summarise(
+#     # Calculate the MAE
+#     MAE = mean(abs(Observed_contrast - Predicted_contrast)),
+#     # Calculate the RMSE
+#     RMSE = sqrt(mean((Observed_contrast - Predicted_contrast)^2)),
+#     # Calculate the R-squared
+#     SS_residual = sum((Observed_contrast - Predicted_contrast)^2),  
+#     SS_total = sum((Observed_contrast - mean(Observed_contrast))^2), 
+#     R2 = 1 - (SS_residual / SS_total),
+#     .groups = "drop"
+#   ) |>
+#   mutate(Status = "Inference")
+
+# # Combine
+# metric_prediction <- bind_rows(test_prediction, inf_prediction) |>
+#   select(-Comparison) |>
+#   distinct() |>
+#   left_join(metric_df, by = "Status")
+
+# # Save
+# fwrite(metric_prediction, file.path(setup$output_directory, "Metric_contrast.csv"))
+
+
+# Predicting regression (Baseline differences) ----------------------------------------------------------------------
+print("Predicting baseline differences.")
+train_coefficients <- train_limma_fit$coefficients
+# Prediction
+test_predictions <- as_tibble(t(train_coefficients %*% t(test_design)), rownames = "Idx")
+inf_predictions <- as_tibble(t(train_coefficients %*% t(inf_design)), rownames = "Idx")
+# Observed
+test_observations <- as_tibble(t(test_norm$E), rownames = "Idx")
+inf_observations <- as_tibble(t(inf_norm$E), rownames = "Idx")
+# Meta
+test_meta <- as_tibble(test_filtered$obs, rownames = "Idx") |> select(Idx, setup$classification$output_column)
+inf_meta <- as_tibble(inf_filtered$obs, rownames = "Idx") |> select(Idx, setup$classification$output_column)
+# Merge
+test_predictions <- left_join(test_meta, test_predictions, by = "Idx")
+inf_predictions <- left_join(inf_meta, inf_predictions, by = "Idx")
+
+test_observations <- left_join(test_meta, test_observations, by = "Idx")
+inf_observations <- left_join(inf_meta, inf_observations, by = "Idx")
+
+# Reshape
+test_observations <- test_observations |>
+  pivot_longer(
+    cols = -c(Idx, setup$classification$output_column), 
+    names_to = "Feature", 
+    values_to = "Observed"
+    )
+
+inf_observations <- inf_observations |>
+  pivot_longer(
+    cols = -c(Idx, setup$classification$output_column), 
+    names_to = "Feature", 
+    values_to = "Observed"
+    )
+
+test_predictions <- test_predictions |>
+  pivot_longer(
+    cols = -c(Idx, setup$classification$output_column), 
+    names_to = "Feature", 
+    values_to = "Predicted"
+    )
+
+inf_predictions <- inf_predictions |>
+  pivot_longer(
+    cols = -c(Idx, setup$classification$output_column), 
+    names_to = "Feature", 
+    values_to = "Predicted"
+    )
+
+# Merge (Observed, predicted)
+test_obs_pred <- left_join(test_observations, test_predictions, by = c("Idx", setup$classification$output_column, "Feature"))
+inf_obs_pred <- left_join(inf_observations, inf_predictions, by = c("Idx", setup$classification$output_column, "Feature"))
+
+# ---- Per gene metric ----
+test_gene_error <- test_obs_pred |>
+  group_by(!!sym(setup$classification$output_column), Feature) |>
   summarise(
-    # Calculate the MAE
-    MAE = mean(abs(Observed_contrast - Predicted_contrast)),
-    # Calculate the RMSE
-    RMSE = sqrt(mean((Observed_contrast - Predicted_contrast)^2)),
-    # Calculate the R-squared
-    SS_residual = sum((Observed_contrast - Predicted_contrast)^2),  
-    SS_total = sum((Observed_contrast - mean(Observed_contrast))^2), 
-    R2 = 1 - (SS_residual / SS_total),
+    RMSE = sqrt(mean((Observed - Predicted)^2)),  
+    MAE  = mean(abs(Observed - Predicted)),   
+    R2 = 1 - sum((Observed - Predicted)^2) / sum((Observed - mean(Observed))^2),   
     .groups = "drop"
   ) |>
-  mutate(Status = "Test")
+  mutate(
+    Status = "Test",
+    Prediction = "Subset"
+  )
 
-inf_prediction <-  observed_contrast_inf |>
-  left_join(predicted_contrast_train, by = c("Comparison", "Feature")) |>
-  group_by(Comparison) |>
+inf_gene_error <- inf_obs_pred |>
+  group_by(!!sym(setup$classification$output_column), Feature) |>
   summarise(
-    # Calculate the MAE
-    MAE = mean(abs(Observed_contrast - Predicted_contrast)),
-    # Calculate the RMSE
-    RMSE = sqrt(mean((Observed_contrast - Predicted_contrast)^2)),
-    # Calculate the R-squared
-    SS_residual = sum((Observed_contrast - Predicted_contrast)^2),  
-    SS_total = sum((Observed_contrast - mean(Observed_contrast))^2), 
-    R2 = 1 - (SS_residual / SS_total),
+    RMSE = sqrt(mean((Observed - Predicted)^2)),  
+    MAE  = mean(abs(Observed - Predicted)),
+    R2 = 1 - sum((Observed - Predicted)^2) / sum((Observed - mean(Observed))^2),  
     .groups = "drop"
   ) |>
-  mutate(Status = "Inference")
+  mutate(
+    Status = "Inference",
+    Prediction = "Ancestry"
+  )
 
 # Combine
-metric_prediction <- bind_rows(test_prediction, inf_prediction) |>
-  select(-Comparison) |>
-  left_join(metric_df, by = "Status")
+baseline_per_gene_metric <- bind_rows(test_gene_error, inf_gene_error) |>
+  mutate(
+    Seed = setup$seed,
+    Ancestry = toupper(setup$classification$infer_ancestry),
+    n_train_ancestry = train_n,
+    n_inf_ancestry = inf_n,
+  )
+
+baseline_per_gene_metric <- baseline_per_gene_metric |>
+  left_join(condition_count, by = setup$classification$output_column) |>
+  rename(n_condition = n) |>
+  rename(Condition = !!sym(setup$classification$output_column))
+
+# Save
+fwrite(baseline_per_gene_metric, file.path(setup$output_directory, "Baseline_metric_per_gene.csv"))
+
+# ---- Summarized metric ----
+test_metric <- test_obs_pred |>
+  group_by(!!sym(setup$classification$output_column)) |>
+  summarise(
+    RMSE = sqrt(mean((Observed - Predicted)^2)),  
+    MAE  = mean(abs(Observed - Predicted)),      
+    R2   = 1 - (sum((Observed - Predicted)^2) / sum((Observed - mean(Observed))^2)),
+    .groups = "drop"
+  ) |>
+  mutate(
+    Status = "Test",
+    Prediction = "Subset"
+    )
+
+inf_metric <- inf_obs_pred |>
+  group_by(!!sym(setup$classification$output_column)) |>
+  summarise(
+    RMSE = sqrt(mean((Observed - Predicted)^2)),  
+    MAE  = mean(abs(Observed - Predicted)),      
+    R2   = 1 - (sum((Observed - Predicted)^2) / sum((Observed - mean(Observed))^2)),
+    .groups = "drop"
+  ) |>
+  mutate(
+    Status = "Inference",
+    Prediction = "Ancestry"
+  )
+
+# Combine test_metric and inf_metric
+baseline_metric <- bind_rows(test_metric, inf_metric) |>
+  mutate(
+    Seed = setup$seed,
+    Ancestry = toupper(setup$classification$infer_ancestry),
+    n_train_ancestry = train_n,
+    n_inf_ancestry = inf_n,
+  )
+
+baseline_metric <- baseline_metric |>
+  left_join(condition_count, by = setup$classification$output_column) |>
+  rename(n_condition = n) |>
+  rename(Condition = !!sym(setup$classification$output_column))
+
+# Save 
+fwrite(baseline_metric, file.path(setup$output_directory, "Baseline_metric_dge.csv"))
 
 
-# Save metric Dataframe
-fwrite(metric_prediction, file.path(setup$output_directory, "Metric_dge.csv"))
-
-# Print statement to switch back to python script
 print("Switching back to Python.")
 
 

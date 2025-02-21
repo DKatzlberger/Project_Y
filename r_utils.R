@@ -517,6 +517,82 @@ calculate_observed_contrast <- function(mean_responses, output_column, cancer_ty
 }
 
 
+# Interactions check variance
+# Optimized function
+calculate_variance_explained <- function(expression_df, check_variance, batch_size = 100, num_cores = detectCores() - 1) {
+  setDT(expression_df)
+  
+  # Split the data by feature (gene) into batches
+  feature_list <- unique(expression_df$Feature)
+  batches <- split(feature_list, ceiling(seq_along(feature_list) / batch_size))
+  
+  # Set up parallel cluster
+  cl <- makeCluster(num_cores)
+  clusterExport(cl, list("expression_df", "check_variance"), envir = environment())
+  clusterEvalQ(cl, library(data.table))
+  
+  # Parallelize the processing of each batch
+  batch_results <- parLapply(cl, batches, function(batch) {
+    # Subset data for the current batch
+    batch_data <- expression_df[Feature %in% batch, ]
+    
+    # Function to calculate R2 for each Feature and check_variance variable
+    calculate_r2_for_feature <- function(.x, var) {
+      var_data <- .x[[var]]
+      
+      # Determine if the variable is numeric or categorical
+      if (is.numeric(var_data)) {
+        # Numeric predictor (e.g., age)
+        formula <- reformulate(var, response = "Expression")
+        model <- lm(formula, data = .x)
+        r2 <- summary(model)$r.squared
+      } else {
+        # Categorical predictor: Convert character to factor
+        var_data <- as.factor(var_data)
+        
+        # Ensure at least two unique levels to avoid contrast error
+        if (nlevels(var_data) > 1) {
+          .x[[var]] <- var_data  # Assign back converted factor
+          formula <- reformulate(var, response = "Expression")
+          model <- lm(formula, data = .x)
+          r2 <- summary(model)$r.squared
+        } else {
+          r2 <- NA  # Skip models with only one category
+        }
+      }
+      return(data.table(Feature = unique(.x$Feature), Variable = var, R2 = r2))
+    }
+    
+    # Efficiently calculate R2 for each variable in check_variance
+    feature_results <- lapply(batch, function(feature) {
+      feature_data <- batch_data[Feature == feature, ]
+      
+      # Calculate R2 for each variable in check_variance
+      result <- lapply(check_variance, function(var) {
+        calculate_r2_for_feature(feature_data, var)
+      })
+      
+      # Combine the results for this feature
+      rbindlist(result)
+    })
+    
+    # Combine all features' results for this batch
+    rbindlist(feature_results)
+  })
+  
+  # Combine all batches' results efficiently
+  variance_df <- rbindlist(batch_results)
+  
+  # Stop the cluster
+  stopCluster(cl)
+  
+  return(variance_df)
+}
+
+
+
+
+
 
 # Permutation test
 permutation_test <- function(data, value_col, group_col) {
@@ -528,7 +604,7 @@ permutation_test <- function(data, value_col, group_col) {
   
   # If any group has zero variance, return p-value of 1
   if (any(var_check$var_value == 0)) {
-    message("One or more groups have identical values. Returning `NA`.")
+    message("Perm test: One or more groups have identical values. Returning `NA`.")
     return(NA)  # Return the p-value of NA directly
   }
 
@@ -569,6 +645,31 @@ permutation_test <- function(data, value_col, group_col) {
   
 #   return(samples)
 # }
+
+
+# Define a generalized function to load and bind data from CSV files
+fload_data <- function(folders, file_name) {
+  combined_data <- data.table()  # Initialize an empty data.table
+
+  # Loop through each folder to read and bind the specified CSV file
+  for (folder in folders) {
+    file <- file.path(folder, file_name)
+
+    if (file.exists(file)) {
+      # Read the data from the CSV file and bind it to the result
+      data <- fread(file)
+      combined_data <- rbindlist(list(combined_data, data), use.names = TRUE, fill = TRUE)
+    } else {
+      warning("File does not exist: ", file)
+    }
+  }
+
+  # Return the combined data.table
+  return(combined_data)
+}
+
+
+
 
 sample_by_size <- function(data, sizes, seed, class_column) {
   # Set seed for reproducibility
@@ -687,7 +788,7 @@ read_enrichR_database <- function(path){
 }
 
 # Function to perform GSEA with fgsea on pvals and logFC
-perform_gsea <- function(dge_results, database_path, rank_by = "logFC") {
+perform_gsea <- function(dge_results, database, rank_by = "logFC") {
   
   # Validate the rank_by argument
   if (!(rank_by %in% colnames(dge_results))) {
@@ -707,11 +808,8 @@ perform_gsea <- function(dge_results, database_path, rank_by = "logFC") {
     "std"  # Use "std" if there are negative values
   }
   
-  # Read the database (path to file)
-  db <- read_enrichR_database(database_path)
-  
   # Run fgsea with the dynamic scoreType
-  fgsea_results <- fgsea(pathways = db, stats = ranked_stats, scoreType = score_type) |>
+  fgsea_results <- fgsea(pathways = database, stats = ranked_stats, scoreType = score_type) |>
     mutate(ranked_by = rank_by)
   
   return(fgsea_results)

@@ -242,18 +242,38 @@ best_models = Parallel(n_jobs=num_algorithms)(
 )
 
 # Evaluation
+y_hat_list = []
 # Feature names for interpretations
 feature_names = train_data.var_names
 for algo_name, best_model in zip(setup.algorithms, best_models):
     if best_model:
-          evaluate_algorithm_cross_ancestry(algo_name, best_model, setup, test_X, test_y, inf_X, inf_y, feature_names)
+          y_hat = evaluate_algorithm_cross_ancestry(
+              algo_name, 
+              best_model,
+              setup, 
+              test_X, 
+              test_y, 
+              inf_X, 
+              inf_y, 
+              feature_names,
+              encoder = inv_encoder
+              )
+          # Append to list of probabilities
+          y_hat_list.append(y_hat)
     else:
         print(f"Skipping evaluation for {algo_name} because training failed.")
+
+# Combine probabilities across algorithms
+y_hat = pd.concat(y_hat_list)
+# Add information
+y_hat["n_train_ancestry"] = len(train_idx)
+y_hat["n_inf_ancestry"] = len(inf_idx)
+# Save
+y_hat.to_csv(setup.out(f"Probabilities.csv"), index=False)
 
 # Calculate metric
 # Multiclass calculation
 if setup.classification['multiclass']:
-    # TODO - Create multiclass scoring script
     print('Score metrics for multiclass needs to be developed.')
 
 # Binary calculation

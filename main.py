@@ -99,7 +99,7 @@ def submit_seed_jobs(settings_file,
                      singularity, 
                      script_name, 
                      analysis_name, 
-                     save_cpus=10):
+                     cpus=10):
     """
     Prepare and submit seed jobs for analysis.
 
@@ -118,10 +118,8 @@ def submit_seed_jobs(settings_file,
     # Load settings
     settings = load_settings(settings_file)
 
-    # Calculate available CPUs
-    available_cpus = get_available_cpus(hostname, save_cpus)
-    cpus_per_job = max(1, available_cpus // len(seeds))
-    settings["njobs"] = cpus_per_job
+    # Set cpus
+    settings["njobs"] = cpus
 
     # Define paths and constants
     tmp_dir = os.path.join("data", "tmp")
@@ -157,7 +155,7 @@ def submit_seed_jobs(settings_file,
             "qsub",
             "-N", modified_path,
             "-l", f"hostname={hostname}",
-            "-pe", "smp", str(cpus_per_job),
+            "-pe", "smp", str(cpus),
             "-o", os.path.join(qsub_output_dir, "output.log"),
             "-e", os.path.join(qsub_output_dir, "error.log"),
             "singularity", "exec", "--bind", "/vscratch:/vscratch",
@@ -176,19 +174,22 @@ def submit_seed_jobs(settings_file,
 
 
 def submit_single_job(settings_file,
-                      job_name_list, 
-                      combine_script_name, 
+                      script_name, 
                       analysis_name, 
-                      singularity):
+                      singularity,
+                      job_name_list=None,
+                      wait_for_jobs=True
+                      ):
     """
-    Submit a job that waits for the seed jobs to finish and combines their outputs.
+    Submit a job that optionally waits for seed jobs to finish before combining their outputs.
 
     Parameters:
-        job_name_list (list): List of job names to wait for.
+        settings_file (str): Path to the settings file.
+        job_name_list (list): List of job names to wait for (if enabled).
         combine_script_name (str): Name of the script to combine results.
         analysis_name (str): Name of the analysis.
-        hostname (str): Hostname for CPU availability.
         singularity (str): Path to the Singularity image.
+        wait_for_jobs (bool): Whether to wait for the jobs in job_name_list to finish.
 
     Returns:
         str: The name of the combine job.
@@ -197,11 +198,10 @@ def submit_single_job(settings_file,
     # Load settings
     settings = load_settings(settings_file)
 
-    # Create a comma-separated list of job names
-    ids_to_wait = ",".join(job_name_list)
+    # Create job name
     tag = settings['tag']
     comparison = "_vs_".join(settings['classification']['comparison'])
-    job_name = f"{tag}_{comparison}_{analysis_name}_combine_runs"
+    job_name = f"{tag}_{comparison}_{analysis_name}"
 
     # Define paths and constants
     tmp_dir = os.path.join("data", "tmp")
@@ -214,19 +214,24 @@ def submit_single_job(settings_file,
     qsub_output_dir = prepare_directories(qsub_dir, job_name)
 
     # Make combine script executable
-    os.chmod(combine_script_name, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+    os.chmod(script_name, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
 
     # Define the qsub command
     command = [
         "qsub",
         "-N", job_name,
-        "-hold_jid", ids_to_wait,
         "-o", os.path.join(qsub_output_dir, "output.log"),
         "-e", os.path.join(qsub_output_dir, "error.log"),
         "singularity", "exec", "--bind", "/vscratch:/vscratch",
         singularity,
-        "Rscript", combine_script_name, settings_file
+        "Rscript", script_name, settings_file
     ]
+
+    # Add hold_jid only if wait_for_jobs is True and job_name_list is not empty
+    if wait_for_jobs and job_name_list:
+        ids_to_wait = ",".join(job_name_list)
+        command.insert(3, "-hold_jid")
+        command.insert(4, ids_to_wait)
 
     # Execute the command
     try:
@@ -243,17 +248,26 @@ if __name__ == "__main__":
 
     # Fixed arguments
     SINGULARITY = "data/ancestry_dk.sif"
-    HOSTNAME = "merida.came.sbg.ac.at"
-    SEEDS = np.arange(1, 11)
+    HOSTNAME = "trude.came.sbg.ac.at"
+    SEEDS = np.arange(1, 3)
 
     # Ancestry specific settings
     SETTINGS_FILES = [
-        "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_ADMIX.yml",
-        "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_AFR.yml",
-        "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_EAS.yml"
+        "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml",
+        "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_AFR.yml",
+        "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_EAS.yml"  
     ]
     # Pattern to extract 'eur_to_region'
     pattern = r"EUR_to_[A-Z]+"
+
+    # CPUS
+    available_cpus = get_available_cpus(hostname=HOSTNAME, save_cpus=5)
+    number_jobs = len(SETTINGS_FILES) * len(SEEDS) * 3
+    available_cpus = max(4, available_cpus // number_jobs)
+
+    # Job list for all ancestries
+    # 'Combine_ancestries' script needs to wait for these jobs
+    combine_ancestries_wait_jobs = []
     for SETTINGS_FILE in SETTINGS_FILES:
         
         # Extract ancestry comparison
@@ -261,83 +275,119 @@ if __name__ == "__main__":
         eur_to_region = match.group()
 
         # 'cross_ancestry' analysis
-        SCRIPT_NAME = "cross_ancestry.py"
-        COMBINE_SCRIPT_NAME = "cross_ancestry_combine_runs.R"
-        CUSTOM_ANALYSIS_NAME = f"{eur_to_region}_cross_ancestry"
+        SCRIPT = "cross_ancestry.py"
+        ANALYSIS_NAME = f"{eur_to_region}_cross_ancestry"
 
         # Submit seed jobs and retrieve the job names
-        job_name_list, tmp_settings = submit_seed_jobs(
-            SETTINGS_FILE,
-            SEEDS,
-            HOSTNAME,
-            SINGULARITY,
-            SCRIPT_NAME,
-            CUSTOM_ANALYSIS_NAME,
-            save_cpus=10
+        cross_ancestry_jobs, tmp_settings = submit_seed_jobs(
+            settings_file=SETTINGS_FILE,
+            seeds=SEEDS,
+            hostname=HOSTNAME,
+            singularity=SINGULARITY,
+            script_name=SCRIPT,
+            analysis_name=ANALYSIS_NAME,
+            cpus=available_cpus
         )
 
-        # Submit combine job that depends on seed jobs
-        combine_job_name = submit_single_job(
-            tmp_settings,
-            job_name_list,
-            COMBINE_SCRIPT_NAME,
-            CUSTOM_ANALYSIS_NAME,
-            SINGULARITY
-        )
-        print(f"Combine job submitted: {combine_job_name}\n")
+        # 'cross_ancestry' combine runs
+        COMBINE_SCRIPT = "cross_ancestry_combine_runs.R"
+        NAME = f"{eur_to_region}_cross_ancestry_combine_runs"
 
-        # TODO - Eventually wait for other analysis to be finished
+        cross_ancestry_combine_runs_job = submit_single_job(
+            settings_file=tmp_settings,
+            job_name_list=cross_ancestry_jobs,
+            script_name=COMBINE_SCRIPT,
+            analysis_name=NAME,
+            singularity=SINGULARITY,
+            wait_for_jobs=True
+        )
+
+        # 'Interactions'
+        INTERACTIONS_SCRIPT = "interactions.R"
+        NAME = f"{eur_to_region}_interactions"
+        
+        # Combine wait jobs
+        interactions_wait_jobs = cross_ancestry_jobs
+        interactions_wait_jobs.append(cross_ancestry_combine_runs_job)
+
+        job_name = submit_single_job(
+            settings_file=tmp_settings,
+            job_name_list=interactions_wait_jobs,
+            script_name=INTERACTIONS_SCRIPT,
+            analysis_name=NAME,
+            singularity=SINGULARITY,
+            wait_for_jobs=True
+        )
 
         # 'robustness' analysis
-        SCRIPT_NAME = "robustness.py"
-        COMBINE_SCRIPT_NAME = "robustness_combine_runs.R"
-        CUSTOM_ANALYSIS_NAME = f"{eur_to_region}_robustness"
+        SCRIPT = "robustness.py"
+        ANALYSIS_NAME = f"{eur_to_region}_robustness"
 
         # Submit seed jobs and retrieve the job names
         job_name_list, tmp_settings = submit_seed_jobs(
-            SETTINGS_FILE,
-            SEEDS,
-            HOSTNAME,
-            SINGULARITY,
-            SCRIPT_NAME,
-            CUSTOM_ANALYSIS_NAME,
-            save_cpus=10
+            settings_file=SETTINGS_FILE,
+            seeds=SEEDS,
+            hostname=HOSTNAME,
+            singularity=SINGULARITY,
+            script_name=SCRIPT,
+            analysis_name=ANALYSIS_NAME,
+            cpus=available_cpus
         )
 
-        # Submit combine job that depends on seed jobs
-        combine_job_name = submit_single_job(
-            tmp_settings,
-            job_name_list,
-            COMBINE_SCRIPT_NAME,
-            CUSTOM_ANALYSIS_NAME,
-            SINGULARITY
-        )
-        print(f"Combine job submitted: {combine_job_name}")
+        # 'robustness' combine runs
+        COMBINE_SCRIPT = "robustness_combine_runs.R"
+        NAME = f"{eur_to_region}_robustness_combine_runs"
 
-    # This analysis only needs to run once
-    # and is not dependent on the compared ancestry
+        robustness_combine_runs_job = submit_single_job(
+            settings_file=tmp_settings,
+            job_name_list=job_name_list,
+            script_name=COMBINE_SCRIPT,
+            analysis_name=NAME,
+            singularity=SINGULARITY,
+            wait_for_jobs=True
+        )
+
+        # Add to combine_ancestries_wait_jobs
+        combine_ancestries_wait_jobs.extend([cross_ancestry_combine_runs_job, robustness_combine_runs_job])
+
+    # This analysis only needs to run once per comparison
     # 'eur_subsetting' analysis
     SCRIPT_NAME = "eur_subsetting.py"
     COMBINE_SCRIPT_NAME = "eur_subsetting_combine_runs.R"
-    CUSTOM_ANALYSIS_NAME = "EUR_subsetting"
+    ANALYSIS_NAME = "EUR_subsetting"
 
     # Submit seed jobs and retrieve the job names
     job_name_list, tmp_settings = submit_seed_jobs(
-        SETTINGS_FILE,
-        SEEDS,
-        HOSTNAME,
-        SINGULARITY,
-        SCRIPT_NAME,
-        CUSTOM_ANALYSIS_NAME,
-        save_cpus=10
+        settings_file=SETTINGS_FILE,
+        seeds=SEEDS,
+        hostname=HOSTNAME,
+        singularity=SINGULARITY,
+        script_name=SCRIPT_NAME,
+        analysis_name=ANALYSIS_NAME,
+        cpus=available_cpus
     )
 
     # Submit combine job that depends on seed jobs
-    combine_job_name = submit_single_job(
-        tmp_settings,
-        job_name_list,
-        COMBINE_SCRIPT_NAME,
-        CUSTOM_ANALYSIS_NAME,
-        SINGULARITY
+    eur_subsetting_combine_runs_job = submit_single_job(
+        settings_file=tmp_settings,
+        job_name_list=job_name_list,
+        script_name=COMBINE_SCRIPT_NAME,
+        analysis_name=ANALYSIS_NAME,
+        singularity=SINGULARITY
     )
-    print(f"Combine job submitted: {combine_job_name}")
+
+
+    # 'Combine ancestries' script
+    COMBINE_ANCESTRIES_SCRIPT = "cross_ancestry_combine_ancestries.R"
+    NAME = "combine_ancestries"
+    combine_ancestries_wait_jobs.append(eur_subsetting_combine_runs_job)
+
+    job_name = submit_single_job(
+            settings_file=SETTINGS_FILE,
+            job_name_list=combine_ancestries_wait_jobs,
+            script_name=COMBINE_ANCESTRIES_SCRIPT,
+            analysis_name=NAME,
+            singularity=SINGULARITY,
+            wait_for_jobs=True
+        )
+    

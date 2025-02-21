@@ -121,6 +121,119 @@ ggsave(filename = "Continous_variables.pdf",
        width = width, height = height
        )
 
+
+# NF meta plot
+# comp_data <- adata[adata$obs[[setup$classification$output_column]]
+#               %in% setup$classification$comparison]
+
+# subtype <- comp_data$obs |> 
+#   ggplot(
+#     aes(
+#       x = !!sym(setup$classification$output_column),
+#       fill = subtype
+#     )
+#   ) +
+#   geom_bar(position = "fill") +
+#   facet_grid(rows = vars(!!sym(setup$classification$ancestry_column))) +
+#   coord_flip() + 
+#   labs(
+#     title = "Subtype",
+#     x = "Comparison",
+#     y = "Proportion",
+#   ) +
+#   theme(
+#     legend.position = "bottom",
+#     legend.title = element_blank(),
+#     strip.text = element_blank(),      
+#     strip.background = element_blank()
+#   ) +
+#   guides(fill = guide_legend(ncol = 2))
+
+# # Sex
+# sex <- comp_data$obs |> 
+#   ggplot(
+#     aes(
+#       x = !!sym(setup$classification$output_column),
+#       fill = sex
+#     )
+#   ) +
+#   geom_bar(position = "fill") +
+#   facet_grid(rows = vars(!!sym(setup$classification$ancestry_column))) +
+#   coord_flip() + 
+#   labs(
+#     title = "Sex",
+#     x = "Comparison",
+#     y = "Proportion",
+#   ) +
+#   theme(
+#     legend.position = "bottom",
+#     legend.title = element_blank(),
+#     axis.text.y = element_blank(),  
+#     axis.title.y = element_blank(),
+#     strip.text = element_blank(),      
+#     strip.background = element_blank()
+#   ) +
+#   guides(fill = guide_legend(ncol = 1))
+
+# # Total plot
+# total <- comp_data$obs |> 
+#   ggplot(
+#     aes(
+#       x = !!sym(setup$classification$output_column),
+#     )
+#   ) +
+#   geom_bar() +
+#   facet_grid(rows = vars(!!sym(setup$classification$ancestry_column))) +
+#   coord_flip() + 
+#   labs(
+#     title = "Total patients",
+#     x = "Comparison",
+#     y = "Total",
+#   ) +
+#   theme(
+#     legend.position = "bottom",
+#     legend.title = element_blank(),
+#     axis.text.y = element_blank(),  
+#     axis.title.y = element_blank(),
+#     strip.text = element_blank(),      
+#     strip.background = element_blank()
+#   )
+
+# age <- comp_data$obs |> 
+#   ggplot(
+#     aes(
+#       x = age,
+#       fill = !!sym(setup$classification$output_column)
+#     )
+#   ) +
+#   geom_density(alpha = 0.5) +
+#   facet_grid(
+#     rows = vars(toupper(!!sym(setup$classification$ancestry_column))),
+#     scale = "free"
+#   ) +
+#   labs(
+#     title = "Age", 
+#     x = "Age",
+#     y = "Density"
+#   ) +
+#   theme(
+#     legend.position = "bottom",
+#     legend.title = element_blank()
+#   ) +
+#   guides(fill = guide_legend(ncol = 1))
+
+# # Patchwork 
+# nf_plot <- subtype + sex + total + age + 
+#   plot_layout(ncol = 4, guides = "collect") &
+#   theme(legend.position = "bottom")
+
+# ggsave(filename = "NF_meta_plot.pdf", 
+#        plot = nf_plot, 
+#        path = path_to_save_location, 
+#        width = 8, height = 6
+#        )
+
+
 # Clustering analysis
 # Check NA values
 # Rows

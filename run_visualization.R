@@ -34,21 +34,21 @@ if (length(args) > 0) {
 print('Start visualization.')
 
 # Load metric dataframes
-ml_metric <- fread(file.path(setup$output_directory, 'Metric_ml.csv')) 
-dge_metric <- fread(file.path(setup$output_directory, 'Metric_dge.csv')) 
+ml_metric <- fread(file.path(setup$output_directory, "Contrast_metric_ml.csv")) 
+dge_metric <- fread(file.path(setup$output_directory, "Contrast_metric_dge.csv")) 
 
 
 # Change format (pivot longer)
 ml_metric <- ml_metric |>  
     pivot_longer(
-        cols = c(LogisticRegression, RandomForestClassifier),
+        cols = c(ROC_AUC, Accuracy),
         values_to = 'Value',
-        names_to = 'Algorithm'
+        names_to = 'Metric'
     ) |> 
     mutate(Prediction = fct_rev(Prediction))
 
 
-dge_metric <- dge_metric |> 
+correlation_dge_metric <- dge_metric |> 
     pivot_longer(
         cols = c(Pearson, Spearman),
         values_to = 'Value',
@@ -70,39 +70,41 @@ ancestry_labels <- ml_metric |>
   select(Ancestry, label) |>
   deframe()  # Converts to a named vector
 
+# Create threshold label
+
+
 # Visualize:
 ml_metric_plot <- ml_metric |>
-    ggplot(
-        aes(
-            x = Prediction,
-            y = Value
-        )
-    ) +
-    geom_col() +
-    common_scale_y +
-        facet_grid(
-        cols = vars(Ancestry),
-        rows = vars(Algorithm),
-        labeller = labeller(
-            Ancestry = as_labeller(ancestry_labels),
-            Metric = label_value
-        )
-    ) +
-    labs(
-        x = "Prediction",
-        y = "ROC AUC"
+  ggplot(
+    aes(
+      x = Prediction,
+      y = Value
     )
+  ) +
+  geom_col() +
+  common_scale_y +
+  facet_grid(
+    cols = vars(Ancestry),
+    rows = vars(Algorithm, Metric),
+    labeller = labeller(
+      Ancestry = as_labeller(ancestry_labels)
+      )
+  ) +
+  labs(
+    x = "Prediction",
+    y = "Y"
+  )
 
 # Save
 # Save the image
-ggsave(filename = "Plot_ml.pdf", 
+ggsave(filename = "Plot_phenotype_prediction.pdf", 
        plot = ml_metric_plot, 
        path = setup$output_directory, 
        width = 5, height = 5)
 
 
 
-dge_metric_plot <- dge_metric |> 
+dge_correlation_plot <- correlation_dge_metric |> 
     ggplot(
         aes(
             x = Prediction,
@@ -125,13 +127,46 @@ dge_metric_plot <- dge_metric |>
     )
 
 # Save
-ggsave(filename = "Plot_dge.pdf", 
-       plot = dge_metric_plot, 
+ggsave(filename = "Plot_logFC_correlation.pdf", 
+       plot = dge_correlation_plot, 
        path = setup$output_directory, 
        width = 5, height = 5)
 
 
-dge_metric |>
-    select(Value)
+# # DGE prediction
+# prediction_dge_metric <- dge_metric |>
+#     pivot_longer(
+#         cols = c(RMSE, R2),
+#         values_to = 'Value',
+#         names_to = 'Metric'
+#     ) |> 
+#     mutate(Prediction = fct_rev(Prediction))
 
+# # Visualize
+# dge_prediction_plot <- prediction_dge_metric |>
+#     ggplot(
+#         aes(
+#             x = Prediction,
+#             y = Value
+#         )
+#     ) +
+#     geom_col() +
+#     common_scale_y +
+#     facet_grid(
+#         cols = vars(Ancestry),
+#         rows = vars(Metric),
+#         labeller = labeller(
+#             Ancestry = as_labeller(ancestry_labels),
+#             Metric = label_value
+#         )
+#     ) +
+#     labs(
+#         x = "Prediction",
+#         y = "Y"
+#     )
+
+# ggsave(filename = "Plot_logFC_prediction.pdf", 
+#        plot = dge_prediction_plot, 
+#        path = setup$output_directory, 
+#        width = 5, height = 5)
 
