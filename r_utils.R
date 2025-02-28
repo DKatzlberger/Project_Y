@@ -26,12 +26,49 @@ is_yml_file <- function(file_path) {
   }
 }
 
-normalize_log <- function(X, e = 0.01){
+# Normalization function
+normalize_log <- function(X, e = 0.01, ...){
   # Log normalization.
   # X: Vector or Matrix to be transformed.
   # e: threshold to correct for infinity values.
-  X = log2(X + e)
+  return(log2(X + e))
 }
+
+beta_to_mvalue <- function(betas, epsilon = 0.00001, ...) {
+  # This function transforms beta values (ranging from 0 to 1) into M-values 
+  # using a logit transformation. M-values provide a more statistically normal 
+  # distribution compared to beta values and are commonly used in DNA methylation 
+  # analysis.
+
+  # betas: A numeric vector of beta values (ranging between 0 and 1).
+  # epsilon: A small numeric value (default: 0.00001) to prevent extreme 
+  # log transformations by clamping values close to 0 or 1.
+	if (!is.numeric(betas)) {
+		stop("invalid value for betas")
+	}
+	if (!(is.numeric(epsilon) && length(epsilon) == 1 && (!is.na(epsilon)))) {
+		stop("invalid value for epsilon")
+	}
+	if (epsilon < 0 || epsilon > 0.5) {
+		stop("invalid value for epsilon; expected 0 <= epsilon <= 0.5")
+	}
+	betas[betas < epsilon] <- epsilon
+	betas[betas > (1 - epsilon)] <- 1 - epsilon
+	return(log2(betas / (1 - betas)))
+}
+
+# Normalization lookup list
+normalization_methods <- list(
+  "expression" = list(
+    "limma_voom" = function(X, design, ...) voom(t(X), design, plot = FALSE),  
+    "normalize_log" = function(X, ...) normalize_log(t(X))
+  ),
+  "methylation" = list(
+    "beta_to_mvalue" = function(X, ...) beta_to_mvalue(t(X)),
+    "normalize_log" = function(X, ...) normalize_log(t(X))
+  )
+)
+
 
 # Function to check if covariate is present in settings
 get_covariate <- function(setup) {
@@ -590,43 +627,101 @@ calculate_variance_explained <- function(expression_df, check_variance, batch_si
 }
 
 
-
-
-
-
 # Permutation test
-permutation_test <- function(data, value_col, group_col) {
+permutation_test <- function(data, value, group, paired = NULL, tail = "both") {
   
-  # Check if any group has identical values (zero variance)
-  var_check <- data |>
-  group_by(!!sym(group_col)) |>
-  summarise(var_value = var(!!sym(value_col)), .groups = 'drop')
+  # # Check if any group has identical values (zero variance)
+  # var_check <- data |>
+  #   group_by(!!sym(group)) |>
+  #   summarise(var_value = var(!!sym(value)), .groups = 'drop')
   
-  # If any group has zero variance, return p-value of 1
-  if (any(var_check$var_value == 0)) {
-    message("Perm test: One or more groups have identical values. Returning `NA`.")
-    return(NA)  # Return the p-value of NA directly
-  }
+  # # If any group has zero variance, return p-value of 1
+  # if (any(var_check$var_value == 0)) {
+  #   message("Perm test: One or more groups have identical values. Returning `NA`.")
+  #   return(NA)  # Return the p-value of NA directly
+  # }
 
   # Quote the column names for later use in evaluation
-  value_col <- sym(value_col)  # Quoting the value column
-  group_col <- sym(group_col)  # Quoting the group column
+  value <- sym(value)  
+  group <- sym(group)
   
-  # Prepare the data by selecting relevant columns and ensuring the group variable is a factor
-  perm_data <- data |>
-    select(!!value_col, !!group_col) |>
-    mutate(!!group_col := as.factor(!!group_col))  # Ensure group_col is a factor
+  # Prepare the data by selecting relevant columns
+  # If paired is provided, also select the paired column
+  if (!is.null(paired)) {
+    perm_data <- data |>
+      select(!!value, !!group, !!sym(paired)) |>
+      mutate(
+        !!group := as.factor(!!group),
+        !!sym(paired) := as.factor(!!sym(paired))  # Ensure the paired column is a factor
+      )
+  } else {
+    perm_data <- data |>
+      select(!!value, !!group) |>
+      mutate(
+        !!group := as.factor(!!group)
+      )
+  }
   
-  # Construct the formula for the independence test
-  formula <- as.formula(paste(deparse(value_col), "~", deparse(group_col)))
+  # If paired is not NULL, use it as the paired column (blocking variable)
+  if (!is.null(paired)) {
+    # Construct the formula for paired test using the '|' operator for blocking
+    formula <- as.formula(paste(deparse(value), "~", deparse(group), "|", paired))
+  } else {
+    # Construct the formula for the independence test (no pairing)
+    formula <- as.formula(paste(deparse(value), "~", deparse(group)))
+  }
   
   # Perform the permutation test (independence test)
   perm_test_result <- independence_test(formula = formula, data = perm_data)
   
-  # Return the result of the permutation test
-  p_value = as.numeric(pvalue(perm_test_result))
+  # Extract test statistic (Z-score)
+  test_stat <- statistic(perm_test_result, type = "standardized")
+  
+  # Compute p-values
+  if (tail == "right") {
+    p_value <- as.numeric(1 - pnorm(test_stat))  # Right-tailed test
+  } else if (tail == "left") {
+    p_value <- as.numeric(pnorm(test_stat))  # Left-tailed test
+  } else {
+    p_value <- as.numeric(pvalue(perm_test_result))  # Default two-tailed test
+  }
+  
   return(p_value)
 }
+
+
+# permutation_test <- function(data, value_col, group_col) {
+  
+#   # Check if any group has identical values (zero variance)
+#   var_check <- data |>
+#   group_by(!!sym(group_col)) |>
+#   summarise(var_value = var(!!sym(value_col)), .groups = 'drop')
+  
+#   # If any group has zero variance, return p-value of 1
+#   if (any(var_check$var_value == 0)) {
+#     message("Perm test: One or more groups have identical values. Returning `NA`.")
+#     return(NA)  # Return the p-value of NA directly
+#   }
+
+#   # Quote the column names for later use in evaluation
+#   value_col <- sym(value_col)  # Quoting the value column
+#   group_col <- sym(group_col)  # Quoting the group column
+  
+#   # Prepare the data by selecting relevant columns and ensuring the group variable is a factor
+#   perm_data <- data |>
+#     select(!!value_col, !!group_col) |>
+#     mutate(!!group_col := as.factor(!!group_col))  # Ensure group_col is a factor
+  
+#   # Construct the formula for the independence test
+#   formula <- as.formula(paste(deparse(value_col), "~", deparse(group_col)))
+  
+#   # Perform the permutation test (independence test)
+#   perm_test_result <- independence_test(formula = formula, data = perm_data)
+  
+#   # Return the result of the permutation test
+#   p_value = as.numeric(pvalue(perm_test_result))
+#   return(p_value)
+# }
 
 # Take a non stratified sample from a population by proportortions
 # sample_with_proportions <- function(data, proportions, sizes, seed) {

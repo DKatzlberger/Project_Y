@@ -95,7 +95,7 @@ data_validator.check_min_samples_per_class(
     data=eur_data.obs,
     column=setup.classification['output_column'],
     min_samples=setup.sample_cutoff,
-    data_name="European data"
+    data_name="All train data"
     )
 
 setup.log('Setting seed')
@@ -172,11 +172,11 @@ with open(setup.out(save_str), 'w') as f:
     yaml.dump(inf_idx.to_list(), f)
 
 # RUN R define R to run
-R = ScriptRunner(r_path='/usr/bin/Rscript', py_path='/opt/conda/envs/ancestry/bin/python3')
+R = ScriptRunner(r_path="/usr/bin/Rscript", py_path="/opt/conda/envs/ancestry/bin/python3")
 settings_file = os.path.join(os.getcwd(), setup.output_directory, 'Settings.yml')
 
 # Statistical analysis (DGE)
-setup.log('DGE')
+setup.log("DGE")
 script = "cross_ancestry_dge.R"
 R.run_script(script_path=os.path.join(os.getcwd(), script),
              args=[settings_file])
@@ -208,12 +208,16 @@ test_y = encode_y(test_data.obs[setup.classification['output_column']], encoder)
 inf_X = np.array(inf_data.X)
 inf_y = encode_y(inf_data.obs[setup.classification['output_column']], encoder)
 
-
 # Normalization of features 
-setup.log('Normalization')
-train_X = normalize(eval(setup.normalization), train_X)
-test_X = normalize(eval(setup.normalization), test_X) 
-inf_X = normalize(eval(setup.normalization), inf_X) 
+setup.log("Normalization")
+# Select normalization method
+data_type = setup.data_type
+ml_normalization = setup.ml_normalization
+normalization_method = ml_normalization_methods[data_type][ml_normalization]
+# Normalization
+train_X = normalization_method(train_X)
+test_X = normalization_method(test_X)
+inf_X = normalization_method(inf_X)
 
 # Assertion: Check arrays
 # Labels
@@ -235,9 +239,13 @@ pickable_settings = setup.return_settings()
 
 # Training (parallel)
 best_models = Parallel(n_jobs=num_algorithms)(
-    delayed(train_algorithm)(algo_name, pickable_settings, 
-                             train_X, train_y, 
-                             jobs_per_algorithm)
+    delayed(train_algorithm)(
+        algo_name, 
+        pickable_settings, 
+        train_X, 
+        train_y, 
+        jobs_per_algorithm
+        )
     for algo_name in setup.algorithms
 )
 

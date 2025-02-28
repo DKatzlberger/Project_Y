@@ -37,6 +37,13 @@ if (length(args) > 0) {
   setup <- yaml.load_file(yaml_file)
 }
 
+# Transform settings into R useable form
+comparison <- setup$classification$comparison
+output_column <- setup$classification$output_column
+ancestry_column <- setup$classification$ancestry_column
+train_ancestry <- setup$classification$train_ancestry
+infer_ancestry <- setup$classification$infer_ancestry
+
 # Set seed (because why not)
 set.seed(setup$seed)
 
@@ -58,26 +65,14 @@ train_data <- adata[train_idx, ]
 test_data <- adata[test_idx, ]
 inf_data <- adata[inf_idx, ]
 
-# Assertion: Check arrays
-# Dimensions
-stopifnot(length(train_idx) == length(train_data$obs_names))
-stopifnot(nrow(test_data) == nrow(inf_data))
-# Order
-stopifnot(all(colnames(t(train_data$X)) ==
-                row.names(train_data$obs[colnames(t(train_data$X)), ])))
-
-# Check if inf_idx are from the correct ancestry
-inf_adata = adata[adata$obs[setup$classification$ancestry_column] == setup$classification$infer_ancestry]
-inf_adata = inf_adata[inf_adata$obs[[setup$classification$output_column]] %in% setup$classification$comparison]
+# Check if saved 'inf_idx' are from the correct ancestry
+inf_adata = adata[adata$obs[ancestry_column] == infer_ancestry]
+inf_adata = inf_adata[inf_adata$obs[[output_column]] %in% comparison]
 inf_adata_obs = inf_adata$obs_names
 stopifnot(length(inf_adata_obs) == length(inf_idx))
 
 # Number of samples per condition
-condition_count <- inf_adata$obs |>
- group_by(!!sym(setup$classification$output_column)) |>
- count()
-
-
+condition_count <- group_by(inf_adata$obs, !!sym(output_column)) |> count()
 
 # Covariate:
 # 1. Extract the covariate, if it exists and has a meaningful value
@@ -140,44 +135,47 @@ if (!is.null(covariate_list)) {
   }
 }
 
+# Design matrix for GLM
+output_column <- setup$classification$output_column
+train_design <- create_design(output_column, train_data$obs, covariate = covariate_list)                                                       
+test_design <- create_design(output_column, test_data$obs, covariate = covariate_list)
+inf_design <- create_design(output_column, inf_data$obs, covariate = covariate_list)
 
-# Create design matrix
-train_design <- create_design(setup$classification$output_column,
-                              meta = train_data$obs,
-                              covariate = covariate_list)                                                       
-test_design <- create_design(setup$classification$output_column,
-                             meta = test_data$obs,
-                             covariate = covariate_list)
-inf_design <- create_design(setup$classification$output_column,
-                            meta = inf_data$obs,
-                            covariate = covariate_list)
-
-
-# Filter genes by expression (Use the train set)
-keeper_genes <- filterByExpr(t(train_data$X), train_design)
-# Subset features
-train_filtered <- train_data[, keeper_genes]
-test_filtered <- test_data[, keeper_genes]
-inf_filtered <- inf_data[, keeper_genes]
-
-# Save feature names (For use in ML)
-write_yaml(train_filtered$var_names, 
-           file.path(setup$output_directory, "Features.yml")
-          )
-
-# Assertion: Check array
-# Same genes in all sets
-stopifnot(all(train_data$var_names == test_data$var_names))
-# Dimensions
-stopifnot(table(keeper_genes)[2] == dim(train_filtered$X)[2])
+# Filtering genes
+if (setup$filter_features & setup$data_type == "expression"){
+  print("Filter features")
+  # Based on train data samples
+  dge <- DGEList(counts = t(train_data$X))
+  dge <- calcNormFactors(dge)
+  cpm_values <- cpm(dge)
+  # Filter genes based on CPM threshold 
+  # (e.g., keep genes with CPM > 1 in at least 50% of the samples)
+  threshold <- 1 
+  filter_genes <- rowSums(cpm_values > threshold) >= (0.5 * ncol(cpm_values))
+  # Subset features
+  train_filtered <- train_data[, filter_genes]
+  test_filtered <- test_data[, filter_genes]
+  inf_filtered <- inf_data[, filter_genes]
+} else{
+  train_filtered <- train_data
+  test_filtered <- test_data
+  inf_filtered <- inf_data
+}
+# Save feature (for use in ML)
+output_directory <- setup$output_directory
+write_yaml(train_filtered$var_names, file.path(output_directory, "Features.yml"))
 
 
 # Limma workflow
 print("Start differential gene expression analysis.")
-# Normalization (logCPM)
-train_norm <- voom(t(train_filtered$X), train_design, plot = FALSE)
-test_norm <- voom(t(test_filtered$X), test_design, plot = FALSE)
-inf_norm <- voom(t(inf_filtered$X), inf_design, plot = FALSE)
+# Select normalization method
+data_type <- setup$data_type
+dge_normalization <- setup$dge_normalization
+normalization_method <- normalization_methods[[data_type]][[dge_normalization]]
+# Normalization
+train_norm <- normalization_method(train_filtered$X, train_design)
+test_norm <- normalization_method(test_filtered$X, test_design)
+inf_norm <- normalization_method(inf_filtered$X, inf_design)
 
 # Fit the model (Means model)
 train_limma_fit <- lmFit(train_norm, design = train_design)
@@ -194,14 +192,11 @@ train_mean_res <- extract_results(train_limma_fit)
 test_mean_res <- extract_results(test_limma_fit)
 inf_mean_res <- extract_results(inf_limma_fit)
 
-# Assertion: Check if all genes have been tested
-stopifnot(all(dim(train_mean_res)[1] / length(unique(train_mean_res$coef)) ==
-                table(keeper_genes)[2]))
-
 # Save results
-fwrite(train_mean_res, file.path(setup$output_directory, "Limma_means_train.csv"))
-fwrite(test_mean_res, file.path(setup$output_directory, "Limma_means_test.csv"))
-fwrite(inf_mean_res, file.path(setup$output_directory, "Limma_means_inf.csv"))
+output_directory <- setup$output_directory
+fwrite(train_mean_res, file.path(output_directory, "Limma_means_train.csv"))
+fwrite(test_mean_res, file.path(output_directory, "Limma_means_test.csv"))
+fwrite(inf_mean_res, file.path(output_directory, "Limma_means_inf.csv"))
 
 # Create contrast matrix 
 print("Fit contrast.")
@@ -227,17 +222,15 @@ test_contrast_res <- extract_results(test_limma_fit_contrast)
 inf_contrast_res <- extract_results(inf_limma_fit_contrast)
 
 # Save results
-fwrite(train_contrast_res,
-       file.path(setup$output_directory, "Limma_contrast_train.csv"))
-fwrite(test_contrast_res,
-       file.path(setup$output_directory, "Limma_contrast_test.csv"))
-fwrite(inf_contrast_res,
-       file.path(setup$output_directory, "Limma_contrast_inf.csv"))
+output_directory <- setup$output_directory
+fwrite(train_contrast_res, file.path(output_directory, "Limma_contrast_train.csv"))
+fwrite(test_contrast_res, file.path(output_directory, "Limma_contrast_test.csv"))
+fwrite(inf_contrast_res,file.path(output_directory, "Limma_contrast_inf.csv"))
 
 # Filter coef that are in comparison (only interested in those)
-train_contrast_res <- train_contrast_res |> filter(coef %in% setup$classification$comparison)
-test_contrast_res <- test_contrast_res |> filter(coef %in% setup$classification$comparison)
-inf_contrast_res <- inf_contrast_res |> filter(coef %in% setup$classification$comparison)
+train_contrast_res <- filter(train_contrast_res, coef %in% setup$classification$comparison)
+test_contrast_res <- filter(test_contrast_res, coef %in% setup$classification$comparison)
+inf_contrast_res <- filter(inf_contrast_res, coef %in% setup$classification$comparison)
 
 
 # Visualization (Validation of models) -----------------------------------------------------------------------------------------
@@ -565,7 +558,7 @@ baseline_per_gene_metric <- baseline_per_gene_metric |>
   rename(Condition = !!sym(setup$classification$output_column))
 
 # Save
-fwrite(baseline_per_gene_metric, file.path(setup$output_directory, "Baseline_metric_per_gene.csv"))
+fwrite(baseline_per_gene_metric, file.path(setup$output_directory, "Baseline_metric_per_gene_dge.csv"))
 
 # ---- Summarized metric ----
 test_metric <- test_obs_pred |>

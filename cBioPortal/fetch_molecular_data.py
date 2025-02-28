@@ -1,6 +1,6 @@
 # This script needs a working conda environment with pybioportal installed
 # Pybioportal
-import pybioportal 
+# import pybioportal 
 from pybioportal import molecular_data as md
 from pybioportal import molecular_profiles as mpf
 from pybioportal import server_running_status as srs
@@ -12,19 +12,33 @@ import os
 # Meta data that contains study_ids and sample_ids
 # 'cBioPortal' files are in a different folder to have access:
 # One step up in the folder hierachy
-to_fetch = pd.read_csv('../data/downloads/cbioportal/rna_studies/tcga_pan_studies_with_rna.csv')
+to_fetch = pd.read_csv("data/downloads/cbioportal/tcga_firehose/meta_tcga_firehose_expression.csv")
 
 # to_fetch = pd.read_csv('data/downloads/cbioportal/rna_studies/tcga_pan_studies_with_rna.csv')
 # study_id = to_fetch['studyid'].unique()[2]
 
 molecular_data = []
-for study_id in to_fetch['studyid'].unique():
-
+for study_id in to_fetch['studyId'].unique():
+    #study_id = "brca_tcga_pan_can_atlas_2018"
     print(f"Fetching {study_id}")
     # Molecular profile ids
     # 1. Get all molecular profiles in study
     # 2. Filter for 'mRNA Expression, RSEM (Batch normalized from Illumina HiSeq_RNASeqV2)'
     profiles = mpf.get_all_molecular_profiles_in_study(study_id=study_id)
+
+    # Available profiles
+# 0                      uvm_tcga_pan_can_atlas_2018_rppa
+# 1              uvm_tcga_pan_can_atlas_2018_rppa_Zscores
+# 2                    uvm_tcga_pan_can_atlas_2018_gistic
+# 3                   uvm_tcga_pan_can_atlas_2018_log2CNA
+# 4              uvm_tcga_pan_can_atlas_2018_armlevel_cna
+# 5                 uvm_tcga_pan_can_atlas_2018_mutations
+# 6       uvm_tcga_pan_can_atlas_2018_structural_variants
+# 7     uvm_tcga_pan_can_atlas_2018_methylation_hm27_h...
+# 8           uvm_tcga_pan_can_atlas_2018_rna_seq_v2_mrna
+# 9     uvm_tcga_pan_can_atlas_2018_rna_seq_v2_mrna_me...
+# 10    uvm_tcga_pan_can_atlas_2018_rna_seq_v2_mrna_me...
+# 11         uvm_tcga_pan_can_atlas_2018_genetic_ancestry
 
     rna_id = f'{study_id}_rna_seq_v2_mrna'
     rna_profile = profiles[profiles['molecularProfileId'] == rna_id]
@@ -33,10 +47,11 @@ for study_id in to_fetch['studyid'].unique():
 
     # Samples in the study
     # Used to fetch by individual sample
-    to_fetch_samples = to_fetch[to_fetch['studyid'] == study_id]['sampleid'].tolist()
+    to_fetch_samples = to_fetch[to_fetch['studyId'] == study_id]['sampleId'].tolist()
+    print(len(to_fetch_samples))
 
     # Save location
-    vscratch_dir_out = f"../data/downloads/cbioportal/tcga_pan_can_atlas/RNA"
+    vscratch_dir_out = f"data/downloads/cbioportal/tcga_firehose/expression"
     # 1. Location for successful samples
     # 2. Location for failed samples
     path_to_successful = os.path.join(vscratch_dir_out, f"{study_id}.csv")
@@ -55,7 +70,7 @@ for study_id in to_fetch['studyid'].unique():
             # 1. Get samples with ancestry from meta data
             # 2. Filter for samples with ancestry
             # 3. Filter for important attributes
-            samples_with_ancestry = to_fetch[to_fetch['studyid'] == study_id]['sampleid']
+            samples_with_ancestry = to_fetch[to_fetch['studyId'] == study_id]['sampleId']
             attributes = ['gene_entrezGeneId', 'gene_hugoGeneSymbol', 'sampleId', 'patientId', 'value', 'studyId']
             # Filter
             response = response[response['sampleId'].isin(samples_with_ancestry)]
@@ -114,7 +129,7 @@ for study_id in to_fetch['studyid'].unique():
             # 1. Get samples with ancestry from meta data
             # 2. Filter for samples with ancestry
             # 3. Filter for important attributes
-            samples_with_ancestry = to_fetch[to_fetch['studyid'] == study_id]['sampleid']
+            samples_with_ancestry = to_fetch[to_fetch['studyId'] == study_id]['sampleId']
             attributes = ['gene_entrezGeneId', 'gene_hugoGeneSymbol', 'sampleId', 'patientId', 'value', 'studyId']
             # Filter
             response = response[response['sampleId'].isin(samples_with_ancestry)]
@@ -181,7 +196,7 @@ for study_id in to_fetch['studyid'].unique():
         # 1. Get samples with ancestry from meta data
         # 2. Filter for samples with ancestry
         # 3. Filter for important attributes
-        samples_with_ancestry = to_fetch[to_fetch['studyid'] == study_id]['sampleid']
+        samples_with_ancestry = to_fetch[to_fetch['studyId'] == study_id]['sampleId']
         attributes = ['gene_entrezGeneId', 'gene_hugoGeneSymbol', 'sampleId', 'patientId', 'value', 'studyId']
         # Filter
         response = response[response['sampleId'].isin(samples_with_ancestry)]
@@ -213,13 +228,13 @@ for study_id in to_fetch['studyid'].unique():
 
 print('Finished!')
 # Assertion: Check if all studies have been downloaded
-if not len(molecular_data) == len(to_fetch['studyid'].unique()):
+if not len(molecular_data) == len(to_fetch['studyId'].unique()):
     print("Not all studies have samples.")
 
 # Combine all dataframes: 
 # Using 'pd.concat' would produce NA values in columns (= features) which aren't available across studies
-combined_molecular_data = pd.concat(molecular_data, axis=0)
-combined_molecular_data.to_csv('../data/downloads/cbioportal/rna_studies/rna_molecular_data.csv', index=False)
+# combined_molecular_data = pd.concat(molecular_data, axis=0)
+# combined_molecular_data.to_csv('data/downloads/cbioportal/rna_studies/rna_molecular_data.csv', index=False)
 
 # combined_molecular_data = pd.read_csv('data/downloads/cbioportal/rna_studies/rna_molecular_data.csv')
 # # Assertion:

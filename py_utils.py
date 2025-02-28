@@ -43,15 +43,18 @@ class Setup(dict):
         # Combine custom and default settings 
         final_config = {**default_config, **custom_config} 
 
-        # add an id and date
-        final_config['id'] = uuid.uuid4().hex.upper()[:10]
-        final_config['date'] = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
+        # Add date
+        final_config["date"] = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())
 
+        # Add id if not given
+        if "id" not in final_config or not final_config["id"]:
+            final_config["id"] = uuid.uuid4().hex.upper()[:10]
+        
         # Print statement to inform user about their analysis
         print(f'New analysis with id: {final_config['id']}; created: {final_config['date']}')
 
         # Check required settings
-        required_settings = ['classification', 'data_path', 'output_directory', 'seed']
+        required_settings = ["classification", "data_path", "data_type", "output_directory", "seed"]
         for i in required_settings:
             assert i in final_config, f'No {i} defined but required!'     
         
@@ -64,7 +67,7 @@ class Setup(dict):
         assert "covariate" not in final_config["classification"] or isinstance(final_config["classification"]["covariate"], list), \
             "If covariate exists, it must be a list."
 
-        # Check for classification task
+        # Check how many classes
         if len(final_config['classification']['comparison']) > 2:
             final_config['classification'].update({'multiclass': True})
             print(f'Multiclass problem comparing: {final_config['classification']['comparison']}.')
@@ -104,16 +107,22 @@ class Setup(dict):
         # TODO - Check whether settings are of the right type 
         assert isinstance(self.seed, int)
 
-        # Check data_path
+        # Check data
         assert isinstance(self.data_path, str)
         assert os.path.exists(self.data_path)
-        assert self.data_path.endswith('.h5ad'), f'Only support data files in h5ad format.'
+        assert self.data_path.endswith(".h5ad"), \
+            f"Only support data files in h5ad format."
+        # Type
+        assert self.data_type in ["expression", "methylation"], \
+            f"Invalid data type: {self.data_type}. Expected 'expression' or 'methylation'."
+
 
         # Classification
-        assert isinstance(self.classification['train_ancestry'], str)
-        assert isinstance(self.classification['infer_ancestry'], str)
-        assert isinstance(self.classification['ancestry_column'], str)
+        assert isinstance(self.classification["train_ancestry"], str)
+        assert isinstance(self.classification["infer_ancestry"], str)
+        assert isinstance(self.classification["ancestry_column"], str)
 
+    
         # Machine learning
         assert isinstance(self.nfolds, int)
         assert self.nfolds >= 2, \
@@ -479,14 +488,49 @@ def normalize_minmax(X):
     """
     return (X - X.min(axis=0)) / (X.max(axis=0) - X.min(axis=0))
 
-def normalize(func, X):
+def beta_to_mvalue(X, epsilon=0.00001):
     """
-    Takes a normalization function to nomralize data.
-    func: Normalization function.
-    X: Vector or Matrix to be transformed.
+    Convert beta values to M-values using the formula:
+    M = log2(X / (1 - X)), with clipping to avoid extreme values.
+
+    Parameters:
+    X (array-like or float): X values (0 < X < 1)
+    epsilon (float): Small value to prevent log(0) or division by zero (0 <= epsilon <= 0.5)
+
+    Returns:
+    numpy.ndarray or float: M-values
     """
-    normalized_data = func(X)
-    return normalized_data
+    # Validate input types
+    if not isinstance(X, (list, np.ndarray, float, int)):
+        raise ValueError("Invalid value for X: Expected numeric values or an array.")
+
+    if not isinstance(epsilon, (float, int)) or not (0 <= epsilon <= 0.5):
+        raise ValueError("Invalid value for epsilon; expected 0 <= epsilon <= 0.5")
+
+    # Convert to NumPy array for vectorized operations
+    X = np.array(X, dtype=np.float64)
+
+    # Clip X values to avoid extreme cases
+    X = np.clip(X, epsilon, 1 - epsilon)
+
+    # Convert X values to M-values
+    m_values = np.log2(X / (1 - X))
+
+    return m_values
+
+# Dictionary to look up methods to normalize data
+ml_normalization_methods = {
+    "expression": {
+        "normalize_log": normalize_log,
+        "normalize_minmax": normalize_minmax
+    },
+    "methylation": {
+        "beta_to_mvalue": beta_to_mvalue,
+        "normalize_log": normalize_log,
+        "normalize_minmax": normalize_minmax
+    }
+}
+
 
 # Function to create integer vector from categotical column
 def encode_y(data, dictionary):

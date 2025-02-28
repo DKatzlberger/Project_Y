@@ -17,6 +17,7 @@ suppressPackageStartupMessages(
     library(patchwork)
     library(ggrepel)
     library(ComplexHeatmap)
+    library(GetoptLong)
     library(circlize)
     library(ggVennDiagram)
     # Standard libraries
@@ -43,7 +44,7 @@ if (length(args) > 0) {
 
 } else {
   # Dev settings if no command-line argument provided
-  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml"
+  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_AFR.yml"
   print("Running interactive mode for development.")
   setup <- yaml.load_file(yaml_file)
 }
@@ -440,7 +441,7 @@ total_plot <- adata$obs |>
   scale_y_continuous(
     n.breaks = 3,
     expand = expansion(mult = c(0.1, 0.35))
-    ) +
+  ) +
   facet_grid(rows = vars(!!sym(setup$classification$ancestry_column))) +
   labs(
     title = "Total patients",
@@ -556,7 +557,8 @@ filtered_expression <- filtered_expression |>
 variance_explained <- calculate_variance_explained(
   expression_df = filtered_expression,
   check_variance = check_variance,
-  batch_size = 1000
+  batch_size = 1000,
+  num_cores = setup$njobs
 ) 
 
 # Variance by ancestry
@@ -585,7 +587,8 @@ for (condition in unique(adata$obs[[output_column]])){
   con_variance_by_ancestry <- calculate_variance_explained(
     expression_df = filtered_expression,
     check_variance = c(ancestry_column),
-    batch_size = 1000
+    batch_size = 1000,
+    num_cores = setup$njobs
   ) |>
   mutate(Condition = condition)
 
@@ -649,11 +652,6 @@ variance_colors <- c(
 variance_explained <- variance_explained %>%
   mutate(
     mapped_variable = recode(Variable, !!!variance_mapping),
-    mapped_variable = factor(mapped_variable, levels = c("Genetic ancestry", 
-                                                        "Histologocal subtype", 
-                                                        "Molecular subtype", 
-                                                        "Sex", 
-                                                        "Age")) 
   )
 
 # Legend x-position
@@ -662,6 +660,17 @@ legend_x_pos <- max(0.5, 0.9 - 0.005 * max_name_length)
 # Legend y-position
 max_items <- length(unique(variance_explained$mapped_variable))
 legend_y_pos <- max(0.3, 0.9 - 0.01 * max_items)
+
+# Relevel variables
+variance_explained <- variance_explained %>%
+  mutate(
+    mapped_variable = factor(mapped_variable, levels = c("Genetic ancestry", 
+                                                        "Histologocal subtype", 
+                                                        "Molecular subtype", 
+                                                        "Sex", 
+                                                        "Age")) 
+  )
+
 
 # ---- Variance explained (variance_explained_plot) ----
 variance_explained_plot <- variance_explained |>
@@ -855,16 +864,9 @@ colnames(design) <- colnames(design) |>
 # Rename to R useable names
 colnames(design) <- make.names(colnames(design))
 
-# Filter genes by expression
-keeper_genes <- filterByExpr(t(data$X), 
-                             design = design,
-                             min.count = 100,         # Minimum total counts across all samples
-                             # min.total.count = 200, # Minimum total counts across all samples
-                             # min.prop = 0.1,        # Require at least 10% of samples with non-zero counts
-                             # min.cpm = 1,           # Minimum CPM of 1
-                             # min.n = 3
-                             )
-filtered_data <- data[, keeper_genes]
+# # Filter genes by expression
+# keeper_genes <- filterByExpr(t(data$X), design = design)
+# filtered_data <- data[, keeper_genes]
 
 # Limma workflow
 # 1. Normalization 
@@ -937,6 +939,7 @@ fwrite(interactions, file.path(path_to_save_location, "Interactions.csv"))
 # Visualize 
 logFC_threshold <- 1
 alpha_value  <- 0.7
+point_size  <- 0.5
 
 # Sig. interactions
 sig_interactions <- interactions |>
@@ -944,6 +947,15 @@ sig_interactions <- interactions |>
     adj.P.Val < 0.05 & 
     abs(logFC) > logFC_threshold
   ) |>
+  pull(Feature)
+
+# Top interactions
+top_interactions <- interactions |>
+  filter(
+    adj.P.Val < 0.05 & 
+    abs(logFC) > logFC_threshold
+  ) |>
+  slice_max(abs(logFC), n = 5) |>
   pull(Feature)
 
 # ---- Baseline volcano plot (baseline_volcano_plot) ----
@@ -957,6 +969,16 @@ baseline_volcano_plot <- baseline |>
   ) +
   geom_point(
     size = point_size
+  ) +
+  geom_text_repel(
+    data = baseline |> filter(Feature %in% top_interactions),
+    aes(label = Feature),
+    size = 1.5,
+    color = "black",  
+    segment.color = "black",  
+    min.segment.length = 0,
+    segment_size = 0.01,
+    max.iter = 2000,
   ) +
   facet_grid(
     cols = vars(Ancestry),
@@ -988,7 +1010,7 @@ baseline_volcano_plot <- baseline |>
 ggsave(filename = "Baseline_volcano_plot.pdf",
        plot = baseline_volcano_plot,
        path = path_to_save_location,
-       height = 2, width = 2)
+       height = 3, width = 3)
 
 # ---- Interactions volcano plot (interactions_volcano_plot) ----
 interactions_volcano_plot <- interactions |>
@@ -1001,6 +1023,16 @@ interactions_volcano_plot <- interactions |>
   ) +
   geom_point(
     size = point_size
+  ) +
+  geom_text_repel(
+    data = interactions |> filter(Feature %in% top_interactions),
+    aes(label = Feature),
+    size = 1.5,
+    color = "black",  
+    segment.color = "black",  
+    min.segment.length = 0,
+    segment_size = 0.01,
+    max.iter = 2000,
   ) +
   facet_grid(
     cols = vars(Ancestry),
@@ -1032,7 +1064,7 @@ interactions_volcano_plot <- interactions |>
 ggsave(filename = "Interactions_volcano_plot.pdf",
        plot = interactions_volcano_plot,
        path = path_to_save_location,
-       height = 2, width = 2)
+       height = 3, width = 3)
 
 # ---- Correlation of baselines (baseline_scatter_plot) -------
 # Reformat data
@@ -1052,15 +1084,19 @@ intercept <- coef(lm_model)[1]
 slope <- coef(lm_model)[2]
 
 predicted_values <- fitted(lm_model)
-observed_values <- wide_baseline[3]
 
 residuals <- residuals(lm_model)
 abs_residuals <- abs(residuals)
 
 # Define outliers
 residual_threshold <- 1
-upper_threshold <- (intercept + slope * predicted_values + residual_threshold)[, 1]
-lower_threshold <- (intercept + slope * predicted_values - residual_threshold)[, 1]
+upper_threshold <- predicted_values + residual_threshold
+lower_threshold <- predicted_values - residual_threshold
+
+# Calculate the correlation
+cor_pearson <- cor(wide_baseline[[x_col]], wide_baseline[[y_col]], method = "pearson")
+# Label
+smooth_label <- bquote(R[Pearson] == .(round(cor_pearson, 2)))
 
 # Reformat data
 scatter_plot_data <- baseline |>
@@ -1077,8 +1113,9 @@ scatter_plot_data <- baseline |>
     with_interactions = Feature %in% sig_interactions, 
     with_baseline = Feature %in% sig_baseline,
     coloring = case_when(
-      with_interactions ~ "With interaction",    
-      with_baseline & !with_interactions ~ "With baseline (no interaction)",
+      with_interactions & with_baseline ~ "Interaction + Baseline",
+      with_interactions &! with_baseline ~ "Interaction",    
+      with_baseline & !with_interactions ~ "Baseline",
       TRUE ~ "Rest"                                
     )
   )
@@ -1087,6 +1124,14 @@ scatter_plot_data <- baseline |>
 sig_residuals <- scatter_plot_data |>
   filter(abs(residuals) > logFC_threshold) |>
   pull(Feature)
+
+# Legend 
+# Legend x-position
+max_name_length <- max(nchar(unique(scatter_plot_data$coloring)))
+legend_x_pos <- min(0.5, 0.05 + 0.005 * max_name_length)
+# Legend y-position
+max_items <- length(unique(scatter_plot_data$coloring))
+legend_y_pos <- max(0.3, 0.9 - 0.01 * max_items)
 
 # Plot
 baseline_scatter_plot <- scatter_plot_data %>%
@@ -1097,14 +1142,30 @@ baseline_scatter_plot <- scatter_plot_data %>%
       color = coloring
     )
   ) +
+  # Plot the points
   geom_point(
+    data = scatter_plot_data |> filter(coloring == "Rest"),
+    aes(color = coloring),
+    size = point_size,
+    show.legend = FALSE
+  ) +
+  geom_point(
+    data = scatter_plot_data |> filter(coloring == "Baseline"),
+    aes(color = coloring),
     size = point_size
   ) +
+  geom_point(
+    data = scatter_plot_data |> filter(coloring %in% c("Interaction + Baseline", "Interaction")),
+    aes(color = coloring),
+    size = point_size
+  ) +
+  # Add geom_smooth for linear regression (no color mapping for legend)
   geom_smooth(
     method = "lm", 
     color = "blue",
-    linewidth = point_size
+    linewidth = point_size,
   ) + 
+  # Add threshold lines
   geom_line(
     aes(y = upper_threshold), 
     linetype = "dashed", 
@@ -1121,10 +1182,23 @@ baseline_scatter_plot <- scatter_plot_data %>%
   ) +
   scale_color_manual(
     values = c(
-      "With interaction" = "red", 
-      "With baseline (no interaction)" = "gold", 
-      "Rest" = "lightgrey"),
-    breaks = c("With interaction", "With baseline (no interaction)"),
+      "Interaction + Baseline" = "red",
+      "Interaction" = "darkgreen", 
+      "Baseline" = "gold", 
+      "Rest" = "lightgrey"
+    ),
+    breaks = c(
+      "Interaction + Baseline", 
+      "Interaction", 
+      "Baseline",
+      "Rest" 
+    ),
+    labels = c(
+      "Interaction + Baseline", 
+      "Interaction", 
+      "Baseline",
+      smooth_label 
+    )
   ) +
   scale_x_continuous(
     limits = c(
@@ -1138,22 +1212,32 @@ baseline_scatter_plot <- scatter_plot_data %>%
       max(scatter_plot_data[[names(scatter_plot_data)[3]]]) + 1
     )  
   ) +
+  geom_text_repel(
+    data = scatter_plot_data |> filter(Feature %in% top_interactions),
+    aes(label = Feature),
+    size = 1.5,
+    color = "black",  
+    segment.color = "black",  
+    min.segment.length = 0,
+    max.iter = 2000
+  ) +
   theme_nature_fonts() +
   theme_white_background() +
   theme_small_legend() +
   theme(
-    legend.position = c(0.35, 0.9), 
+    legend.position = c(legend_x_pos, legend_y_pos), 
     legend.title = element_blank(),  
     legend.spacing.x = unit(0, "cm"), 
+    legend.spacing.y = unit(0, "cm"),
     legend.background = element_rect(fill = "transparent"),  
     legend.key.spacing = unit(0, "cm")
-  ) 
+  )
 
-# Save
+# Save the plot
 ggsave(filename = "Baseline_scatter_plot.pdf",
        plot = baseline_scatter_plot,
        path = path_to_save_location,
-       height = 2, width = 2)
+       height = 3, width = 3)
 
 # ---- Venn Diagram (venn_diagram) ----
 venn_data <- list(
@@ -1214,7 +1298,7 @@ vennDiagram <- ggplot() +
 ggsave(filename = "Venn_diagram.pdf",
        plot = vennDiagram,
        path = path_to_save_location,
-       height = 2, width = 2)
+       height = 3, width = 3)
 
 # ---- Heatmap (expression_heatmap) ----
 exp_list <- list()
@@ -1227,50 +1311,9 @@ for(gg in sig_interactions){
 # Bind to dataframe
 expression <- bind_rows(exp_list, .id = "Feature")
 
-expression_heatmap <- expression |> 
-  ggplot(
-    aes(
-      x = patient_id,
-      y = Feature,
-      fill = E
-    )
-  ) +
-  geom_tile() +
-  facet_grid(
-    cols = vars(
-      toupper(genetic_ancestry), 
-      subtype_pooled
-    ),
-    scales = "free_x"  
-  ) +
-  scale_fill_gradient2(
-    low = "blue", 
-    mid = "white", 
-    high = "red", 
-    midpoint = 0
-  ) +
-  labs(
-    x = "Patients"
-  ) +
-  theme_nature_fonts() +
-  theme_white_background() +
-  theme_white_strip() +
-  theme_small_legend() +
-  theme(
-    legend.position = "bottom",
-    legend.title.position = "top",
-    axis.text.x = element_blank(),  
-    axis.ticks.x = element_blank(),  
-  ) 
-
-# Save
-ggsave(filename = "Interactions_expression_heatmap_ggplot.pdf",
-       plot = expression_heatmap,
-       path = path_to_save_location,
-       height = 2, width = 2)
-
-
-# Complex heatmap
+pdf(file.path(path_to_save_location, "Interactions_expression_heatmap.pdf"), 
+    width = 6 , height = 3
+  )
 # Expression matrix
 expression_matrix <- expression |>
   dplyr::select(Feature, patient_id, E) |>
@@ -1278,46 +1321,226 @@ expression_matrix <- expression |>
   column_to_rownames("Feature") |>
   as.matrix()
 
-
 # Annotations
 # Colors
-output_column_colors <- setNames(c("#1b9e77", "purple"), comparison )
+output_column_colors <- setNames(c("#1b9e77", "purple"), comparison)
 
 # Annotation dataframe
 anno_df <- expression |>
   dplyr::select(patient_id, all_of(c(output_column, ancestry_column))) |>
   distinct() |>
-  arrange(match(patient_id, colnames(expression_matrix))) |>
+  arrange(match(patient_id, colnames(expression_matrix)))
+
+# Grouping 
+custom_order <- c(
+  paste(train_ancestry, comparison[1], sep = "_"),  
+  paste(train_ancestry, comparison[2], sep = "_"),  
+  paste(setdiff(anno_df[[ancestry_column]], train_ancestry), comparison[1], sep = "_"),  
+  paste(setdiff(anno_df[[ancestry_column]], train_ancestry), comparison[2], sep = "_")  
+)
+
+anno_df <- anno_df |>
   mutate(
     group = paste(anno_df[[ancestry_column]], anno_df[[output_column]], sep = "_"),
+    group = factor(group, levels = custom_order)
   ) 
 
-# Annotation clasee
-top_ha <- HeatmapAnnotation(
-  group_block = anno_block(
-    gp = gpar(fill = output_column_colors),  
-    labels = unique(anno_df$group)  
-  )
+# Annotation (Sample)
+top_anno <- HeatmapAnnotation(
+  # Annotations
+  Ancestry = anno_empty(
+    border = FALSE, 
+    height = unit(0.2, "cm"), 
+    show_name = TRUE
+  ),
+  Condition = anno_df[[output_column]], 
+  # Colors
+  col = list(
+    Condition = output_column_colors
+  ), 
+  # Fonts
+  annotation_name_gp = gpar(fontsize = 5),
+  border = TRUE,
+  show_annotation_name = TRUE,
+  # Height
+  simple_anno_size = unit(0.2, "cm"),
+  # Legend
+  show_legend = FALSE
 )
+
+# Legends
+ancetsry_lgd <- Legend(
+  title = "Ancestry", 
+  at = c(
+    toupper(train_ancestry), 
+    toupper(inf_ancestry)
+    ), 
+  legend_gp = gpar(
+    fill = c(
+      genetic_ancestry_colors[train_ancestry], 
+      genetic_ancestry_colors[inf_ancestry]
+      )
+    ),
+  # Font
+  labels_gp = gpar(fontsize = 5),
+  title_gp = gpar(fontsize = 5, fontface = "plain"),
+  # Size
+  grid_height = unit(0.3, "cm"), 
+  grid_width = unit(0.3, "cm"),
+  # Direction
+  direction = "horizontal"
+  )
+
+condition_lgd <- Legend(
+  title = "Condition", 
+  at = c(
+    comparison[1], 
+    comparison[2]
+    ), 
+  legend_gp = gpar(
+    fill = c(
+      output_column_colors[comparison[1]], 
+      output_column_colors[comparison[2]]
+      )
+    ),
+  # Font
+  labels_gp = gpar(fontsize = 5),
+  title_gp = gpar(fontsize = 5, fontface = "plain"),
+  # Size
+  grid_height = unit(0.3, "cm"), 
+  grid_width = unit(0.3, "cm"),
+  # Direction
+  direction = "horizontal"
+  )
+
+lgd_list <- c(ancetsry_lgd, condition_lgd)
 
 # Heatmap
 heatmap <- Heatmap(
-  expression_matrix,  
+  expression_matrix,
   name = "Expression", 
   show_column_names = FALSE,
+  # Clustering
+  cluster_rows = FALSE,
+  cluster_columns = FALSE,
   # Split
   column_split = anno_df$group,
+  cluster_column_slices = FALSE,
   column_title = NULL,
   # Annotations
-  top_annotation = top_ha
+  top_annotation = top_anno,
+  # Fonts
+  row_names_gp = gpar(fontsize = 5),
+  row_title_gp = gpar(fontsize = 5),
+  # Legends
+  heatmap_legend_param = list(
+    title_gp = gpar(fontsize = 5, fontface = "plain"), 
+    labels_gp = gpar(fontsize = 5, fontface = "plain"),
+    grid_height = unit(0.3, "cm"), 
+    grid_width = unit(0.3, "cm"),
+    direction = "horizontal"
+    )
+  )
+
+# Add legend
+draw(
+  heatmap, 
+  # Legend
+  annotation_legend_list = lgd_list,
+  heatmap_legend_side = "bottom",
+  annotation_legend_side = "bottom",
+  merge_legend = TRUE
+  )
+
+# Spanning groups
+group_block_anno = function(group, empty_anno, gp = gpar(), 
+    label = NULL, label_gp = gpar()) {
+
+    seekViewport(qq("annotation_@{empty_anno}_@{min(group)}"))
+    loc1 = deviceLoc(x = unit(0, "npc"), y = unit(0, "npc"))
+    seekViewport(qq("annotation_@{empty_anno}_@{max(group)}"))
+    loc2 = deviceLoc(x = unit(1, "npc"), y = unit(1, "npc"))
+
+    seekViewport("global")
+    grid.rect(loc1$x, loc1$y, width = loc2$x - loc1$x, height = loc2$y - loc1$y, 
+        just = c("left", "bottom"), gp = gp)
+    if(!is.null(label)) {
+        grid.text(label, x = (loc1$x + loc2$x)*0.5, y = (loc1$y + loc2$y)*0.5, gp = label_gp)
+    }
+}
+
+# Add the blocks
+group_block_anno(
+  1:2, "Ancestry", 
+  gp = gpar(fill = genetic_ancestry_colors[train_ancestry])
+  )
+group_block_anno(
+  3:4, "Ancestry", 
+  gp = gpar(fill = genetic_ancestry_colors[inf_ancestry])
+  )
+# Save off
+dev.off()  
+
+# ---- Boxplot interactions (interaction_boxplot) ----
+exp_list <- list()
+for(gg in top_interactions){
+  exp_list[[gg]] <- data$obs |>
+    mutate(E=scale(data_norm$E[gg,])) |>
+    rownames_to_column("patient_id") |>
+    remove_rownames()
+}
+# Bind to dataframe
+expression <- bind_rows(exp_list, .id = "Feature")
+
+interactions_boxplot_list <- list()
+for (feature in unique(expression$Feature)){
+  # Filter by feature
+  filtered_expression <- expression |>
+  filter(Feature == feature)
+
+  feat_interactions_boxplot <- filtered_expression |>
+    ggplot(
+      aes(
+        x = !!sym(output_column),
+        y = E
+      )
+    ) +
+    geom_boxplot(
+      width = point_size,
+      outlier.size = 0.1,
+    ) +
+    scale_y_continuous(
+      breaks = scales::breaks_extended(n = 3)
+    ) +
+    facet_grid(
+      cols = vars(fct_rev(toupper(!!sym(ancestry_column)))),
+    ) +
+    labs(
+      title = feature,
+      x = "Condition"
+    ) +
+    theme_nature_fonts() +
+    theme_white_background() +
+    theme_white_strip() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+  # Append to list 
+  interactions_boxplot_list[[feature]] <- feat_interactions_boxplot
+}
+
+# Patchwork
+interactions_boxplot <- wrap_plots(
+  interactions_boxplot_list,
+  nrow = 1, 
+  ncol = ceiling(length(interactions_boxplot_list) / 1)
 )
 
 # Save
-pdf(
-  file.path(path_to_save_location, "Interactions_expression_heatmap_complex.pdf"), 
-  width = 5, height = 5)
-draw(heatmap)  
-dev.off()  
+ggsave(filename = "Interactions_boxplot.pdf",
+       plot = interactions_boxplot,
+       path = path_to_save_location,
+       height = 3, width = 6)
+
 
 
 

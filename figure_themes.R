@@ -14,9 +14,9 @@ theme_nature_fonts <- function(base_size = 5) {
 # Small legend theme
 theme_small_legend <- function(...) {
   theme(
-    legend.key.spacing = unit(0, "cm")
-    legend.key.height = unit(0.3, "cm"),  
-    legend.key.width = unit(0.3, "cm"),
+    legend.key.spacing = unit(0, "cm"),
+    legend.key.height = unit(0.2, "cm"),  
+    legend.key.width = unit(0.2, "cm"),
     legend.margin = margin(0, 0, 0, 0),
     ...
   )
