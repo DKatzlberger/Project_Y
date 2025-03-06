@@ -38,7 +38,7 @@ if (length(args) > 0) {
 } else {
   print("Running interactive mode for development.")
   # Yaml file used for development (often an actual job script)
-  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_EAS.yml"
+  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml"
   # 1. Check if it's a valid yaml file
   # 2. Load the yaml file
   is_yml_file(yaml_file)
@@ -402,7 +402,6 @@ contrast_correlation_logFC <- aggregated_contrast_metric_dge |>
     stat = "identity", 
     width = 0.7
   ) +
-
   geom_text(
     aes(
       label = round(mean_value, 3),  
@@ -484,7 +483,7 @@ ggsave(filename = "Contrast_correlation_logFC.pdf",
        width = 3, height = 3
        )
 
-# ---- Contrast distribution logFC (DGE) ----
+# ---- Contrast distribution avg. logFC (DGE) ----
 # Train - Inference
 lm_data <- aggregated_raw_metric_dge |>
   select(-c(Ancestry, sd_value, se_value)) |>
@@ -511,12 +510,8 @@ cor_spearman <- cor(lm_data$Train, lm_data$Inference, method = "spearman")
 cor_p_spearman <- pvalue(independence_test(rank(Inference) ~ rank(Train), data = lm_data))
 
 # Label
-pearson_label <- bquote(
-  R[Pearson] == .(round(cor_pearson, 3)) ~ ", " ~ p == .(format(cor_p_pearson, scientific = TRUE, digits = 3))
-  )
-spearman_label <- bquote(
-  R[Spearman] == .(round(cor_spearman, 3)) ~ ", " ~ p == .(format(cor_p_spearman, scientific = TRUE, digits = 3))
-  )
+pearson_label <- bquote(R[Pearson] == .(round(cor_pearson, 3)))
+spearman_label <- bquote(R[Spearman] == .(round(cor_spearman, 3)))
 
 # Add threshold
 lm_data <- lm_data |>
@@ -585,21 +580,21 @@ contrast_distribution_logFC <- lm_data |>
     method = "lm",
     color = "blue",
     linewidth = point_size,
-    alpha = 0.7
+    alpha = 0.5
   ) +
   geom_line(
     aes(x = Train, y = upper_threshold), 
     color = "blue", 
     linetype = "dashed",
     linewidth = point_size,
-    alpha = 0.7
+    alpha = 0.5
   ) + 
   geom_line(
     aes(x = Train, y = lower_threshold), 
     color = "blue", 
     linetype = "dashed",
     linewidth = point_size,
-    alpha = 0.7
+    alpha = 0.5
   ) +
   scale_color_manual(
     values = c(
@@ -624,6 +619,11 @@ contrast_distribution_logFC <- lm_data |>
       spearman_label
     )
   ) +
+  guides(
+    color = guide_legend(
+      title = "Ancestry"
+      )
+  ) +
   labs(
     x = paste(x_ancestry, condition_1, "vs", condition_2, "(avg. logFC)"),
     y = paste(y_ancestry, condition_1, "vs", condition_2, "(avg. logFC)")
@@ -642,7 +642,7 @@ contrast_distribution_logFC <- lm_data |>
   theme_white_strip() +
   theme_small_legend() +
   theme(
-    legend.title = element_blank(),
+    legend.title = element_text(face = "bold"),
     legend.justification = c(0, 1),
     legend.position = c(legend_x_pos, legend_y_pos), 
     legend.spacing.x = unit(0, "cm"), 
@@ -652,7 +652,7 @@ contrast_distribution_logFC <- lm_data |>
   ) 
 
 # Save
-ggsave(filename = "Contrast_distribution_logFC_train_inference.pdf", 
+ggsave(filename = "Contrast_distribution_avg_logFC_train_inference.pdf", 
        plot = contrast_distribution_logFC, 
        path = path_to_save_location, 
        width = 3, height = 3
@@ -684,14 +684,10 @@ cor_spearman <- cor(lm_data$Train, lm_data$Test, method = "spearman")
 cor_p_spearman <- pvalue(independence_test(rank(Test) ~ rank(Train), data = lm_data))
 
 # Label
-pearson_label <- bquote(
-  R[Pearson] == .(round(cor_pearson, 3)) ~ ", " ~ p == .(format(cor_p_pearson, scientific = TRUE, digits = 3))
-  )
-spearman_label <- bquote(
-  R[Spearman] == .(round(cor_spearman, 3)) ~ ", " ~ p == .(format(cor_p_spearman, scientific = TRUE, digits = 3))
-  )
+pearson_label <- bquote(R[Pearson] == .(round(cor_pearson, 3)))
+spearman_label <- bquote(R[Spearman] == .(round(cor_spearman, 3)))
 
-# Add threshold
+# Add coloring
 lm_data <- lm_data |>
   mutate(
     abs_residual = abs_residuals,
@@ -708,7 +704,7 @@ lm_data <- lm_data |>
       )
   )
 
-# Train and inf ancestry
+# x and y ancestry
 x_ancestry <- unique(aggregated_raw_metric_dge$Ancestry[aggregated_raw_metric_dge$Status == "Train"])
 y_ancestry <- unique(aggregated_raw_metric_dge$Ancestry[aggregated_raw_metric_dge$Status == "Test"])
 
@@ -758,21 +754,21 @@ contrast_distribution_logFC <- lm_data |>
     method = "lm",
     color = "blue",
     linewidth = point_size,
-    alpha = 0.7
+    alpha = 0.5
   ) +
   geom_line(
     aes(x = Train, y = upper_threshold), 
     color = "blue", 
     linetype = "dashed",
     linewidth = point_size,
-    alpha = 0.7
+    alpha = 0.5
   ) + 
   geom_line(
     aes(x = Train, y = lower_threshold), 
     color = "blue", 
     linetype = "dashed",
     linewidth = point_size,
-    alpha = 0.7
+    alpha = 0.5
   ) +
   scale_color_manual(
     values = c(
@@ -797,6 +793,11 @@ contrast_distribution_logFC <- lm_data |>
       spearman_label
     )
   ) +
+  guides(
+    color = guide_legend(
+      title = "Subset"
+      )
+  ) +
   labs(
     x = paste(x_ancestry, condition_1, "vs", condition_2, "(avg. logFC)"),
     y = paste(y_ancestry, condition_1, "vs", condition_2, "(avg. logFC)")
@@ -815,7 +816,360 @@ contrast_distribution_logFC <- lm_data |>
   theme_white_strip() +
   theme_small_legend() +
   theme(
-    legend.title = element_blank(),
+    legend.title = element_text(face = "bold"),
+    legend.justification = c(0, 1),
+    legend.position = c(legend_x_pos, legend_y_pos), 
+    legend.spacing.x = unit(0, "cm"), 
+    legend.spacing.y = unit(0, "cm"),
+    legend.background = element_rect(fill = "transparent"),  
+    legend.key.spacing = unit(0, "cm")
+  ) 
+
+# Save
+ggsave(filename = "Contrast_distribution_avg_logFC_train_test.pdf", 
+       plot = contrast_distribution_logFC, 
+       path = path_to_save_location, 
+       width = 3, height = 3
+       )
+
+# ---- Contrast distribution logFC (DGE) ----
+# Train - Inference
+lm_data <- raw_metric_dge |>
+  filter(coef == unique(raw_metric_dge$coef)[1]) |>
+  select(-c(Ancestry)) |>
+  pivot_wider(names_from = Status, values_from = logFC) 
+
+# Model
+lm_model <- lm(Inference ~ Train, data = lm_data)
+
+# Coefficients
+predicted_values <- fitted(lm_model)
+residuals <- residuals(lm_model)
+abs_residuals <- abs(residuals)
+
+# Create threshold line
+thr = 1
+upper_threshold <- predicted_values + thr
+lower_threshold <- predicted_values - thr
+
+# Calculate the correlation
+cor_pearson <- cor(lm_data$Train, lm_data$Inference, method = "pearson")
+cor_p_pearson <- pvalue(independence_test(Test ~ Inference, data = lm_data))
+
+cor_spearman <- cor(lm_data$Train, lm_data$Test, method = "spearman")
+cor_p_spearman <- pvalue(independence_test(rank(Test) ~ rank(Inference), data = lm_data))
+
+# Label
+pearson_label <- bquote(R[Pearson] == .(round(cor_pearson, 3)))
+spearman_label <- bquote(R[Spearman] == .(round(cor_spearman, 3)))
+
+# Add coloring
+lm_data <- lm_data |>
+  mutate(
+    abs_residual = abs_residuals,
+    above_threshold = abs_residual > thr,
+  ) |>
+  mutate(
+    with_interactions = Feature %in% sig_interactions, 
+    with_baseline = Feature %in% sig_baseline,
+    coloring = case_when(
+      with_interactions & with_baseline ~ "Interaction + Baseline",
+      with_interactions &! with_baseline ~ "Interaction",    
+      with_baseline & !with_interactions ~ "Baseline",                       
+      TRUE ~ "Rest"   
+      )
+  ) |>
+  mutate(
+    Seed = factor(Seed)
+  )
+
+# x and y ancestry
+x_ancestry <- unique(raw_metric_dge$Ancestry[raw_metric_dge$Status == "Train"])
+y_ancestry <- unique(raw_metric_dge$Ancestry[raw_metric_dge$Status == "Inference"])
+
+# Compared conditions
+condition_1 <- unique(raw_metric_dge$coef)[1]
+condition_2 <- unique(raw_metric_dge$coef)[2]
+
+# Plot
+contrast_distribution_logFC <- lm_data |>
+  ggplot(
+    aes(
+      x = Train,
+      y = Inference
+    )
+  ) +
+  geom_point(
+    data = lm_data |> filter(coloring == "Rest"),
+    aes(
+      color = coloring,
+      shape = Seed,
+      ),
+    size = point_size,
+    show.legend = FALSE
+  ) +
+  geom_point(
+    data = lm_data |> filter(coloring == "Rest"),
+    aes(color = "dummy"),
+    size = NA,   
+    show.legend = FALSE 
+  ) +
+  geom_point(
+    data = lm_data |> filter(coloring == "Baseline"),
+    aes(
+      color = coloring,
+      shape = Seed
+      ),
+    size = point_size
+  ) +
+  geom_point(
+    data = lm_data |> filter(coloring %in% c("Interaction + Baseline", "Interaction")),
+    aes(
+      color = coloring,
+      shape = Seed
+      ),
+    size = point_size
+  ) +
+  geom_smooth(
+    method = "lm",
+    color = "blue",
+    linewidth = point_size,
+    alpha = 0.5
+  ) +
+  geom_line(
+    aes(x = Train, y = upper_threshold), 
+    color = "blue", 
+    linetype = "dashed",
+    linewidth = point_size,
+    alpha = 0.5
+  ) + 
+  geom_line(
+    aes(x = Train, y = lower_threshold), 
+    color = "blue", 
+    linetype = "dashed",
+    linewidth = point_size,
+    alpha = 0.5
+  ) +
+  scale_color_manual(
+    values = c(
+      "Interaction + Baseline" = "red",
+      "Interaction" = "darkgreen", 
+      "Baseline" = "gold", 
+      "Rest" = "lightgrey",
+      "dummy" = "black"
+    ),
+    breaks = c(
+      "Interaction + Baseline", 
+      "Interaction", 
+      "Baseline",
+      "Rest",
+      "dummy" 
+    ),
+    labels = c(
+      "Interaction + Baseline", 
+      "Interaction", 
+      "Baseline",
+      pearson_label,
+      spearman_label
+    )
+  ) +
+  guides(
+    color = guide_legend(
+      title = "Ancestry",
+      title.theme = element_text(face = "bold")
+      ),  
+    shape = guide_legend(
+      title = "Seed",
+      ncol = 5,
+      title.theme = element_text(face = "plain")
+      )
+  ) +
+  labs(
+    x = paste(x_ancestry, condition_1, "vs", condition_2, "(logFC)"),
+    y = paste(y_ancestry, condition_1, "vs", condition_2, "(logFC)")
+  ) +
+  theme_nature_fonts() +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
+  theme(
+    # legend.title = element_blank(),
+    legend.justification = c(0, 1),
+    legend.position = c(legend_x_pos, legend_y_pos), 
+    legend.spacing.x = unit(0, "cm"), 
+    legend.spacing.y = unit(0, "cm"),
+    legend.background = element_rect(fill = "transparent"),  
+    legend.key.spacing = unit(0, "cm")
+  ) 
+
+# Save
+ggsave(filename = "Contrast_distribution_logFC_train_inference.pdf", 
+       plot = contrast_distribution_logFC, 
+       path = path_to_save_location, 
+       width = 3, height = 3
+       )
+
+# Train - Subset
+lm_data <- raw_metric_dge |>
+  filter(coef == unique(raw_metric_dge$coef)[1]) |>
+  select(-c(Ancestry)) |>
+  pivot_wider(names_from = Status, values_from = logFC) 
+
+# Model
+lm_model <- lm(Test ~ Train, data = lm_data)
+
+# Coefficients
+predicted_values <- fitted(lm_model)
+residuals <- residuals(lm_model)
+abs_residuals <- abs(residuals)
+
+# Create threshold line
+thr = 1
+upper_threshold <- predicted_values + thr
+lower_threshold <- predicted_values - thr
+
+# Calculate the correlation
+cor_pearson <- cor(lm_data$Train, lm_data$Test, method = "pearson")
+cor_p_pearson <- pvalue(independence_test(Test ~ Train, data = lm_data))
+
+cor_spearman <- cor(lm_data$Train, lm_data$Test, method = "spearman")
+cor_p_spearman <- pvalue(independence_test(rank(Test) ~ rank(Train), data = lm_data))
+
+# Label
+pearson_label <- bquote(R[Pearson] == .(round(cor_pearson, 3)))
+spearman_label <- bquote(R[Spearman] == .(round(cor_spearman, 3)))
+
+# Add coloring
+lm_data <- lm_data |>
+  mutate(
+    abs_residual = abs_residuals,
+    above_threshold = abs_residual > thr,
+  ) |>
+  mutate(
+    with_interactions = Feature %in% sig_interactions, 
+    with_baseline = Feature %in% sig_baseline,
+    coloring = case_when(
+      with_interactions & with_baseline ~ "Interaction + Baseline",
+      with_interactions &! with_baseline ~ "Interaction",    
+      with_baseline & !with_interactions ~ "Baseline",                       
+      TRUE ~ "Rest"   
+      )
+  ) |>
+  mutate(
+    Seed = factor(Seed)
+  )
+
+# x and y ancestry
+x_ancestry <- unique(raw_metric_dge$Ancestry[raw_metric_dge$Status == "Train"])
+y_ancestry <- unique(raw_metric_dge$Ancestry[raw_metric_dge$Status == "Test"])
+
+# Compared conditions
+condition_1 <- unique(raw_metric_dge$coef)[1]
+condition_2 <- unique(raw_metric_dge$coef)[2]
+
+# Plot
+contrast_distribution_logFC <- lm_data |>
+  ggplot(
+    aes(
+      x = Train,
+      y = Test
+    )
+  ) +
+  geom_point(
+    data = lm_data |> filter(coloring == "Rest"),
+    aes(
+      color = coloring,
+      shape = Seed,
+      ),
+    size = point_size,
+    show.legend = FALSE
+  ) +
+  geom_point(
+    data = lm_data |> filter(coloring == "Rest"),
+    aes(color = "dummy"),
+    size = NA,   
+    show.legend = FALSE 
+  ) +
+  geom_point(
+    data = lm_data |> filter(coloring == "Baseline"),
+    aes(
+      color = coloring,
+      shape = Seed
+      ),
+    size = point_size
+  ) +
+  geom_point(
+    data = lm_data |> filter(coloring %in% c("Interaction + Baseline", "Interaction")),
+    aes(
+      color = coloring,
+      shape = Seed
+      ),
+    size = point_size
+  ) +
+  geom_smooth(
+    method = "lm",
+    color = "blue",
+    linewidth = point_size,
+    alpha = 0.5
+  ) +
+  geom_line(
+    aes(x = Train, y = upper_threshold), 
+    color = "blue", 
+    linetype = "dashed",
+    linewidth = point_size,
+    alpha = 0.5
+  ) + 
+  geom_line(
+    aes(x = Train, y = lower_threshold), 
+    color = "blue", 
+    linetype = "dashed",
+    linewidth = point_size,
+    alpha = 0.5
+  ) +
+  scale_color_manual(
+    values = c(
+      "Interaction + Baseline" = "red",
+      "Interaction" = "darkgreen", 
+      "Baseline" = "gold", 
+      "Rest" = "lightgrey",
+      "dummy" = "black"
+    ),
+    breaks = c(
+      "Interaction + Baseline", 
+      "Interaction", 
+      "Baseline",
+      "Rest",
+      "dummy" 
+    ),
+    labels = c(
+      "Interaction + Baseline", 
+      "Interaction", 
+      "Baseline",
+      pearson_label,
+      spearman_label
+    )
+  ) +
+  guides(
+    color = guide_legend(
+      title = "Subset",
+      title.theme = element_text(face = "bold")
+      ),  
+    shape = guide_legend(
+      title = "Seed",
+      ncol = 5,
+      title.theme = element_text(face = "plain")
+      )
+  ) +
+  labs(
+    x = paste(x_ancestry, condition_1, "vs", condition_2, "(logFC)"),
+    y = paste(y_ancestry, condition_1, "vs", condition_2, "(logFC)")
+  ) +
+  theme_nature_fonts() +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
+  theme(
+    # legend.title = element_blank(),
     legend.justification = c(0, 1),
     legend.position = c(legend_x_pos, legend_y_pos), 
     legend.spacing.x = unit(0, "cm"), 
@@ -916,15 +1270,12 @@ contrast_prediction_phenotype <- aggregated_contrast_metric_ml |>
     x = "Prediction",
     y = "Y"
   ) +
-  # P-value annotation
-  # Horizontal line
   annotate(
     "segment",
     x = 1, xend = 2,  
     y = y_max * 1.1, yend = y_max * 1.1,  
     linewidth = 0.3
   ) +
-  # Ticks
   annotate(
     "segment",
     x = 1, xend = 1,
@@ -969,21 +1320,34 @@ ggsave(filename = "Contrast_prediction_phenotype.pdf",
        )
 
 # ---- Contrast distribution probabilities (ML) ----
+threshold <- 0.5
+# Conditions
+class_0 <- colnames(raw_metric_ml)[1]
+class_1 <- colnames(raw_metric_ml)[2] # Target
+
 contrast_distribution_probabilities <- raw_metric_ml |>
+  mutate(
+    Classification = ifelse(.data[[class_1]] > threshold, class_1, class_0),
+    True_labels = as.factor(y)
+  ) |>
+  select(-all_of(class_0)) |>
   pivot_longer(
-    cols = 1:2,
+    cols = 1,
     names_to = "Condition",
     values_to = "Probabilities"
   ) |>
   ggplot(
     aes(
       x = Condition,
-      y = Probabilities
+      y = Probabilities,
+      fill = True_labels
     )
   ) +
-  geom_violin() +
+  geom_violin(
+    color = NA
+  ) +
   geom_hline(
-    yintercept = 0.5, 
+    yintercept = threshold, 
     color = "blue", 
     linetype = "dashed", 
     linewidth = point_size
@@ -995,10 +1359,21 @@ contrast_distribution_probabilities <- raw_metric_ml |>
       Algorithm = as_labeller(algorithm_labels)
     )
   ) +
+  scale_fill_discrete(
+    name = "True labels",
+    labels = c(class_0, class_1)
+  ) +
+  labs(
+    x = "Target condition"
+  ) +
   theme_nature_fonts() +
   theme_white_background() +
   theme_white_background() +
-  theme_white_strip()
+  theme_white_strip() +
+  theme_small_legend() +
+  theme(
+    legend.position = c(0.9, 0.1)
+  )
 
 # Save
 ggsave(filename = "Contrast_distribution_probabilities.pdf", 

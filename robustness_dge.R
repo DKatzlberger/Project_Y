@@ -42,7 +42,6 @@ if (length(args) > 0) {
   is_yml_file(yaml_file)
   setup <- yaml.load_file(yaml_file)
 }
-
 # Set seed (because why not)
 set.seed(setup$seed)
 
@@ -50,7 +49,8 @@ set.seed(setup$seed)
 adata <- read_h5ad(setup$data_path)
 
 # Iterate over all proportions doing DGE analysis
-robustness_results <- list()
+robustness_metric <- list()
+robustness_logFC <- list()
 for (prop in setup$proportion){
 
   print(paste("Dealing with", prop, "% of data."))
@@ -81,8 +81,7 @@ for (prop in setup$proportion){
   # Dimensions
   stopifnot(length(train_idx) == length(train_data$obs_names))
   # Order
-  stopifnot(all(colnames(t(train_data$X)) ==
-                  row.names(train_data$obs[colnames(t(train_data$X)), ])))
+  stopifnot(all(colnames(t(train_data$X)) == row.names(train_data$obs[colnames(t(train_data$X)), ])))
 
   # Covariate:
   # 1. Extract the covariate, if it exists and has a meaningful value
@@ -122,43 +121,47 @@ for (prop in setup$proportion){
     }
   } 
 
-  # Create design matrix
-  train_design <- create_design(setup$classification$output_column,
-                                meta = train_data$obs,
-                                covariate = covariate_list)                            
-  test_design <- create_design(setup$classification$output_column,
-                              meta = test_data$obs,
-                              covariate = covariate_list)
-  inf_design <- create_design(setup$classification$output_column,
-                              meta = inf_data$obs,
-                              covariate = covariate_list)
+  # Create design (GLM)
+  output_column <- setup$classification$output_column
+  train_design <- create_design(output_column, train_data$obs, covariate = covariate_list)                            
+  test_design <- create_design(output_column, test_data$obs, covariate = covariate_list)
+  inf_design <- create_design(output_column, inf_data$obs, covariate = covariate_list)
 
-  # Filter genes by expression (Use the train set)
-  # This will lead to different features across proportions
-  # TODO - This will lead to different features across proportions
-  keeper_genes <- filterByExpr(t(train_data$X), train_design)
-  # Subset features
-  train_filtered <- train_data[, keeper_genes]
-  test_filtered <- test_data[, keeper_genes]
-  inf_filtered <- inf_data[, keeper_genes]
-
+  # Filter genes
+  if (setup$filter_features & setup$data_type == "expression"){
+    print("Filter features")
+    # Filter by expression
+    keeper_genes <- filterByExpr(t(train_data$X), design = train_design)
+    # Subset features
+    train_filtered <- train_data[, keeper_genes]
+    test_filtered <- test_data[, keeper_genes]
+    inf_filtered <- inf_data[, keeper_genes]
+  } else{
+    train_filtered <- train_data
+    test_filtered <- test_data
+    inf_filtered <- inf_data
+  }
   # Save features (for use in ML)
-  # Features are saved per 'prop'
-  feature_file <- paste0("Features_", prop_, ".yml")
-  write_yaml(train_filtered$var_names, file.path(setup$output_directory, feature_file))
-
-  # Assertion: Check array
-  # Same genes in all sets
-  stopifnot(all(train_data$var_names == test_data$var_names))
-  # Dimensions
-  stopifnot(table(keeper_genes)[2] == dim(train_filtered$X)[2])
+  output_directory <- setup$output_directory
+  file_name <- paste0("Features_", prop_, ".yml")
+  write_yaml(train_filtered$var_names, file.path(output_directory, file_name))
 
   # Limma workflow
   print("Start differential gene expression analysis.")
-  # Normalization (logCPM)
-  train_norm <- voom(t(train_filtered$X), train_design, plot = FALSE)
-  test_norm <- voom(t(test_filtered$X), test_design, plot = FALSE)
-  inf_norm <- voom(t(inf_filtered$X), inf_design, plot = FALSE)
+  # Select normalization method
+  data_type <- setup$data_type
+  dge_normalization <- setup$dge_normalization
+  normalization_method <- normalization_methods[[data_type]][[dge_normalization]]
+  
+  # Transpose (rows = Genes, cols = Samples)
+  train_filtered = t(train_filtered$X)
+  test_filtered = t(test_filtered$X)
+  inf_filtered = t(inf_filtered$X)
+
+  # Normalization
+  train_norm <- normalization_method(train_filtered, train_design)
+  test_norm <- normalization_method(test_filtered, test_design)
+  inf_norm <- normalization_method(inf_filtered, inf_design)
 
   # Fit the model (Means model)
   train_limma_fit <- lmFit(train_norm, design = train_design)
@@ -175,14 +178,16 @@ for (prop in setup$proportion){
   test_mean_res <- extract_results(test_limma_fit)
   inf_mean_res <- extract_results(inf_limma_fit)
 
-  # Assertion: Check if all genes have been tested
-  stopifnot(all(dim(train_mean_res)[1] / length(unique(train_mean_res$coef)) ==
-                table(keeper_genes)[2]))
-
   # Save results
-  fwrite(train_mean_res, file.path(setup$output_directory, paste0("Means_", prop_, "_train.csv")))
-  fwrite(test_mean_res, file.path(setup$output_directory, paste0("Means_", prop_, "_test.csv")))
-  fwrite(inf_mean_res, file.path(setup$output_directory, paste0("Means_", prop_, "_inf.csv")))
+  output_directory <- setup$output_directory
+  file_name <- paste0("Limma_means_", prop_, "_train.csv")
+  fwrite(train_mean_res, file.path(output_directory, file_name))
+
+  file_name <- paste0("Limma_means_", prop_, "_test.csv")
+  fwrite(test_mean_res, file.path(output_directory, file_name))
+
+  file_name <- paste0("Limma_means_", prop_, "_inf.csv")
+  fwrite(inf_mean_res, file.path(output_directory, file_name))
 
   # Create contrast matrix 
   print("Fit contrast matrix.")
@@ -208,21 +213,52 @@ for (prop in setup$proportion){
   inf_contrast_res <- extract_results(inf_limma_fit_contrast)
 
   # Save contrast results
-  results_file_train <- paste0("Contrast_", prop_ ,"_train.csv")
-  results_file_test <- paste0("Contrast_", prop_ ,"_test.csv")
-  results_file_inf <- paste0("Contrast_", prop_ ,"_inf.csv")
+  output_directory <- setup$output_directory
+  file_name <- paste0("Limma_contrast_", prop_ ,"_train.csv")
+  fwrite(train_contrast_res, file.path(output_directory, file_name))
 
-  fwrite(train_contrast_res,
-        file.path(setup$output_directory, results_file_train))
-  fwrite(test_contrast_res,
-        file.path(setup$output_directory, results_file_test))
-  fwrite(inf_contrast_res,
-        file.path(setup$output_directory, results_file_inf))
+  file_name <- paste0("Limma_contrast_", prop_ ,"_test.csv")
+  fwrite(test_contrast_res, file.path(output_directory, file_name))
+
+  file_name <- paste0("Limma_contrast_", prop_ ,"_inf.csv")
+  fwrite(inf_contrast_res, file.path(output_directory, file_name))
 
   # Filter coef that are in comparison (only interested in those)
-  train_contrast_res <- train_contrast_res |> filter(coef %in% setup$classification$comparison)
-  test_contrast_res <- test_contrast_res |> filter(coef %in% setup$classification$comparison)
-  inf_contrast_res <- inf_contrast_res |> filter(coef %in% setup$classification$comparison)
+  train_contrast_res <- filter(train_contrast_res, coef %in% setup$classification$comparison)
+  test_contrast_res <- filter(test_contrast_res, coef %in% setup$classification$comparison)
+  inf_contrast_res <- filter(inf_contrast_res,coef %in% setup$classification$comparison)
+
+  # Foramatting results
+  # Raw logFC
+  train_log_FC <- train_contrast_res |>
+  select(coef, Feature, logFC) |>
+  mutate(
+    Status = "Train",
+    Ancestry = toupper(setup$classification$train_ancestry),
+  )
+
+  test_log_FC <- test_contrast_res |>
+  select(coef, Feature, logFC) |>
+  mutate(
+    Status = "Test",
+    Ancestry = toupper(setup$classification$train_ancestry),
+  )
+
+  inf_log_FC <- inf_contrast_res |>
+  select(coef, Feature, logFC) |>
+  mutate(
+    Status = "Inference",
+    Ancestry = toupper(setup$classification$infer_ancestry)
+  )
+
+  # Combine across sets
+  raw_logFC <- bind_rows(train_log_FC, test_log_FC, inf_log_FC) |>
+  mutate(
+    Seed = setup$seed,
+    n_train_ancestry = train_n,
+    n_inf_ancestry = inf_n,
+    Proportion = prop
+  )
 
   # Extract logFC for correlation analysis
   train_log_FC <- train_contrast_res |>
@@ -258,15 +294,19 @@ for (prop in setup$proportion){
       Proportion = prop
     )
   
-  # Add 'metric_df' to list to combine later
-  robustness_results <- append(robustness_results, list(metric_df))
+  # Combine across proportions
+  robustness_metric <- append(robustness_metric, list(metric_df))
+  robustness_logFC <- append(robustness_logFC, list(raw_logFC))
 }
 
 # Combine into one big dataframe
-final_metric_df <- bind_rows(robustness_results)
+robustness_metric <- bind_rows(robustness_metric)
+robustness_logFC <- bind_rows(robustness_logFC)
 
-# Save metric Dataframe
-fwrite(final_metric_df, file.path(setup$output_directory, "Metric_dge.csv"))
+# Save 
+output_directory <- setup$output_directory
+fwrite(robustness_metric, file.path(output_directory, "Contrast_metric_dge.csv"))
+fwrite(robustness_logFC, file.path(output_directory, "LogFCs.csv"))
 
 # Print statement to switch back to python script
 print("Switching back to Python.")

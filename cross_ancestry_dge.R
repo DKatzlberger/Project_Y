@@ -144,18 +144,12 @@ inf_design <- create_design(output_column, inf_data$obs, covariate = covariate_l
 # Filtering genes
 if (setup$filter_features & setup$data_type == "expression"){
   print("Filter features")
-  # Based on train data samples
-  dge <- DGEList(counts = t(train_data$X))
-  dge <- calcNormFactors(dge)
-  cpm_values <- cpm(dge)
-  # Filter genes based on CPM threshold 
-  # (e.g., keep genes with CPM > 1 in at least 50% of the samples)
-  threshold <- 1 
-  filter_genes <- rowSums(cpm_values > threshold) >= (0.5 * ncol(cpm_values))
+  # Filter by expression
+  keeper_genes <- filterByExpr(t(train_data$X), design = train_design)
   # Subset features
-  train_filtered <- train_data[, filter_genes]
-  test_filtered <- test_data[, filter_genes]
-  inf_filtered <- inf_data[, filter_genes]
+  train_filtered <- train_data[, keeper_genes]
+  test_filtered <- test_data[, keeper_genes]
+  inf_filtered <- inf_data[, keeper_genes]
 } else{
   train_filtered <- train_data
   test_filtered <- test_data
@@ -172,12 +166,18 @@ print("Start differential gene expression analysis.")
 data_type <- setup$data_type
 dge_normalization <- setup$dge_normalization
 normalization_method <- normalization_methods[[data_type]][[dge_normalization]]
-# Normalization
-train_norm <- normalization_method(train_filtered$X, train_design)
-test_norm <- normalization_method(test_filtered$X, test_design)
-inf_norm <- normalization_method(inf_filtered$X, inf_design)
 
-# Fit the model (Means model)
+# Transpose (rows = Genes, cols = Samples)
+train_filtered_t = t(train_filtered$X)
+test_filtered_t = t(test_filtered$X)
+inf_filtered_t = t(inf_filtered$X)
+
+# Normalization
+train_norm <- normalization_method(train_filtered_t, train_design)
+test_norm <- normalization_method(test_filtered_t, test_design)
+inf_norm <- normalization_method(inf_filtered_t, inf_design)
+
+# Fit the model (means model)
 train_limma_fit <- lmFit(train_norm, design = train_design)
 test_limma_fit <- lmFit(test_norm, design = test_design)
 inf_limma_fit <- lmFit(inf_norm, design = inf_design)

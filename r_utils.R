@@ -26,7 +26,7 @@ is_yml_file <- function(file_path) {
   }
 }
 
-# Normalization function
+# Normalization functions:
 normalize_log <- function(X, e = 0.01, ...){
   # Log normalization.
   # X: Vector or Matrix to be transformed.
@@ -60,14 +60,24 @@ beta_to_mvalue <- function(betas, epsilon = 0.00001, ...) {
 # Normalization lookup list
 normalization_methods <- list(
   "expression" = list(
-    "limma_voom" = function(X, design, ...) voom(t(X), design, plot = FALSE),  
-    "normalize_log" = function(X, ...) normalize_log(t(X))
+    "limma_voom" = function(X, design, ...) voom(X, design, plot = FALSE),  
+    "normalize_log" = function(X, ...) normalize_log(X),
+    "normalize_zscore" = function(X, ...) scale(X),  
+    "raw" = function(X, ...) X 
   ),
   "methylation" = list(
-    "beta_to_mvalue" = function(X, ...) beta_to_mvalue(t(X)),
-    "normalize_log" = function(X, ...) normalize_log(t(X))
+    "beta_to_mvalue" = function(X, ...) beta_to_mvalue(X),
+    "normalize_log" = function(X, ...) normalize_log(X),
+    "normalize_zscore" = function(X, ...) scale(X),  
+    "raw" = function(X, ...) X  
+  ),
+  "rppa" = list(
+    "normalize_zscore" = function(X, ...) scale(X),  
+    "raw" = function(X, ...) X  
   )
 )
+
+
 
 
 # Function to check if covariate is present in settings

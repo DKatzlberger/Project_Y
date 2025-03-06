@@ -7,9 +7,9 @@ import numpy as np
 # 1. Molecular data -> adata.X
 # 2. Meta data -> adata.obs
 # 3. Output path
-molecular_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/RNA/ucec_tcga_pan_can_atlas_2018.csv"
-meta_data_path = "data/downloads/cbioportal/rna_studies/tcga_pan_studies_with_rna.csv"
-path_to_save_location = "data/inputs/PanCanAtlas_UCEC_RSEM_subtypeNAremoved.h5ad"
+molecular_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/protein/brca_tcga_pan_can_atlas_2018.csv"
+meta_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/meta_tcga_pan_can_atlas_protein.csv"
+path_to_save_location = "data/inputs/PanCanAtlas_BRCA_RPPA_subtypeNAremoved.h5ad"
 # Load the data
 molecular_data = pd.read_csv(molecular_data_path)
 meta_data = pd.read_csv(meta_data_path)
@@ -40,7 +40,7 @@ adata.var_names = features
 columns_with_na = adata.var_names[np.isnan(adata.X).any(axis=0)]
 adata = adata[:, ~adata.var_names.isin(columns_with_na)]
 # Remove negative values (Set them to zero)
-adata.X[adata.X < 0] = 0
+# adata.X[adata.X < 0] = 0
 
 # Add meta data to anndata object
 columns_to_add = matched_meta_data.columns
@@ -73,23 +73,24 @@ column_mapping = {
 adata.obs = adata.obs.rename(columns=column_mapping)
 
 # Custom modifications
-# # BRCA
-# # Remove all NAs
-# adata = adata[adata.obs.dropna(subset="subtype").index]
 
-# # Include subtype_pooled
-# adata.obs["subtype_pooled"] = adata.obs["subtype"].apply(
-#     lambda x: "basal" if x == "BRCA_Basal" else "non_basal"
-# )
+# BRCA
+# Remove all NAs
+adata = adata[adata.obs.dropna(subset="subtype").index]
+
+# Include subtype_pooled
+adata.obs["subtype_pooled"] = adata.obs["subtype"].apply(
+    lambda x: "basal" if x == "BRCA_Basal" else "non_basal"
+)
 
 # UCEC
 # Remove parts of hte name after /
-adata.obs["cancer_type_detailed"] = adata.obs["cancer_type_detailed"].str.split("/").str[0]
-adata = adata[adata.obs.dropna(subset="subtype").index]
-# # Include subtype_pooled
-adata.obs["subtype_pooled"] = adata.obs["subtype"].apply(
-    lambda x: "cn_high" if x == "UCEC_CN_HIGH" else "non_cn_high"
-)
+# adata.obs["cancer_type_detailed"] = adata.obs["cancer_type_detailed"].str.split("/").str[0]
+# adata = adata[adata.obs.dropna(subset="subtype").index]
+# # # Include subtype_pooled
+# adata.obs["subtype_pooled"] = adata.obs["subtype"].apply(
+#     lambda x: "cn_high" if x == "UCEC_CN_HIGH" else "non_cn_high"
+# )
 
 # Save
 adata.write(path_to_save_location, compression="gzip")

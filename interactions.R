@@ -44,7 +44,7 @@ if (length(args) > 0) {
 
 } else {
   # Dev settings if no command-line argument provided
-  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_AFR.yml"
+  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RPPA_basal_vs_non-basal_EUR_to_AFR.yml"
   print("Running interactive mode for development.")
   setup <- yaml.load_file(yaml_file)
 }
@@ -71,9 +71,6 @@ if (!dir.exists(path_to_save_location)) {
   dir.create(path_to_save_location, recursive = TRUE)
 }
 
-# Load the data
-adata_whole <- read_h5ad(setup$data_path)
-
 # Transform settings into R useable form
 comparison <- setup$classification$comparison
 output_column <- setup$classification$output_column
@@ -81,20 +78,32 @@ ancestry_column <- setup$classification$ancestry_column
 train_ancestry <- setup$classification$train_ancestry
 inf_ancestry <- setup$classification$infer_ancestry
 
+# Load the data
+adata_whole <- read_h5ad(setup$data_path)
+
 # Clustering -------------------------------------------------------------------
-# Transform  data to log2-normalized counts
-log2_normalized <- log2(adata_whole$X + 1)
-# Tsne
-tsne <- Rtsne(log2_normalized, dims = 2, perplexity = 50)
+# Transform data to log2 
+if (setup$data_type == "rppa") {
+  # For RPPA (raw data), apply shift to handle negative values
+  min_value <- min(adata_whole$X, na.rm = TRUE)
+  shifted_rppa <- adata_whole$X + abs(min_value) + 1 
+  cluster_data <- log2(shifted_rppa)  
+} else if (setup$data_type == "expression") {
+  # Log2 normalization
+  cluster_data <-  log2(cluster_data + 1)
+} else {
+  # Default: Keep input data as is
+  cluster_data <- adata_whole$X
+}
+# Clustering (tsne)
+tsne <- Rtsne(cluster_data, dims = 2, perplexity = 50)
 # Coordinates
 tsne_coordinates <- data.frame(TSNE1 = tsne$Y[, 1], TSNE2 = tsne$Y[, 2])
 # Add meta data
 tsne_coordinates  <- bind_cols(tsne_coordinates, adata_whole$obs)
 
-
 # Visualize 
 point_size <-  0.5
-alpha_value <- 0.3
 
 # ---- Genetic ancestry (tsne_genetic_ancestry_plot) ----
 genetic_ancestry_colors <- c("admix"= "#ff4d4d", "afr" = "#ff9900", "amr" =  "#33cc33",
@@ -252,6 +261,8 @@ adata <- adata_whole[adata_whole$obs[[output_column]] %in% comparison]
 
 
 # Descriptive statistics 
+alpha_value <- 0.3
+
 # ---- Genetic ancestry (genetic_ancestry_plot) -----
 genetic_ancestry_plot <- adata$obs |>
   ggplot(
@@ -527,7 +538,7 @@ ggsave(filename = "Patchwork_descriptive_meta_plot_no_legend.pdf",
        height = 3, width = 3)
 
 
-# Variance 
+# Variance
 # Variance by meta variable
 check_variance <- c(
   ancestry_column, 
@@ -810,15 +821,19 @@ data <- adata[adata$obs[[ancestry_column]] %in% c(train_ancestry, inf_ancestry)]
 # 2. Relevel them so 'train_ancestry' is first level
 # 3. Update in the actual data frame
 possible_ancestry <- unique(data$obs[[ancestry_column]])
-releveled_ancestry <- factor(possible_ancestry, 
-                             levels = c(train_ancestry, setdiff(possible_ancestry, train_ancestry))
-                            )
+releveled_ancestry <- factor(
+  possible_ancestry, 
+  levels = c(train_ancestry, setdiff(possible_ancestry, train_ancestry))
+  )
 levels_ancestry <- levels(releveled_ancestry)
 
 # Update 'ancestry_column' in the actual data
 data$obs <- data$obs |>
-  mutate(!!ancestry_column := factor(.data[[ancestry_column]], 
-                                     levels = levels_ancestry))
+  mutate(
+    !!ancestry_column := factor(
+      .data[[ancestry_column]],
+      levels = levels_ancestry)
+      )
 
 # Relevel 'output_column' based on the occurance in the settings
 # This is consitent with 'cross_ancestry' 
@@ -864,24 +879,30 @@ colnames(design) <- colnames(design) |>
 # Rename to R useable names
 colnames(design) <- make.names(colnames(design))
 
-# # Filter genes by expression
-# keeper_genes <- filterByExpr(t(data$X), design = design)
-# filtered_data <- data[, keeper_genes]
+# Filter features 
+if (setup$filter_features & setup$data_type == "expression"){
+  # Filter by expression
+  keeper_genes <- filterByExpr(t(data$X), design = design)
+  filtered_data <- data[, keeper_genes]
+} else{
+  filtered_data <- data
+}
+# Save feature 
+write_yaml(filtered_data$var_names, file.path(path_to_save_location, "Features.yml"))
 
 # Limma workflow
-# 1. Normalization 
-# Save voom plot
-output_file <- file.path(path_to_save_location, "Voom_plot.pdf")
-pdf(file = output_file, width = 7, height = 7)
-# Voom
-data_norm <- voom(t(filtered_data$X), design, plot = TRUE)
-# Close pdf
-dev.off()
+print("Start differential gene expression analysis.")
+# Select normalization method
+data_type <- setup$data_type
+dge_normalization <- setup$dge_normalization
+normalization_method <- normalization_methods[[data_type]][[dge_normalization]]
+# Transpose (rows = Genes, cols = Samples)
+filtered_data <- t(filtered_data$X)
+# Normalization
+norm_data <- normalization_method(filtered_data, train_design)
 
-# 2. Fit the model (including hypothesis testing)
-# 3. Ebayes
-# 4. Extract results
-limma_fit <- lmFit(data_norm, design = design)
+# Fit the model (means model)
+limma_fit <- lmFit(norm_data, design = design)
 limma_fit <- eBayes(limma_fit)
 limma_fit_res <- extract_results(limma_fit)
 # Remove interecpt
@@ -918,6 +939,7 @@ baseline <- bind_rows(intercept_baseline, non_intercept_baseline) |>
 # Save 
 fwrite(baseline, file.path(path_to_save_location, "Baseline.csv"))
 
+# Define significant baseline differences
 logFC_threshold <- 1
 sig_baseline <- baseline |>
   filter(
@@ -976,9 +998,7 @@ baseline_volcano_plot <- baseline |>
     size = 1.5,
     color = "black",  
     segment.color = "black",  
-    min.segment.length = 0,
-    segment_size = 0.01,
-    max.iter = 2000,
+    min.segment.length = 0
   ) +
   facet_grid(
     cols = vars(Ancestry),
@@ -1030,9 +1050,7 @@ interactions_volcano_plot <- interactions |>
     size = 1.5,
     color = "black",  
     segment.color = "black",  
-    min.segment.length = 0,
-    segment_size = 0.01,
-    max.iter = 2000,
+    min.segment.length = 0
   ) +
   facet_grid(
     cols = vars(Ancestry),
@@ -1095,8 +1113,10 @@ lower_threshold <- predicted_values - residual_threshold
 
 # Calculate the correlation
 cor_pearson <- cor(wide_baseline[[x_col]], wide_baseline[[y_col]], method = "pearson")
+cor_spearman <- cor(wide_baseline[[x_col]], wide_baseline[[y_col]], method = "spearman")
 # Label
-smooth_label <- bquote(R[Pearson] == .(round(cor_pearson, 2)))
+label_pearson <- bquote(R[Pearson] == .(round(cor_pearson, 3)))
+label_spearman <- bquote(R[Spearman] == .(round(cor_pearson, 3)))
 
 # Reformat data
 scatter_plot_data <- baseline |>
@@ -1142,12 +1162,17 @@ baseline_scatter_plot <- scatter_plot_data %>%
       color = coloring
     )
   ) +
-  # Plot the points
   geom_point(
     data = scatter_plot_data |> filter(coloring == "Rest"),
     aes(color = coloring),
     size = point_size,
     show.legend = FALSE
+  ) +
+  geom_point(
+    data = scatter_plot_data |> filter(coloring == "Rest"),
+    aes(color = "dummy"),
+    size = NA,   
+    show.legend = FALSE 
   ) +
   geom_point(
     data = scatter_plot_data |> filter(coloring == "Baseline"),
@@ -1159,45 +1184,47 @@ baseline_scatter_plot <- scatter_plot_data %>%
     aes(color = coloring),
     size = point_size
   ) +
-  # Add geom_smooth for linear regression (no color mapping for legend)
   geom_smooth(
     method = "lm", 
     color = "blue",
     linewidth = point_size,
+    alpha = 0.5
   ) + 
-  # Add threshold lines
   geom_line(
     aes(y = upper_threshold), 
     linetype = "dashed", 
     color = "blue",
     linewidth = point_size,
-    alpha = alpha_value
+    alpha = 0.5
   ) +  
   geom_line(
     aes(y = lower_threshold), 
     linetype = "dashed", 
     color = "blue",
     linewidth = point_size,
-    alpha = alpha_value
+    alpha = 0.5
   ) +
   scale_color_manual(
     values = c(
       "Interaction + Baseline" = "red",
       "Interaction" = "darkgreen", 
       "Baseline" = "gold", 
-      "Rest" = "lightgrey"
+      "Rest" = "lightgrey",
+      "dummy" = "black"
     ),
     breaks = c(
       "Interaction + Baseline", 
       "Interaction", 
       "Baseline",
-      "Rest" 
+      "Rest",
+      "dummy"
     ),
     labels = c(
       "Interaction + Baseline", 
       "Interaction", 
       "Baseline",
-      smooth_label 
+      label_pearson,
+      label_spearman
     )
   ) +
   scale_x_continuous(
@@ -1218,8 +1245,7 @@ baseline_scatter_plot <- scatter_plot_data %>%
     size = 1.5,
     color = "black",  
     segment.color = "black",  
-    min.segment.length = 0,
-    max.iter = 2000
+    min.segment.length = 0
   ) +
   theme_nature_fonts() +
   theme_white_background() +
@@ -1540,9 +1566,6 @@ ggsave(filename = "Interactions_boxplot.pdf",
        plot = interactions_boxplot,
        path = path_to_save_location,
        height = 3, width = 6)
-
-
-
 
 
 # Functional analysis -----------------------------------------------------------------------------------------

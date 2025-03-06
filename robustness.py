@@ -26,7 +26,7 @@ from joblib import Parallel, delayed
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, accuracy_score
 
 # Visualization
 import seaborn as sns
@@ -44,8 +44,8 @@ if len(sys.argv) > 1:
     YAML_FILE = args.settings_yml
 else:
     # Dev settings 
-    YAML_FILE = 'dev_settings.yml'
-    print('Running interactive mode for development.')
+    YAML_FILE = "dev_settings.yml"
+    print("Running interactive mode for development.")
 
 # Here starts the script   
 
@@ -53,11 +53,11 @@ else:
 setup = Setup(YAML_FILE)
 # Create output directory
 setup.make_output_directory()
-# Load settings
-with open(setup.out('Settings.yml'), 'w') as f:
+# Save settings
+with open(setup.out("Settings.yml"), 'w') as f:
     yaml.dump(setup.final_config, f)
 # Log
-setup.log('Settings done')
+setup.log("Settings done")
 
 # Error handler
 error_file = setup.out("Error.log")
@@ -66,7 +66,6 @@ error_handler = ErrorHandler(log_file=error_file)
 # Data loading
 setup.log("Loading data")
 data = anndata.read_h5ad(setup.data_path)
-
 
 setup.log("Check data")
 data_validator = DataValidator(data=data, setup=setup, error_handler=error_handler)
@@ -87,7 +86,7 @@ inf_data = data[data.obs[setup.classification['ancestry_column']] == setup.class
 setup.log("Define classification")
 # Check that classification
 eur_data = (eur_data[eur_data.obs[setup.classification['output_column']]
-                     .isin(setup.classification['comparison'])]
+.isin(setup.classification['comparison'])]
                      )
 inf_data = (inf_data[inf_data.obs[setup.classification['output_column']]
                      .isin(setup.classification['comparison'])]
@@ -137,7 +136,6 @@ inf_downsampled_list = sample_by_size(adata=inf_data,
 for downsampled_data in zip(eur_downsampled_list, inf_downsampled_list):
     eur_downsampled = eur_downsampled_list[downsampled_data[0]]
     inf_downsampled = inf_downsampled_list[downsampled_data[1]]
-
 
     # TODO - Covariant stuff
     covariate_list = setup.classification.get("covariate", None)
@@ -215,7 +213,8 @@ R.run_script(script_path=os.path.join(os.getcwd(), script),
 
 # Iterate over all proportions and filter data
 setup.log(f"Machine learning")
-robustness_list = list()
+robustness_probabilities = list()
+robustness_metric = list()
 for prop in setup.proportion:
     # Filter data based on observations and features per proportion
     prop_ = str(prop).replace(".", "_")
@@ -259,10 +258,15 @@ for prop in setup.proportion:
     inf_X = np.array(inf_data.X)
     inf_y = encode_y(inf_data.obs[setup.classification['output_column']], encoder)
 
-    # Normalization of features 
-    train_X = normalize(eval(setup.normalization), train_X)
-    test_X = normalize(eval(setup.normalization), test_X) 
-    inf_X = normalize(eval(setup.normalization), inf_X) 
+    # Normalization
+    # Select normalization method
+    data_type = setup.data_type
+    ml_normalization = setup.ml_normalization
+    normalization_method = ml_normalization_methods[data_type][ml_normalization]
+    # Normalization
+    train_X = normalization_method(train_X)
+    test_X = normalization_method(test_X)
+    inf_X = normalization_method(inf_X)
 
     # Assertion: Check arrays
     # Labels
@@ -282,51 +286,115 @@ for prop in setup.proportion:
 
     # Training (parallel)
     best_models = Parallel(n_jobs=num_algorithms)(
-        delayed(train_algorithm)(algo_name, pickable_settings, 
-                                 train_X, train_y, 
-                                 jobs_per_algorithm, 
-                                 prop=prop_)
+        delayed(train_algorithm)(
+            algo_name, 
+            pickable_settings, 
+            train_X, 
+            train_y, 
+            jobs_per_algorithm, 
+            prop=prop_
+            )
         for algo_name in setup.algorithms
     )
 
     # Evaluation
+    y_hat_list = []
     # Feature names for interpretations
     feature_names = train_data.var_names
-    metric_algo_list = []
     for algo_name, best_model in zip(setup.algorithms, best_models):
         if best_model:
-            metric_combined = evaluate_algorithm_robustness(algo_name, best_model, setup, test_X, test_y, inf_X, inf_y, feature_names, prop_)
-            metric_algo_list.append(metric_combined)
+            y_hat = evaluate_algorithm_cross_ancestry(
+                algo_name, 
+                best_model, 
+                setup, 
+                test_X, 
+                test_y, 
+                inf_X, 
+                inf_y, 
+                feature_names, 
+                encoder = inv_encoder,
+                prop = prop_
+                )
+            # Append probabilities
+            y_hat_list.append(y_hat)
         else:
             print(f"Skipping evaluation for {algo_name} because training failed.")
 
-    # Join algorithm metric dataframes
-    merged_df = metric_algo_list[0]
-    # Iterate over the remaining dataframes and merge them
-    for df in metric_algo_list[1:]:
-        merged_df = pd.merge(merged_df, df, on=["Status", "Prediction"], how="outer")
+    # Combine probabilities across algorithms
+    y_hat = pd.concat(y_hat_list)
+    # Add information
+    y_hat["Proportion"] = prop
+    y_hat["n_train_ancestry"] = len(train_idx)
+    y_hat["n_inf_ancestry"] = len(inf_idx)
+    # Append across proportions
+    robustness_probabilities.append(y_hat)
 
-    # Add additional information 
-    merged_df = merged_df.assign(
-        Seed=seed,
-        n_inf_ancestry=len(obs_inf),
-        n_train_ancestry=len(obs_train),
-        Proportion=prop,
-        Ancestry=setup.classification["infer_ancestry"].upper()
-    )
+    # Calculate metric
+    metric_list = list()
+    for algo_name in y_hat["Algorithm"].unique():
+        # Filter by algorithm
+        algo_probabilities = y_hat[y_hat["Algorithm"].str.contains(algo_name)]
+        # Filter by status
+        test_probabilities = algo_probabilities[algo_probabilities["Status"].str.contains("Test")]
+        inf_probabilities = algo_probabilities[algo_probabilities["Status"].str.contains("Inference")]
+        # Filter for target/class 1
+        test_y, test_probabilities = test_probabilities.iloc[:,2].values, test_probabilities.iloc[:,1].values
+        inf_y, inf_probabilities = inf_probabilities.iloc[:,2].values, inf_probabilities.iloc[:,1].values
 
-    # Add to list 
-    robustness_list.append(merged_df)
+        # Calculate ROC AUC
+        test_auc_score = roc_auc_score(y_true=test_y, y_score=test_probabilities)
+        inf_auc_score = roc_auc_score(y_true=inf_y, y_score=inf_probabilities)
 
-# Combine all proportions
-robustness_results = pd.concat(robustness_list)
+        # Calculate Accuracy
+        threshold = 0.5
+        test_preds = (test_probabilities >= threshold).astype(int)
+        inf_preds = (inf_probabilities >= threshold).astype(int)
+
+        test_acc_score = accuracy_score(y_true=test_y, y_pred=test_preds)
+        inf_acc_score = accuracy_score(y_true=inf_y, y_pred=inf_preds)
+
+        # Prepare data
+        train_data = {"Algorithm": algo_name, 
+                      "ROC_AUC": test_auc_score,
+                      "Accuracy": test_acc_score,
+                      "Status": "Test", 
+                      "Prediction": "Subset",
+                      "Threshold": threshold
+                    }
+        inf_data = {"Algorithm": algo_name,
+                    "ROC_AUC": inf_auc_score,
+                    "Accuracy": inf_acc_score,
+                    "Status": "Inference", 
+                    "Prediction": "Ancestry",
+                    "Threshold": threshold
+                    }
+        # Create metric dataframes
+        test_metric = pd.DataFrame(train_data, index=[0])
+        inf_metric = pd.DataFrame(inf_data, index=[0])
+        # Combine
+        metric_df = pd.concat([test_metric, inf_metric])
+        # Add across algorithms
+        metric_list.append(metric_df)
+
+    # Join metric dataframes
+    merged_df = pd.concat(metric_list)
+    # Add additional information
+    merged_df["Proportion"] = prop
+    merged_df["Seed"] = setup.seed
+    merged_df["Ancestry"] = setup["classification"]["infer_ancestry"].upper()
+    merged_df["n_train_ancestry"] = len(train_idx)
+    merged_df["n_inf_ancestry"] = len(inf_idx)
+
+    # Add to across proportions
+    robustness_metric.append(merged_df)
+
+# Combine across proportions
+robustness_metric_ml = pd.concat(robustness_metric)
+robustness_probabilities = pd.concat(robustness_probabilities)
 # Save
-robustness_results.to_csv(setup.out("Metric_ml.csv"), index=False)
-
-
-
-
-
+output_directory = setup["output_directory"]
+robustness_metric_ml.to_csv(os.path.join(output_directory, "Contrast_metric_ml.csv"), index=False)
+robustness_probabilities.to_csv(os.path.join(output_directory, "Probabilities.csv"), index=False)
 
 
 

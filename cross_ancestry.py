@@ -23,7 +23,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import GridSearchCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, accuracy_score
 
 # Visualization
 import seaborn as sns
@@ -50,11 +50,11 @@ else:
 setup = Setup(YAML_FILE)
 # Create output directory
 setup.make_output_directory()
-# Load settings
-with open(setup.out('Settings.yml'), 'w') as f:
+# Save settings
+with open(setup.out("Settings.yml"), 'w') as f:
     yaml.dump(setup.final_config, f)
 # Log
-setup.log('Settings done')
+setup.log("Settings done")
 
 # Error handler
 error_file = setup.out("Error.log")
@@ -281,13 +281,67 @@ y_hat.to_csv(setup.out(f"Probabilities.csv"), index=False)
 
 # Calculate metric
 # Multiclass calculation
-if setup.classification['multiclass']:
+if setup.classification["multiclass"]:
     print('Score metrics for multiclass needs to be developed.')
-
 # Binary calculation
 else:
-    R.run_script(script_path=os.path.join(os.getcwd(), 'binary_metric_calculation.py'),
-                    args=[settings_file])
+    metric_across_algo = []
+    for algo_name in y_hat["Algorithm"].unique():
+        # Filter by algorithm
+        algo_probabilities = y_hat[y_hat["Algorithm"].str.contains(algo_name)]
+        # Filter by status
+        test_probabilities = algo_probabilities[algo_probabilities["Status"].str.contains("Test")]
+        inf_probabilities = algo_probabilities[algo_probabilities["Status"].str.contains("Inference")]
+        # Filter for target/class 1
+        test_y, test_probabilities = test_probabilities.iloc[:,2].values, test_probabilities.iloc[:,1].values
+        inf_y, inf_probabilities = inf_probabilities.iloc[:,2].values, inf_probabilities.iloc[:,1].values
+
+        # ROC AUC
+        test_auc_score = roc_auc_score(y_true=test_y, y_score=test_probabilities)
+        inf_auc_score = roc_auc_score(y_true=inf_y, y_score=inf_probabilities)
+
+        # Accuracy
+        threshold = 0.5
+        test_preds = (test_probabilities >= threshold).astype(int)
+        inf_preds = (inf_probabilities >= threshold).astype(int)
+
+        test_acc_score = accuracy_score(y_true=test_y, y_pred=test_preds)
+        inf_acc_score = accuracy_score(y_true=inf_y, y_pred=inf_preds)
+
+        # Prepare data
+        train_data = {"Algorithm": algo_name, 
+                      "ROC_AUC": test_auc_score,
+                      "Accuracy": test_acc_score,
+                      "Status": "Test", 
+                      "Prediction": "Subset",
+                      "Threshold": threshold
+                    }
+        inf_data = {"Algorithm": algo_name,
+                    "ROC_AUC": inf_auc_score,
+                    "Accuracy": inf_acc_score,
+                    "Status": "Inference", 
+                    "Prediction": "Ancestry",
+                    "Threshold": threshold
+                    }
+        # Create metric dataframes
+        test_metric = pd.DataFrame(train_data, index=[0])
+        inf_metric = pd.DataFrame(inf_data, index=[0])
+        # Combine
+        metric_df = pd.concat([test_metric, inf_metric])
+        # Add to across algorithms
+        metric_across_algo.append(metric_df)
+    
+    # Join metric dataframes
+    metric_across_algo = pd.concat(metric_across_algo)
+    # Add additional information
+    metric_across_algo["Seed"] = setup.seed
+    metric_across_algo["Ancestry"] = setup["classification"]["infer_ancestry"].upper()
+    metric_across_algo["n_train_ancestry"] = len(train_idx)
+    metric_across_algo["n_inf_ancestry"] = len(inf_idx)
+
+    # Save
+    output_directory = setup["output_directory"]
+    metric_across_algo.to_csv(os.path.join(output_directory, "Contrast_metric_ml.csv"), index=False)
 
 # Visualization
 if setup.visual_val:

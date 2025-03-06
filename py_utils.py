@@ -109,7 +109,8 @@ class Setup(dict):
 
         # Check data
         assert isinstance(self.data_path, str)
-        assert os.path.exists(self.data_path)
+        assert os.path.exists(self.data_path), \
+            f"{self.data_path} does not exist."
         assert self.data_path.endswith(".h5ad"), \
             f"Only support data files in h5ad format."
         # Type
@@ -144,8 +145,7 @@ class Setup(dict):
     
     def return_settings(self):
         return self.final_config
-
-
+    
 class ErrorHandler():
     def __init__(self, log_file):
         """
@@ -192,8 +192,6 @@ class ErrorHandler():
                 file.write(message + "\n")
         except Exception as log_error:
             print(f"Failed to write to log file: {str(log_error)}", file=sys.stderr)
-
-
 
 class DataValidator():
     """
@@ -408,10 +406,6 @@ class DataValidator():
         except AssertionError as e:
             self.error_handler.handle_error(e)
 
-
-
-
-
 class ScriptRunner():
     """
     Initialize ScriptRunner with paths to R and Python executables.
@@ -469,7 +463,6 @@ class ScriptRunner():
     def check_rversion(self):
         # Check R version
         subprocess.run([self.r_execute, "--version"])
-
 
 # Functions to normalize data
 def normalize_log(X, e=0.01):
@@ -531,7 +524,6 @@ ml_normalization_methods = {
     }
 }
 
-
 # Function to create integer vector from categotical column
 def encode_y(data, dictionary):
     """
@@ -578,8 +570,6 @@ def classify_covariates(df, covariates):
             classified_covariates['discrete'].append(covariate)
     
     return classified_covariates
-
-
 
 def stratified_subset(data, freq_dict, group_columns, seed):
     """
@@ -711,15 +701,18 @@ def train_algorithm(algo_name, setup, train_X, train_y, available_jobs, prop=Non
         return None
     
 
-def evaluate_algorithm_cross_ancestry(algo_name, 
-                                      best_model, 
-                                      setup, 
-                                      test_X, 
-                                      test_y, 
-                                      inf_X, 
-                                      inf_y, 
-                                      feature_names,
-                                      encoder):
+def evaluate_algorithm_cross_ancestry(
+        algo_name, 
+        best_model, 
+        setup, 
+        test_X, 
+        test_y, 
+        inf_X, 
+        inf_y, 
+        feature_names,
+        encoder,
+        prop=None
+        ):
     """
     Evaluate the trained model on test and inference datasets, saving results and feature importances.
 
@@ -732,6 +725,7 @@ def evaluate_algorithm_cross_ancestry(algo_name,
         inf_X (np.array): Inference feature matrix for a separate subset.
         inf_y (np.array): Inference target vector.
         feature_names (list): List of feature names.
+        encoder (dict): Dictionary of class names.
 
     Returns:
         None
@@ -774,12 +768,15 @@ def evaluate_algorithm_cross_ancestry(algo_name,
 
         # Log the start of model interpretation
         setup.log("Model interpretations")
-
-        # Extract feature importances (if supported by the model)
+        # Extract feature importance
         feature_importance = extract_feature_importance(best_model, feature_names)
 
-        # Save feature importances to a CSV file
-        feature_importance.to_csv(setup.out(f"Feature_importance_{algo_name}.csv"), index=False)
+        # Save
+        if prop is not None:
+            feature_importance.to_csv(setup.out(f"Feature_importance_{prop}_{algo_name}.csv"), index=False)
+        else:
+            # Save feature 
+            feature_importance.to_csv(setup.out(f"Feature_importance_{algo_name}.csv"), index=False)
 
         return y_hat
 
@@ -831,22 +828,54 @@ def evaluate_algorithm_eur_subsetting(algo_name, setup, best_model, subset_X, su
 
 
 
-def evaluate_algorithm_robustness(algo_name, best_model, setup, test_X, test_y, inf_X, inf_y, feature_names, prop):
+def evaluate_algorithm_robustness(
+        algo_name, 
+        best_model, 
+        setup, 
+        test_X, 
+        test_y, 
+        inf_X, 
+        inf_y, 
+        feature_names, 
+        prop,
+        encoder 
+        ):
     """
     Evaluate the trained model, save probabilities, calculate metrics, and return results.
     """
     try:
+        # Log the start of testing
         setup.log("Testing")
-        # Testing on the test set
-        test_y_hat = pd.DataFrame(best_model.predict_proba(test_X))
-        test_y_hat["y"] = test_y
-        test_y_hat.to_csv(setup.out(f"Probabilities_{prop}_{algo_name}_test.csv"), index=False)
 
+        # # Generate predictions on the test set and save probabilities
+        test_y_hat = pd.DataFrame(best_model.predict_proba(test_X))
+        test_y_hat = test_y_hat.rename(columns=encoder)
+        test_y_hat["y"] = test_y
+        # Additional information
+        test_y_hat["Algorithm"] = algo_name
+        test_y_hat["Status"] = "Test"
+        test_y_hat["Prediction"] = "Subset"
+        # test_y_hat.to_csv(setup.out(f"Probabilities_{prop}_{algo_name}_test.csv"), index=False)
+
+        # Log the start of inference
         setup.log("Infering")
-        # Testing on the inference set
+
+        # Generate predictions on the inference set and save probabilities
         inf_y_hat = pd.DataFrame(best_model.predict_proba(inf_X))
+        inf_y_hat = inf_y_hat.rename(columns=encoder)
         inf_y_hat["y"] = inf_y
-        inf_y_hat.to_csv(setup.out(f"Probabilities_{prop}_{algo_name}_inf.csv"), index=False)
+        # Additional information
+        inf_y_hat["Algorithm"] = algo_name
+        inf_y_hat["Status"] = "Inference"
+        inf_y_hat["Prediction"] = "Ancestry"
+        inf_y_hat["y"] = inf_y
+        # inf_y_hat.to_csv(setup.out(f"Probabilities_{prop}_{algo_name}_inf.csv"), index=False)
+
+        # Combine propabilities
+        y_hat = pd.concat([test_y_hat, inf_y_hat])
+        y_hat["Seed"] = setup.seed
+        # Save
+        # y_hat.to_csv(setup.out(f"Probabilities_{algo_name}.csv"), index=False)
 
         print(f"{algo_name} validation done.")
         
@@ -872,7 +901,7 @@ def evaluate_algorithm_robustness(algo_name, best_model, setup, test_X, test_y, 
         inf_metric = pd.DataFrame(inf_data_metric, index=[0])
         metric_df = pd.concat([test_metric, inf_metric])
 
-        return metric_df
+        return y_hat
 
     except Exception as e:
         print(f"Error occurred during evaluation for {algo_name}: {e}")
