@@ -9,19 +9,23 @@ import numpy as np
 # 3. Output path
 molecular_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/protein/brca_tcga_pan_can_atlas_2018.csv"
 meta_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/meta_tcga_pan_can_atlas_protein.csv"
-path_to_save_location = "data/inputs/PanCanAtlas_BRCA_RPPA_subtypeNAremoved.h5ad"
+path_to_save_location = "data/inputs/PanCanAtlas_BRCA_raw_RPPA_subtypeNAremoved.h5ad"
 # Load the data
 molecular_data = pd.read_csv(molecular_data_path)
 meta_data = pd.read_csv(meta_data_path)
 
-# Subset meta data to only include samples that are in molecular data
-matched_meta_data = meta_data[meta_data['sampleId'].isin(molecular_data['sampleId'])]
+# Subset meta data 
+matched_meta_data = meta_data[meta_data["sampleId"].isin(molecular_data["sampleId"])]
 
-# Check the number of unique samples
-assert molecular_data['sampleId'].nunique() == matched_meta_data['sampleId'].nunique()
+# Subset molecular data
+matched_molecular_data = molecular_data[molecular_data["sampleId"].isin(matched_meta_data["sampleId"])]
+
+# Check the number of unique patients
+assert matched_molecular_data["patientId"].nunique() == matched_meta_data["patientId"].nunique()
+assert matched_molecular_data["sampleId"].nunique() == matched_meta_data["sampleId"].nunique()
 
 # Counts
-counts = molecular_data.select_dtypes(include=np.number)
+counts = matched_molecular_data.select_dtypes(include=np.number)
 # Observations (in form of patient_id)
 # Check if they are unique
 assert matched_meta_data["patientId"].is_unique
@@ -29,7 +33,7 @@ observations = matched_meta_data["patientId"].values
 # Drop so its not doubled
 matched_meta_data = matched_meta_data.drop(columns="patientId")
 # Features 
-features = molecular_data.select_dtypes(include=np.number).columns
+features = matched_molecular_data.select_dtypes(include=np.number).columns
 
 # Creating Anndata:
 adata = ad.AnnData(counts)
@@ -80,7 +84,7 @@ adata = adata[adata.obs.dropna(subset="subtype").index]
 
 # Include subtype_pooled
 adata.obs["subtype_pooled"] = adata.obs["subtype"].apply(
-    lambda x: "basal" if x == "BRCA_Basal" else "non_basal"
+    lambda x: "Basal" if x == "BRCA_Basal" else "non-Basal"
 )
 
 # UCEC

@@ -59,6 +59,12 @@ with open(setup.out("Settings.yml"), 'w') as f:
 # Log
 setup.log("Settings done")
 
+setup.log("Setting seed")
+# Subsets are sampled randomly
+seed = setup.seed
+np.random.seed(seed)
+os.environ['PYTHONHASHSEED'] = str(seed)
+
 # Error handler
 error_file = setup.out("Error.log")
 error_handler = ErrorHandler(log_file=error_file)
@@ -76,7 +82,6 @@ data_validator.validate_na_counts()
 # Check for negative counts in molecular data
 data_validator.validate_negative_counts()
 
-
 # Define training and inferred ancestry
 setup.log("Define ancestries")
 eur_data = data[data.obs[setup.classification['ancestry_column']] == setup.classification['train_ancestry']]
@@ -85,12 +90,8 @@ inf_data = data[data.obs[setup.classification['ancestry_column']] == setup.class
 # Define classification task 
 setup.log("Define classification")
 # Check that classification
-eur_data = (eur_data[eur_data.obs[setup.classification['output_column']]
-.isin(setup.classification['comparison'])]
-                     )
-inf_data = (inf_data[inf_data.obs[setup.classification['output_column']]
-                     .isin(setup.classification['comparison'])]
-                     )
+eur_data = (eur_data[eur_data.obs[setup.classification['output_column']].isin(setup.classification['comparison'])])
+inf_data = (inf_data[inf_data.obs[setup.classification['output_column']].isin(setup.classification['comparison'])])
 
 # Assertion: Check min sample sizes per class
 data_validator.check_min_samples_per_class(
@@ -100,12 +101,22 @@ data_validator.check_min_samples_per_class(
     data_name="European data"
     )
 
-setup.log("Setting seed")
-# Seed is used to generate different European subsets
-# Subsets are sampled randomly
-seed = setup.seed
-np.random.seed(seed)
-os.environ['PYTHONHASHSEED'] = str(seed)
+setup.log("Feature selection")
+# Filtering based on eur_data
+if setup.filter_features and setup.data_type == "expression":
+    # Filter by expression
+    cpm_data = cpm(eur_data.X)
+    min_counts = min_counts_by_percentile(cpm_data, percentile=25)
+    filtered_features = filter_by_expression(cpm_data, min_counts = min_counts)
+
+    # Subset features
+    eur_data = eur_data[:, filtered_features]
+    inf_data = inf_data[:, filtered_features]
+
+# Save features (for DGE)
+with open(setup.out("Features.yml"), "w") as f:
+    yaml.dump(eur_data.var_names.to_list(), f)
+
 
 # To check robustness only use 90% or 80% of data 
 # Train data is set based on the inferred ancestry
@@ -118,17 +129,21 @@ os.environ['PYTHONHASHSEED'] = str(seed)
 proportions = setup.proportion
 
 # Downsample 'eur_data' by proportion
-setup.log('Downsample data')
-eur_downsampled_list = sample_by_size(adata=eur_data,
-                                      props=proportions,
-                                      output_column=setup.classification['output_column'],
-                                      seed=seed)
+setup.log("Downsample data")
+eur_downsampled_list = sample_by_size(
+    adata=eur_data,
+    props=proportions,
+    output_column=setup.classification["output_column"],
+    seed=seed
+    )
 
 # Downsample 'inf_data' by proportion
-inf_downsampled_list = sample_by_size(adata=inf_data,
-                                      props=proportions,
-                                      output_column=setup.classification['output_column'],
-                                      seed=seed)
+inf_downsampled_list = sample_by_size(
+    adata=inf_data,
+    props=proportions,
+    output_column=setup.classification["output_column"],
+    seed=seed
+    )
 
 # Iterate over all downsampled datasets
 # 1. Create EUR-subset based on 'inf_downsampeld'
@@ -201,62 +216,53 @@ for downsampled_data in zip(eur_downsampled_list, inf_downsampled_list):
 
 
 # Statistical analysis (DGE)
-setup.log('DGE')
+setup.log("DGE")
 # ScriptRunner defines bin for R and python
 R = ScriptRunner(r_path='/usr/bin/Rscript', py_path='/opt/conda/envs/ancestry/bin/python3')
 settings_file = os.path.join(os.getcwd(), setup.output_directory, 'Settings.yml')
 
 # Runs R script
 script = "robustness_dge.R"
-R.run_script(script_path=os.path.join(os.getcwd(), script),
-             args=[settings_file])
+R.run_script(script_path=os.path.join(os.getcwd(), script), args=[settings_file])
 
 # Iterate over all proportions and filter data
 setup.log(f"Machine learning")
-robustness_probabilities = list()
-robustness_metric = list()
+robustness_metric = []
+robustness_probabilities, robustness_interpretations, robustness_hyperparameters = [], [], []
 for prop in setup.proportion:
     # Filter data based on observations and features per proportion
     prop_ = str(prop).replace(".", "_")
 
     # Create file names for observations
-    obs_file_train = os.path.join(setup.output_directory,
-                                  f"Obs_proportion_{prop_}_train.yml")
-    obs_file_test = os.path.join(setup.output_directory,
-                                 f"Obs_proportion_{prop_}_test.yml")
-    obs_file_inf = os.path.join(setup.output_directory,
-                                f"Obs_proportion_{prop_}_inf.yml")
+    obs_file_train = setup.out(f"Obs_proportion_{prop_}_train.yml")
+    obs_file_test = setup.out(f"Obs_proportion_{prop_}_test.yml")
+    obs_file_inf = setup.out(f"Obs_proportion_{prop_}_inf.yml")
+
     # Load observations
     obs_train = yaml.safe_load(Path(obs_file_train).read_text())
     obs_test = yaml.safe_load(Path(obs_file_test).read_text())
     obs_inf = yaml.safe_load(Path(obs_file_inf).read_text())
 
-    # Feature file name
-    feature_file = os.path.join(setup.output_directory,f"Features_{prop_}.yml")
     # Load features
-    dge_features = yaml.safe_load(Path(feature_file).read_text())
+    feature_file = setup.out("Features.yml")
+    features = yaml.safe_load(Path(feature_file).read_text())
 
     # Filter data
-    train_data = data[obs_train, dge_features]
-    test_data = data[obs_test, dge_features]
-    inf_data = data[obs_inf, dge_features]
+    train_data = data[obs_train, features]
+    test_data = data[obs_test, features]
+    inf_data = data[obs_inf, features]
 
     # Machine learning
     # Encoding for the output column
-    encoder = {}
-    for i,j in enumerate(setup.classification['comparison']):
-        encoder.update({j: i})
+    comparison = setup.classification["comparison"]
+    encoder = {j: i for i, j in enumerate(comparison)}
     inv_encoder = {v: k for k, v in encoder.items()}
     
     # Transform anndata to np.array
-    train_X = np.array(train_data.X)
-    train_y = encode_y(train_data.obs[setup.classification['output_column']], encoder)
-
-    test_X = np.array(test_data.X)
-    test_y = encode_y(test_data.obs[setup.classification['output_column']], encoder)
-
-    inf_X = np.array(inf_data.X)
-    inf_y = encode_y(inf_data.obs[setup.classification['output_column']], encoder)
+    output_column = setup.classification["output_column"]
+    train_X, train_y = np.array(train_data.X), encode_y(train_data.obs[output_column], encoder)
+    test_X, test_y = np.array(test_data.X), encode_y(test_data.obs[output_column], encoder)
+    inf_X, inf_y = np.array(inf_data.X), encode_y(inf_data.obs[output_column], encoder)
 
     # Normalization
     # Select normalization method
@@ -297,30 +303,30 @@ for prop in setup.proportion:
         for algo_name in setup.algorithms
     )
 
-    # Evaluation
-    y_hat_list = []
-    # Feature names for interpretations
-    feature_names = train_data.var_names
+    y_hat_list, interpretations_list, hyperparameters_list = [], [], []
     for algo_name, best_model in zip(setup.algorithms, best_models):
         if best_model:
-            y_hat = evaluate_algorithm_cross_ancestry(
+            y_hat, interpretations, hyperparameters = evaluate_algorithm_cross_ancestry(
                 algo_name, 
-                best_model, 
+                best_model,
                 setup, 
                 test_X, 
                 test_y, 
                 inf_X, 
                 inf_y, 
-                feature_names, 
-                encoder = inv_encoder,
-                prop = prop_
-                )
-            # Append probabilities
+                train_data.var_names,
+                encoder = inv_encoder
+            )
+            
+            # Append across algorithms
             y_hat_list.append(y_hat)
+            interpretations_list.append(interpretations)
+            hyperparameters_list.append(hyperparameters)
         else:
             print(f"Skipping evaluation for {algo_name} because training failed.")
 
-    # Combine probabilities across algorithms
+    # Combine across algorithms
+    # Probabilities
     y_hat = pd.concat(y_hat_list)
     # Add information
     y_hat["Proportion"] = prop
@@ -328,6 +334,24 @@ for prop in setup.proportion:
     y_hat["n_inf_ancestry"] = len(inf_idx)
     # Append across proportions
     robustness_probabilities.append(y_hat)
+
+    # Interpretations
+    interpretaions = pd.concat(interpretations_list)
+    # Add information
+    interpretaions["Proportion"] = prop
+    interpretaions["n_train_ancestry"] = len(train_idx)
+    interpretaions["n_inf_ancestry"] = len(inf_idx)
+    # Append across proportions
+    robustness_interpretations.append(interpretaions)
+
+    # Hyperparamters
+    hyperparameters = pd.concat(hyperparameters_list)
+    # Add information
+    hyperparameters["Proportion"] = prop
+    hyperparameters["n_train_ancestry"] = len(train_idx)
+    hyperparameters["n_inf_ancestry"] = len(inf_idx)
+    # Append across proportions
+    robustness_hyperparameters.append(hyperparameters)
 
     # Calculate metric
     metric_list = list()
@@ -391,11 +415,13 @@ for prop in setup.proportion:
 # Combine across proportions
 robustness_metric_ml = pd.concat(robustness_metric)
 robustness_probabilities = pd.concat(robustness_probabilities)
+robustness_interpretations = pd.concat(robustness_interpretations)
+robustness_hyperparameters = pd.concat(robustness_hyperparameters)
 # Save
-output_directory = setup["output_directory"]
-robustness_metric_ml.to_csv(os.path.join(output_directory, "Contrast_metric_ml.csv"), index=False)
-robustness_probabilities.to_csv(os.path.join(output_directory, "Probabilities.csv"), index=False)
-
+robustness_metric_ml.to_csv(setup.out("Contrast_metric_ml.csv"), index=False)
+robustness_probabilities.to_csv(setup.out("Probabilities.csv"), index=False)
+robustness_interpretations.to_csv(setup.out("Interpretations.csv"), index=False)
+robustness_hyperparameters.to_csv(setup.out("Hyperparameters.csv"), index=False)
 
 
 

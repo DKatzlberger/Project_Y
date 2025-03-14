@@ -12,7 +12,7 @@ import os
 # Meta data that contains study_ids and sample_ids
 # 'cBioPortal' files are in a different folder to have access:
 # One step up in the folder hierachy
-to_fetch = pd.read_csv("data/downloads/cbioportal/tcga_firehose/meta_tcga_firehose_expression.csv")
+to_fetch = pd.read_csv("../data/downloads/cbioportal/tcga_firehose/meta_tcga_firehose_methylation.csv")
 
 # to_fetch = pd.read_csv('data/downloads/cbioportal/rna_studies/tcga_pan_studies_with_rna.csv')
 # study_id = to_fetch['studyid'].unique()[2]
@@ -40,8 +40,9 @@ for study_id in to_fetch['studyId'].unique():
 # 10    uvm_tcga_pan_can_atlas_2018_rna_seq_v2_mrna_me...
 # 11         uvm_tcga_pan_can_atlas_2018_genetic_ancestry
 
+    met_id = f"{study_id}_methylation_hm450"
     rna_id = f'{study_id}_rna_seq_v2_mrna'
-    rna_profile = profiles[profiles['molecularProfileId'] == rna_id]
+    rna_profile = profiles[profiles['molecularProfileId'] == met_id]
     # Get 'molecularProfileId'
     rna_profile_id = rna_profile['molecularProfileId'].values[0]
 
@@ -51,7 +52,7 @@ for study_id in to_fetch['studyId'].unique():
     print(len(to_fetch_samples))
 
     # Save location
-    vscratch_dir_out = f"data/downloads/cbioportal/tcga_firehose/expression"
+    vscratch_dir_out = f"../data/downloads/cbioportal/tcga_firehose/methylation"
     # 1. Location for successful samples
     # 2. Location for failed samples
     path_to_successful = os.path.join(vscratch_dir_out, f"{study_id}.csv")

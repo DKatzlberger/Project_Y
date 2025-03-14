@@ -33,16 +33,10 @@ if (length(args) > 0) {
 } else {
   print("Running interactive mode for development.")
   # Dev settings if no command-line argument provided
-  yaml_file <- "dev_settings.yml"
+  # data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_ADMIX.yml
+  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_ADMIX.yml"
   setup <- yaml.load_file(yaml_file)
 }
-
-# Transform settings into R useable form
-comparison <- setup$classification$comparison
-output_column <- setup$classification$output_column
-ancestry_column <- setup$classification$ancestry_column
-train_ancestry <- setup$classification$train_ancestry
-infer_ancestry <- setup$classification$infer_ancestry
 
 # Set seed (because why not)
 set.seed(setup$seed)
@@ -50,10 +44,15 @@ set.seed(setup$seed)
 # Load data
 adata <- read_h5ad(setup$data_path)
 
+# Load the selected feature used in ml
+output_directory <- setup$output_directory
+features <- yaml.load_file(file.path(output_directory, "Features.yml"))
+feature_n <- length(features)
+
 # Load the observation used in ml
-train_idx <- yaml.load_file(file.path(setup$output_directory, "Obs_train.yml"))
-test_idx <- yaml.load_file(file.path(setup$output_directory, "Obs_test.yml"))
-inf_idx <- yaml.load_file(file.path(setup$output_directory, "Obs_inf.yml"))
+train_idx <- yaml.load_file(file.path(output_directory, "Obs_train.yml"))
+test_idx <- yaml.load_file(file.path(output_directory, "Obs_test.yml"))
+inf_idx <- yaml.load_file(file.path(output_directory, "Obs_inf.yml"))
 
 # Get number of samples
 train_n = length(train_idx)
@@ -61,17 +60,22 @@ test_n = length(test_idx)
 inf_n = length(inf_idx)
 
 # Subset the data by the indexes create in python
-train_data <- adata[train_idx, ]
-test_data <- adata[test_idx, ]
-inf_data <- adata[inf_idx, ]
+train_data <- adata[train_idx, features]
+test_data <- adata[test_idx, features]
+inf_data <- adata[inf_idx, features]
 
-# Check if saved 'inf_idx' are from the correct ancestry
-inf_adata = adata[adata$obs[ancestry_column] == infer_ancestry]
-inf_adata = inf_adata[inf_adata$obs[[output_column]] %in% comparison]
-inf_adata_obs = inf_adata$obs_names
+# Assertion: Check if saved observation origin from the correct ancestry 
+ancestry_column <- setup$classification$ancestry_column
+infer_ancestry  <- setup$classification$infer_ancestry
+comparison <- setup$classification$comparison
+output_column <- setup$classification$output_column
+
+inf_adata <-  adata[adata$obs[ancestry_column] == infer_ancestry]
+inf_adata <-  inf_adata[inf_adata$obs[[output_column]] %in% comparison]
+inf_adata_obs <- inf_adata$obs_names
 stopifnot(length(inf_adata_obs) == length(inf_idx))
 
-# Number of samples per condition
+# Number of samples per output
 condition_count <- group_by(inf_adata$obs, !!sym(output_column)) |> count()
 
 # Covariate:
@@ -141,25 +145,6 @@ train_design <- create_design(output_column, train_data$obs, covariate = covaria
 test_design <- create_design(output_column, test_data$obs, covariate = covariate_list)
 inf_design <- create_design(output_column, inf_data$obs, covariate = covariate_list)
 
-# Filtering genes
-if (setup$filter_features & setup$data_type == "expression"){
-  print("Filter features")
-  # Filter by expression
-  keeper_genes <- filterByExpr(t(train_data$X), design = train_design)
-  # Subset features
-  train_filtered <- train_data[, keeper_genes]
-  test_filtered <- test_data[, keeper_genes]
-  inf_filtered <- inf_data[, keeper_genes]
-} else{
-  train_filtered <- train_data
-  test_filtered <- test_data
-  inf_filtered <- inf_data
-}
-# Save feature (for use in ML)
-output_directory <- setup$output_directory
-write_yaml(train_filtered$var_names, file.path(output_directory, "Features.yml"))
-
-
 # Limma workflow
 print("Start differential gene expression analysis.")
 # Select normalization method
@@ -168,14 +153,19 @@ dge_normalization <- setup$dge_normalization
 normalization_method <- normalization_methods[[data_type]][[dge_normalization]]
 
 # Transpose (rows = Genes, cols = Samples)
-train_filtered_t = t(train_filtered$X)
-test_filtered_t = t(test_filtered$X)
-inf_filtered_t = t(inf_filtered$X)
+train_data_t = t(train_data$X)
+test_data_t = t(test_data$X)
+inf_data_t = t(inf_data$X)
 
 # Normalization
-train_norm <- normalization_method(train_filtered_t, train_design)
-test_norm <- normalization_method(test_filtered_t, test_design)
-inf_norm <- normalization_method(inf_filtered_t, inf_design)
+train_norm <- normalization_method(train_data_t, train_design)
+test_norm <- normalization_method(test_data_t, test_design)
+inf_norm <- normalization_method(inf_data_t, inf_design)
+
+# Extract matrix (used for plotting)
+train_norm_matrix <- if (is.list(train_norm) && !is.null(train_norm$E)) train_norm$E else train_norm
+test_norm_matrix <- if (is.list(test_norm) && !is.null(test_norm$E)) test_norm$E else test_norm
+inf_norm_matrix <- if (is.list(inf_norm) && !is.null(inf_norm$E)) inf_norm$E else inf_norm
 
 # Fit the model (means model)
 train_limma_fit <- lmFit(train_norm, design = train_design)
@@ -253,7 +243,7 @@ if (setup$visual_val) {
   # Validation of the training
   t <- visual_validation(
     meta = train_data$obs,
-    signal = train_norm$E,
+    signal = train_norm_matrix,
     mean_stats = train_mean_res,
     contrast_stats = train_contrast_res,
     goi = goi,
@@ -262,7 +252,7 @@ if (setup$visual_val) {
 
   i <- visual_validation(
     meta = inf_data$obs,
-    signal = inf_norm$E,
+    signal = inf_norm_matrix,
     mean_stats = inf_mean_res,
     contrast_stats = inf_contrast_res,
     goi = goi,
@@ -305,6 +295,7 @@ raw_logFC <- bind_rows(train_log_FC, test_log_FC, inf_log_FC) |>
     Seed = setup$seed,
     n_train_ancestry = train_n,
     n_inf_ancestry = inf_n,
+    data_type = setup$data_type
   )
 
 # Save
@@ -343,6 +334,7 @@ metric_df <- inner_join(pearson, spearman, by = c("V1", "V2")) |>
     Prediction = ifelse(V1 == "logFC_test", "Subset", "Ancestry"),
     n_train_ancestry = train_n,
     n_inf_ancestry = inf_n,
+    data_type = setup$data_type
   )
 
 # Save
@@ -474,8 +466,8 @@ inf_predictions <- as_tibble(t(train_coefficients %*% t(inf_design)), rownames =
 test_observations <- as_tibble(t(test_norm$E), rownames = "Idx")
 inf_observations <- as_tibble(t(inf_norm$E), rownames = "Idx")
 # Meta
-test_meta <- as_tibble(test_filtered$obs, rownames = "Idx") |> select(Idx, setup$classification$output_column)
-inf_meta <- as_tibble(inf_filtered$obs, rownames = "Idx") |> select(Idx, setup$classification$output_column)
+test_meta <- as_tibble(test_data$obs, rownames = "Idx") |> select(Idx, setup$classification$output_column)
+inf_meta <- as_tibble(inf_data$obs, rownames = "Idx") |> select(Idx, setup$classification$output_column)
 # Merge
 test_predictions <- left_join(test_meta, test_predictions, by = "Idx")
 inf_predictions <- left_join(inf_meta, inf_predictions, by = "Idx")
@@ -550,6 +542,7 @@ baseline_per_gene_metric <- bind_rows(test_gene_error, inf_gene_error) |>
     Ancestry = toupper(setup$classification$infer_ancestry),
     n_train_ancestry = train_n,
     n_inf_ancestry = inf_n,
+    data_type = setup$data_type
   )
 
 baseline_per_gene_metric <- baseline_per_gene_metric |>
@@ -594,6 +587,7 @@ baseline_metric <- bind_rows(test_metric, inf_metric) |>
     Ancestry = toupper(setup$classification$infer_ancestry),
     n_train_ancestry = train_n,
     n_inf_ancestry = inf_n,
+    data_type = setup$data_type
   )
 
 baseline_metric <- baseline_metric |>

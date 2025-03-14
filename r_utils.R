@@ -71,11 +71,135 @@ normalization_methods <- list(
     "normalize_zscore" = function(X, ...) scale(X),  
     "raw" = function(X, ...) X  
   ),
-  "rppa" = list(
+  "protein" = list(
     "normalize_zscore" = function(X, ...) scale(X),  
     "raw" = function(X, ...) X  
   )
 )
+
+
+
+# Filter features
+cpm <- function(data, log = FALSE) {
+  # Converts raw counts to CPM (Counts Per Million).
+  # Optionally, log-transform the CPM values.
+  # Args:
+  #   data (matrix): Raw counts (samples x genes).
+  #   log (bool): Whether to log-transform the CPM values (default is FALSE).
+  # Returns:
+  #   matrix: CPM or logCPM values (samples x genes).
+  
+  # Calculate total reads for each sample (sum of all gene counts in each sample)
+  total_reads_per_sample <- rowSums(data)
+  
+  # Convert raw counts to CPM
+  cpm_data <- sweep(data, 1, total_reads_per_sample, FUN = "/") * 1e6
+  
+  # Optionally, log-transform the CPM data
+  if (log) {
+    cpm_data <- log2(cpm_data + 1)  # Add pseudocount to avoid log(0)
+  }
+  
+  return(cpm_data)
+}
+
+# By signal
+signal_by_percentile <- function(data, percentile) {
+  # Calculates the signal threshold for genes based on the specified percentile of their total counts.
+  # Args:
+  #   data (matrix): Expression data (samples x genes).
+  #   percentile (numeric): Percentile to calculate the signal threshold (e.g., 25 for 25th percentile).
+  # Returns:
+  #   numeric: The calculated signal threshold for genes based on the specified percentile.
+  
+  # Calculate total signal for each gene across all samples (sum along rows)
+  gene_signal <- colSums(data)
+  
+  # Calculate the threshold using the specified percentile
+  signal <- quantile(gene_signal, probs = percentile / 100)
+  
+  return(signal)
+}
+
+filter_by_signal <- function(data, min_signal = 10, max_signal = NULL, min_samples_ratio = 0.5) {
+  # Filters genes based on minimum and maximum signal and presence in at least a given fraction of samples.
+  # Args:
+  #   data (matrix): Expression data (samples x genes).
+  #   min_signal (numeric): Minimum total signal required for a gene (default: 10).
+  #   max_signal (numeric): Maximum total signal for a gene (optional).
+  #   min_samples_ratio (numeric): Minimum fraction of samples a gene must be expressed in (default: 50%).
+  # Returns:
+  #   logical: A logical vector indicating which genes were retained.
+  
+  # Calculate the number of samples
+  num_samples <- nrow(data)
+  
+  # Calculate the minimum number of samples for the given ratio
+  min_samples <- floor(min_samples_ratio * num_samples)
+  
+  # Calculate total signal for each gene across all samples (sum along rows)
+  gene_signal <- colSums(data)
+  
+  # Calculate how many samples express each gene (non-zero signal counts)
+  gene_samples <- colSums(data > 0)
+  
+  # Filter genes based on min_signal, max_signal, and min_samples_ratio
+  if (is.null(max_signal)) {
+    # If max_signal is not provided, only filter by min_signal and sample count
+    filtered_genes <- (gene_signal >= min_signal) & (gene_samples >= min_samples)
+  } else {
+    # If max_signal is provided, filter by both min_signal and max_signal
+    filtered_genes <- (gene_signal >= min_signal) & (gene_signal <= max_signal) & (gene_samples >= min_samples)
+  }
+  
+  return(filtered_genes)
+}
+
+# By variance
+min_variance_by_percentile <- function(data, percentile = 25) {
+  # Calculates the variance threshold for methylation genes based on the specified percentile.
+  # Args:
+  #   data (matrix): Methylation beta values (samples x genes).
+  #   percentile (numeric): Percentile to calculate the variance threshold (default: 25).
+  # Returns:
+  #   numeric: The calculated variance threshold based on the specified percentile.
+  
+  # Compute variance for each gene across samples (variance along columns)
+  gene_variances <- apply(data, 2, var)
+  
+  # Determine the variance threshold at the given percentile
+  min_variance <- quantile(gene_variances, probs = percentile / 100)
+  
+  return(min_variance)
+}
+
+filter_by_variance <- function(data, var_threshold = 0.01, min_samples_ratio = 0.5) {
+  # Filters methylation genes based on variance and presence in at least a given fraction of samples.
+  # Args:
+  #   data (matrix): Methylation beta values (samples x genes).
+  #   var_threshold (numeric): Minimum variance threshold to retain a gene (default: 0.01).
+  #   min_samples_ratio (numeric): Minimum fraction of samples where the gene must be methylated above 0 (default: 50%).
+  # Returns:
+  #   logical: A logical vector indicating which genes were retained.
+  
+  # Calculate the number of samples
+  num_samples <- nrow(data)
+  
+  # Calculate the minimum number of samples for the given ratio
+  min_samples <- floor(min_samples_ratio * num_samples)
+  
+  # Calculate variance for each gene across samples (variance along columns)
+  gene_variances <- apply(data, 2, var)
+  
+  # Count how many samples have a methylation value > 0 for each gene (non-zero beta value)
+  methylated_samples <- colSums(data > 0)
+  
+  # Filter genes based on variance threshold and the number of methylated samples
+  filtered_genes <- (gene_variances > var_threshold) & (methylated_samples >= min_samples)
+  
+  return(filtered_genes)
+}
+
 
 
 

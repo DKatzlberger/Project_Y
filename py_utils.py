@@ -56,10 +56,10 @@ class Setup(dict):
         # Check required settings
         required_settings = ["classification", "data_path", "data_type", "output_directory", "seed"]
         for i in required_settings:
-            assert i in final_config, f'No {i} defined but required!'     
+            assert i in final_config, f"No {i} defined but required!"  
         
         # Check required settings in classification
-        required_settings = ['comparison', 'output_column', 'train_ancestry', 'infer_ancestry', 'ancestry_column']
+        required_settings = ["comparison", "output_column", "train_ancestry", "infer_ancestry", "ancestry_column"]
         for i in required_settings:
              assert i in final_config['classification'], f'No {i} in classification but required!'
         
@@ -337,34 +337,38 @@ class DataValidator():
         except ValueError as e:
             self.error_handler.handle_error(e)
     
-    def validate_negative_counts(self):
+    def validate_negative_counts(self, data_type):
         """
         Check if there are any negative values in the count matrix (.X).
         Raise an error with the proportion of negative values if present.
         """
-        try:
-            if hasattr(self.data.X, "toarray"):  
-                dense_matrix = self.data.X.toarray()  # Convert sparse matrix to dense if needed
-            else:
-                dense_matrix = self.data.X  # Already a dense matrix
+        if data_type in ["expression", "methylation"]:
+            try:
+                if hasattr(self.data.X, "toarray"):  
+                    dense_matrix = self.data.X.toarray()  # Convert sparse matrix to dense if needed
+                else:
+                    dense_matrix = self.data.X  # Already a dense matrix
 
-            # Calculate the total number of elements in the matrix
-            total_elements = dense_matrix.size
+                # Calculate the total number of elements in the matrix
+                total_elements = dense_matrix.size
 
-            # Count how many negative values are in the matrix
-            negative_elements = np.sum(dense_matrix < 0)
+                # Count how many negative values are in the matrix
+                negative_elements = np.sum(dense_matrix < 0)
 
-            # Calculate the proportion of negative values
-            proportion_negative = negative_elements / total_elements
+                # Calculate the proportion of negative values
+                proportion_negative = negative_elements / total_elements
 
-            # Raise error if there are any negative values and include the proportion in the error message
-            if negative_elements > 0:
-                raise ValueError(f"Negative values found in the count matrix. " 
-                                 f"Proportion of negative values: {proportion_negative:.4f}.\n"
-                                 f"Please check the data preprocessing steps.")
-        
-        except ValueError as e:
-            self.error_handler.handle_error(e)
+                # Raise error if there are any negative values and include the proportion in the error message
+                if negative_elements > 0:
+                    raise ValueError(f"Negative values found in the count matrix. " 
+                                    f"Proportion of negative values: {proportion_negative:.4f}.\n"
+                                    f"Please check the data preprocessing steps.")
+            
+            except ValueError as e:
+                self.error_handler.handle_error(e)
+
+        elif data_type in ["protein"]:
+            print(f"{data_type} data allows negative values")
 
     def check_min_samples_per_class(self, data, column, min_samples, data_name):
         """
@@ -375,7 +379,7 @@ class DataValidator():
             failing_classes = counts[counts < min_samples]
             assert failing_classes.empty, (
                 f"Minimum sample size of {min_samples} per class is required. "
-                f"The following classes in '{data_name}' fail to meet the requirement:\n{failing_classes}"
+                f"The following classes in '{data_name}' fail to meet the requirement:\n{counts}"
             )
         except AssertionError as e:
             self.error_handler.handle_error(e)
@@ -464,7 +468,7 @@ class ScriptRunner():
         # Check R version
         subprocess.run([self.r_execute, "--version"])
 
-# Functions to normalize data
+# Normalization
 def normalize_log(X, e=0.01):
     """
     Natural log transformation.
@@ -524,7 +528,122 @@ ml_normalization_methods = {
     }
 }
 
-# Function to create integer vector from categotical column
+# Filtering features
+def cpm(data, log=False):
+    """
+    Converts raw counts to CPM (Counts Per Million).
+    
+    Parameters:
+    data (numpy.ndarray): Raw counts (samples x genes).
+    log (bool): Whether to log-transform the CPM values (default is False).
+    
+    Returns:
+    numpy.ndarray: CPM or logCPM values (samples x genes).
+    """
+    # Calculate total reads for each sample (sum of all gene counts in each sample)
+    total_reads_per_sample = data.sum(axis=1)
+    
+    # Convert raw counts to CPM
+    cpm_data = (data.T / total_reads_per_sample).T * 1e6
+    
+    # Optionally, log-transform the CPM data
+    if log:
+        cpm_data = np.log2(cpm_data + 1)  # Add pseudocount to avoid log(0)
+    
+    return cpm_data
+
+def min_signal_by_percentile(data, percentile=25):
+    """
+    Calculates the min_counts threshold for genes based on the specified percentile of their total counts.
+    
+    Parameters:
+    data (numpy.ndarray): Expression data (samples x genes).
+    percentile (float): Percentile to calculate the min_counts threshold (default: 25).
+    
+    Returns:
+    float: The calculated min_signal threshold for genes based on the specified percentile.
+    """
+    # Calculate total counts for each gene across all samples (sum along rows)
+    gene_signal = np.sum(data, axis=0)
+    
+    # Calculate the threshold using the specified percentile
+    min_signal = np.percentile(gene_signal, percentile)
+    
+    return min_signal
+
+def min_variance_by_percentile(data, percentile=25):
+    """
+    Calculates the variance threshold for methylation genes based on the specified percentile.
+
+    Parameters:
+    data (numpy.ndarray): Methylation beta values (samples x genes).
+    percentile (float): Percentile to calculate the variance threshold (default: 25).
+
+    Returns:
+    float: The calculated variance threshold based on the specified percentile.
+    """
+    # Compute variance for each gene across samples
+    gene_variances = np.var(data, axis=0)
+
+    # Determine the variance threshold at the given percentile
+    min_variance = np.percentile(gene_variances, percentile)
+
+    return min_variance
+
+def filter_by_signal(data, min_signal=10, min_samples_ratio=0.5):
+    """
+    Filters genes based on minimum expression counts and presence in at least a given fraction of samples.
+    
+    Parameters:
+    data (numpy.ndarray): Expression data (samples x genes).
+    min_signal (int): Minimum total signal required for a gene (default: 10).
+    min_samples_ratio (float): Minimum fraction of samples a gene must be expressed in (default: 50%).
+    
+    Returns:
+    np.array: Boolean array indicating which genes were retained.
+    """
+    num_samples = data.shape[0]  # Number of samples
+    min_samples = int(min_samples_ratio * num_samples)  # Compute threshold based on ratio
+    
+    # Calculate total counts for each gene across all samples
+    gene_counts = np.sum(data, axis=0)
+    
+    # Calculate how many samples express each gene (non-zero counts)
+    gene_samples = np.sum(data > 0, axis=0)
+    
+    # Filter genes based on min_counts and min_samples_ratio
+    filtered_genes = (gene_counts >= min_signal) & (gene_samples >= min_samples)
+    
+    return filtered_genes
+
+def filter_by_variance(data, var_threshold=0.01, min_samples_ratio=0.5):
+    """
+    Filters methylation genes based on variance and presence in a minimum fraction of samples.
+
+    Parameters:
+    data (numpy.ndarray): Methylation beta values (samples x genes).
+    var_threshold (float): Minimum variance threshold to retain a gene (default: 0.01).
+    min_samples_ratio (float): Minimum fraction of samples where the gene must be methylated above 0 (default: 50%).
+
+    Returns:
+    np.array: Boolean array indicating which genes are retained.
+    """
+    num_samples = data.shape[0]  # Total number of samples
+    min_samples = int(min_samples_ratio * num_samples)  # Compute sample threshold
+
+    # Calculate variance for each gene across samples
+    gene_variances = np.var(data, axis=0)
+
+    # Count the number of samples where beta value > 0
+    methylated_samples = np.sum(data > 0, axis=0)
+
+    # Apply both filters
+    filtered_genes = (gene_variances > var_threshold) & (methylated_samples >= min_samples)
+
+    return filtered_genes
+
+
+
 def encode_y(data, dictionary):
     """
     Creates vector with class labels; additionally returns mapping dictionary.
@@ -675,21 +794,15 @@ def train_algorithm(algo_name, setup, train_X, train_y, available_jobs, prop=Non
         grid_search.fit(train_X, train_y)  # Train the model on the training data
         best_model = grid_search.best_estimator_  # Extract the best model from the grid search
 
-        # Save the best hyperparameters to a CSV file
-        hyp = pd.DataFrame(grid_search.best_params_, index=[setup["id"]])
-        if prop is not None:
-            hyp.to_csv(os.path.join(setup["output_directory"], f"Hyperparameters_{prop}_{algo_name}.csv"), index=False)
-            # Optionally save the trained model to a pickle file
-            if setup["save_model"]:
+        # Save the model
+        if setup["save_model"]:
+            if prop is not None:
                 with open(os.path.join(setup["output_directory"], f"{algo_name}_{prop}_{setup["id"]}.pkl"), "wb") as f:
                     pickle.dump(best_model, f, protocol=pickle.HIGHEST_PROTOCOL)
-
-        else:
-            hyp.to_csv(os.path.join(setup["output_directory"], f"Hyperparameters_{algo_name}.csv"), index=False)
-            # Optionally save the trained model to a pickle file
-            if setup["save_model"]:
-                with open(os.path.join(setup["output_directory"], f"{algo_name}_{setup["id"]}.pkl"), "wb") as f:
+            else:
+                  with open(os.path.join(setup["output_directory"], f"{algo_name}_{setup["id"]}.pkl"), "wb") as f:
                     pickle.dump(best_model, f, protocol=pickle.HIGHEST_PROTOCOL)
+
 
         # Training complete
         print(f"{algo_name} training done.")
@@ -700,7 +813,6 @@ def train_algorithm(algo_name, setup, train_X, train_y, available_jobs, prop=Non
         print(f"Error occurred during training for {algo_name}: {e}")
         return None
     
-
 def evaluate_algorithm_cross_ancestry(
         algo_name, 
         best_model, 
@@ -728,7 +840,7 @@ def evaluate_algorithm_cross_ancestry(
         encoder (dict): Dictionary of class names.
 
     Returns:
-        None
+        Probabilities, Interpretations and Hyperparameters
     """
     try:
         # Log the start of testing
@@ -739,10 +851,8 @@ def evaluate_algorithm_cross_ancestry(
         test_y_hat = test_y_hat.rename(columns=encoder)
         test_y_hat["y"] = test_y
         # Additional information
-        test_y_hat["Algorithm"] = algo_name
         test_y_hat["Status"] = "Test"
         test_y_hat["Prediction"] = "Subset"
-        # test_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_test.csv"), index=False)
 
         # Log the start of inference
         setup.log("Infering")
@@ -752,16 +862,13 @@ def evaluate_algorithm_cross_ancestry(
         inf_y_hat = inf_y_hat.rename(columns=encoder)
         inf_y_hat["y"] = inf_y
         # Additional information
-        inf_y_hat["Algorithm"] = algo_name
         inf_y_hat["Status"] = "Inference"
         inf_y_hat["Prediction"] = "Ancestry"
-        # inf_y_hat.to_csv(setup.out(f"Probabilities_{algo_name}_inf.csv"), index=False)
         
-        # Combine propabilities
+        # Combine propabilities (test inference)
         y_hat = pd.concat([test_y_hat, inf_y_hat])
         y_hat["Seed"] = setup.seed
-        # Save
-        # y_hat.to_csv(setup.out(f"Probabilities_{algo_name}.csv"), index=False)
+        y_hat["Algorithm"] = algo_name
 
         # Inference complete
         print(f"{algo_name} validation done.")
@@ -770,62 +877,54 @@ def evaluate_algorithm_cross_ancestry(
         setup.log("Model interpretations")
         # Extract feature importance
         feature_importance = extract_feature_importance(best_model, feature_names)
+        feature_importance["Seed"] = setup.seed
+        feature_importance["Algorithm"] = algo_name
 
-        # Save
-        if prop is not None:
-            feature_importance.to_csv(setup.out(f"Feature_importance_{prop}_{algo_name}.csv"), index=False)
-        else:
-            # Save feature 
-            feature_importance.to_csv(setup.out(f"Feature_importance_{algo_name}.csv"), index=False)
+        # Log the start of hyperparameters
+        hyperparameters = best_model.get_params()
+        hyperparameters = pd.DataFrame([hyperparameters])
+        hyperparameters["Seed"] = setup.seed
+        hyperparameters["Algorithm"] = algo_name
 
-        return y_hat
+        return y_hat, feature_importance, hyperparameters
 
     except Exception as e:
         # Handle and log any exceptions that occur during evaluation
         print(f"Error occurred during evaluation for {algo_name}: {e}")
 
-
-def evaluate_algorithm_eur_subsetting(algo_name, setup, best_model, subset_X, subset_y):
+def evaluate_algorithm_eur_subsetting(
+        algo_name, 
+        best_model, 
+        subset_X, 
+        subset_y
+        ):
     """
     Evaluate the trained model on test subsets and return probabilities and metrics.
     """
     try:
         propability_list = []
-        metric_list = []
-        
+    
         # Iterate over all subsets (X, y)
         for X, y in zip(subset_X, subset_y):
             # Get predicted probabilities
             test_y_hat = pd.DataFrame(best_model.predict_proba(X))
             test_y_hat["y"] = y
+            test_y_hat["Algorithm"] = algo_name
             test_y_hat["n_test_ancestry"] = y.shape[0]
             
             # Collect probabilities
             propability_list.append(test_y_hat)
 
-            # Calculate metrics
-            test_probabilities, test_y = test_y_hat.iloc[:, 1].values, test_y_hat["y"].values
-            auc = roc_auc_score(y_true=test_y, y_score=test_probabilities)
-            metric = {algo_name: auc, "n_test_ancestry": y.shape[0], "Metric": "ROC_AUC"}
-            
-            # Collect metrics
-            metric_list.append(metric)
-
-        # Combine probabilities and save
+        # Combine probabilities
         propabilities = pd.concat(propability_list, ignore_index=True)
-        propabilities.to_csv(setup.out(f"Probabilities_{algo_name}.csv"), index=False)
-
-        # Combine metric and add algo information
-        metric_combined = pd.DataFrame(metric_list)
 
         # Finished validation
         print(f"{algo_name} validation done.")
 
-        return metric_combined
+        return propabilities
     
     except Exception as e:
         print(f"Error occurred during evaluation for {algo_name}: {e}")
-
 
 
 def evaluate_algorithm_robustness(
@@ -1028,10 +1127,11 @@ def extract_feature_importance(model, feature_names):
     importance = importance / np.sum(importance)
     
     # Create a DataFrame for readability
-    importance_df = pd.DataFrame({
-        "Feature": feature_names,
-        "Importance": importance
-    }).sort_values(by="Importance", ascending=False)
+    importance_df = (
+        pd.DataFrame({"Feature": feature_names, "Importance": importance})
+        .sort_values(by="Importance", ascending=False)
+        .reset_index(drop=True)
+        )
     
     return importance_df
 

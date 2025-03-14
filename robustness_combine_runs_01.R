@@ -39,7 +39,7 @@ if (length(args) > 0) {
 } else {
   print("Running interactive mode for development.")
   # Yaml file used for development (often an actual job script)
-  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml"
+  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_EAS.yml"
   # 1. Check if it's a valid yaml file
   # 2. Load the yaml file
   is_yml_file(yaml_file)
@@ -305,7 +305,8 @@ point_size <- 0.5
 # Define limits for y-axis
 max_y_value <- 1.0 # not considering error bars
 max_sd <- 0.1 # estimated max sd
-max_multiplicator <- 1.2 + max_sd
+max_multiplicator <- 1.3
+max_hight <- max_multiplicator + max_sd
 # y-limit
 max_y_limit <- max_y_value * max_multiplicator
 # y-scale
@@ -393,7 +394,7 @@ for (proportion in rev(unique(aggregated_contrast_metric_dge$Proportion))){
     geom_text(
         aes(
             x = 1.5,
-            y = y_max * 1.2,
+            y = y_max * max_multiplicator,
             label = ifelse(
             is.na(p_value),
             "p[paired~perm.~test] == NA",
@@ -402,8 +403,8 @@ for (proportion in rev(unique(aggregated_contrast_metric_dge$Proportion))){
                 ifelse(p_value < 0.01, 
                     format(p_value, digits = 3, scientific = TRUE), 
                     format(p_value, digits = 3)),
-                ifelse(p_value < 0.001, " **",  # Two asterisks for p < 0.001
-                    ifelse(p_value < 0.05, " *", ""))  # One asterisk for p < 0.05
+                ifelse(p_value < 0.01, " ~`**`",  # Two asterisks for p < 0.001
+                    ifelse(p_value < 0.05, " ~`*`", ""))  # One asterisk for p < 0.05
             )
             )
         ),
@@ -425,7 +426,7 @@ combined_proportions <- wrap_plots(gg_proportion_list, ncol = 2)
 ggsave(filename = "Contrast_correlation_logFC.pdf", 
        plot = combined_proportions, 
        path = path_to_save_location, 
-       width = 6, height = 6
+       width = 4, height = 5
        )
 
 # ---- Contrast distribution avg. logFC (DGE) ----
@@ -465,6 +466,13 @@ for (proportion in rev(unique(aggregated_raw_metric_dge$Proportion))){
   # P-value
   cor_p_pearson <- pvalue(independence_test(Inference ~ Train, data = lm_data))
   cor_p_spearman <- pvalue(independence_test(rank(Inference) ~ rank(Train), data = lm_data))
+  # Dataframe
+  inference <- data.frame(
+    Pearson = cor_pearson, 
+    Spearman = cor_spearman,
+    Prediction = "Ancestry",
+    Status = "Inference"
+    )
   # Label
   pearson_label <- bquote(R[Pearson] == .(round(cor_pearson, 3)))
   spearman_label <- bquote(R[Spearman] == .(round(cor_spearman, 3)))
@@ -541,7 +549,6 @@ for (proportion in rev(unique(aggregated_raw_metric_dge$Proportion))){
       x = paste(x_ancestry, condition_1, "vs", condition_2, "(avg. logFC)"),
       y = paste(y_ancestry, condition_1, "vs", condition_2, "(avg. logFC)")
     ) +
-    coord_fixed() +  
     theme_nature_fonts() +
     theme_white_background() +
     theme_white_strip() +
@@ -581,6 +588,13 @@ for (proportion in rev(unique(aggregated_raw_metric_dge$Proportion))){
   # P-value
   cor_p_pearson <- pvalue(independence_test(Test ~ Train, data = lm_data))
   cor_p_spearman <- pvalue(independence_test(rank(Test) ~ rank(Train), data = lm_data))
+  # Dataframe
+  test <- data.frame(
+    Pearson = cor_pearson, 
+    Spearman = cor_spearman,
+    Prediction = "Subset",
+    Status = "Test"
+    )
   # Label
   pearson_label <- bquote(R[Pearson] == .(round(cor_pearson, 3)))
   spearman_label <- bquote(R[Spearman] == .(round(cor_spearman, 3)))
@@ -592,6 +606,7 @@ for (proportion in rev(unique(aggregated_raw_metric_dge$Proportion))){
   condition_1 <- unique(raw_metric_dge$coef)[1]
   condition_2 <- unique(raw_metric_dge$coef)[2]
 
+  # Plot
   prop_train_test <- lm_data |>
     ggplot(
       aes(
@@ -659,7 +674,6 @@ for (proportion in rev(unique(aggregated_raw_metric_dge$Proportion))){
       x = paste(x_ancestry, condition_1, "vs", condition_2, "(avg. logFC)"),
       y = paste(y_ancestry, condition_1, "vs", condition_2, "(avg. logFC)")
     ) +
-    coord_fixed() +  
     theme_nature_fonts() +
     theme_white_background() +
     theme_white_strip() +
@@ -674,10 +688,61 @@ for (proportion in rev(unique(aggregated_raw_metric_dge$Proportion))){
       legend.key.spacing = unit(0, "cm")
     )
 
+ 
+  # Bar plot for proportion
+  small_bar_plot <- bind_rows(inference, test) |>
+    pivot_longer(
+      cols = c(
+        Pearson,
+        Spearman
+      ),
+      names_to = "Metric",
+      values_to = "Value"
+    ) |>
+    ggplot(
+      aes(
+        x = fct_rev(Prediction),
+        y = Value
+      )
+    ) +
+    geom_bar(
+      stat = "identity", 
+      width = 0.7
+    ) +
+    facet_grid(
+      rows = vars(Metric)
+    ) +
+    scale_x_discrete(
+      labels = c(
+        "Subset" = "S", 
+        "Ancestry" = "A"
+        )
+    ) +
+    scale_y_continuous(
+      limits = c(0, 1),
+      breaks = c(0, 0.5, 1)
+    ) +
+    labs(
+      x = "Prediction",
+      y = "Y"
+    ) +
+    theme_nature_fonts() +
+    theme_white_background() +
+    theme_white_strip() +
+    theme_zero_margin() +
+    theme(
+      plot.background = element_rect(fill = "transparent", color = NA),  
+      panel.background = element_rect(fill = "transparent", color = NA),  
+      axis.title = element_blank()
+    )
+  
   # Pacthwork for a tile
+  insert_patchwork <- prop_train_test +
+    inset_element(small_bar_plot, left = 0.7, bottom = 0.01, right = 1.1, top = 0.6) 
+
   tile_patchwork <- wrap_elements(
-    prop_train_test + 
-    prop_train_inference +
+    (insert_patchwork + 
+    prop_train_inference) +
     plot_annotation(title = inf_n_label) &
     theme(
         plot.title = element_text(hjust = 0.5, size = 5)
@@ -689,11 +754,12 @@ for (proportion in rev(unique(aggregated_raw_metric_dge$Proportion))){
 }
 # Final layout (patchwork)
 contrast_distribution_avg_logFC <- wrap_plots(gg_proportion_list, ncol = 2)
-
+  
 # Save
 ggsave(filename = "Contrast_distribution_avg_logFC.pdf", 
       plot = contrast_distribution_avg_logFC, 
       path = path_to_save_location, 
-      width = 6, height = 6
+      width = 8, height = 5
       )
 
+# ---- Contrast density R-values (DGE) -----

@@ -2,11 +2,11 @@ import pandas as pd
 import anndata as ad
 import numpy as np
 
-study_I_path = "data/downloads/cbioportal/tcga_pan_can_atlas/RNA/lusc_tcga_pan_can_atlas_2018.csv"
-study_II_path= "data/downloads/cbioportal/tcga_pan_can_atlas/RNA/luad_tcga_pan_can_atlas_2018.csv"
-meta_data_path = "data/downloads/cbioportal/rna_studies/tcga_pan_studies_with_rna.csv"
+study_I_path = "data/downloads/cbioportal/tcga_pan_can_atlas/expression/lusc_tcga_pan_can_atlas_2018.csv"
+study_II_path= "data/downloads/cbioportal/tcga_pan_can_atlas/expression/luad_tcga_pan_can_atlas_2018.csv"
+meta_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/meta_tcga_pan_can_atlas_expression.csv"
 # Name
-path_to_save_location = "data/inputs/PanCanAtlas_LUSC_LUAD_RSEM.h5ad"
+path_to_save_location = "data/inputs/PanCanAtlas_LUSC_LUAD_raw_RSEM_subtypeNAremoved.h5ad"
 # Load the data
 study_I = pd.read_csv(study_I_path)
 study_II = pd.read_csv(study_II_path)
@@ -70,7 +70,7 @@ adata.obs = adata.obs.rename(columns=column_mapping)
 
 # Custom modifications
 # Remove all NAs
-# adata = adata[adata.obs.dropna(subset="subtype").index]
+adata = adata[adata.obs.dropna(subset="subtype").index]
 
 # # Include subtype_pooled
 # adata.obs["subtype_pooled"] = adata.obs["subtype"].apply(

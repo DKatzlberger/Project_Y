@@ -62,10 +62,15 @@ for (prop in setup$proportion){
   observation_file_test <- paste0("Obs_proportion_", prop_, "_test.yml")
   observation_file_inf <- paste0("Obs_proportion_", prop_, "_inf.yml")
 
-  # Load indeces
-  train_idx <- yaml.load_file(file.path(setup$output_directory, observation_file_train))
-  test_idx <- yaml.load_file(file.path(setup$output_directory, observation_file_test))
-  inf_idx <- yaml.load_file(file.path(setup$output_directory, observation_file_inf))
+  # Load the selected feature used in ml
+  output_directory <- setup$output_directory
+  features <- yaml.load_file(file.path(output_directory, "Features.yml"))
+  feature_n <- length(features)
+
+  # Load observations
+  train_idx <- yaml.load_file(file.path(output_directory, observation_file_train))
+  test_idx <- yaml.load_file(file.path(output_directory, observation_file_test))
+  inf_idx <- yaml.load_file(file.path(output_directory, observation_file_inf))
 
   # Get number of samples
   train_n = length(train_idx)
@@ -73,9 +78,12 @@ for (prop in setup$proportion){
   inf_n = length(inf_idx)
 
   # Subset the data by the indexes create in python
-  train_data <- adata[adata$obs_names %in% train_idx, ]
-  test_data <- adata[adata$obs_names %in% test_idx, ]
-  inf_data <- adata[adata$obs_names %in% inf_idx, ]
+  train_data <- adata[train_idx, features]
+  test_data <- adata[test_idx, features]
+  inf_data <- adata[inf_idx, features]
+  # train_data <- adata[adata$obs_names %in% train_idx, ]
+  # test_data <- adata[adata$obs_names %in% test_idx, ]
+  # inf_data <- adata[adata$obs_names %in% inf_idx, ]
 
   # Assertion: Check arrays
   # Dimensions
@@ -127,25 +135,6 @@ for (prop in setup$proportion){
   test_design <- create_design(output_column, test_data$obs, covariate = covariate_list)
   inf_design <- create_design(output_column, inf_data$obs, covariate = covariate_list)
 
-  # Filter genes
-  if (setup$filter_features & setup$data_type == "expression"){
-    print("Filter features")
-    # Filter by expression
-    keeper_genes <- filterByExpr(t(train_data$X), design = train_design)
-    # Subset features
-    train_filtered <- train_data[, keeper_genes]
-    test_filtered <- test_data[, keeper_genes]
-    inf_filtered <- inf_data[, keeper_genes]
-  } else{
-    train_filtered <- train_data
-    test_filtered <- test_data
-    inf_filtered <- inf_data
-  }
-  # Save features (for use in ML)
-  output_directory <- setup$output_directory
-  file_name <- paste0("Features_", prop_, ".yml")
-  write_yaml(train_filtered$var_names, file.path(output_directory, file_name))
-
   # Limma workflow
   print("Start differential gene expression analysis.")
   # Select normalization method
@@ -154,14 +143,14 @@ for (prop in setup$proportion){
   normalization_method <- normalization_methods[[data_type]][[dge_normalization]]
   
   # Transpose (rows = Genes, cols = Samples)
-  train_filtered = t(train_filtered$X)
-  test_filtered = t(test_filtered$X)
-  inf_filtered = t(inf_filtered$X)
+  train_data_t = t(train_data$X)
+  test_data_t = t(test_data$X)
+  inf_data_t = t(inf_data$X)
 
   # Normalization
-  train_norm <- normalization_method(train_filtered, train_design)
-  test_norm <- normalization_method(test_filtered, test_design)
-  inf_norm <- normalization_method(inf_filtered, inf_design)
+  train_norm <- normalization_method(train_data_t, train_design)
+  test_norm <- normalization_method(test_data_t, test_design)
+  inf_norm <- normalization_method(inf_data_t, inf_design)
 
   # Fit the model (Means model)
   train_limma_fit <- lmFit(train_norm, design = train_design)

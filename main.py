@@ -260,13 +260,16 @@ if __name__ == "__main__":
     # Fixed arguments
     SINGULARITY = "data/ancestry_dk.sif"
     HOSTNAME = "trude.came.sbg.ac.at"
-    SEEDS = np.arange(1, 3)
+    SEEDS = np.arange(1, 11)
 
     # Ancestry specific settings
     SETTINGS_FILES = [
         "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml",
-        "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_AFR.yml",
-        "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_EAS.yml"  
+        "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_AFR.yml", 
+        "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_EAS.yml"
+        # "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_ADMIX.yml",
+        # "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_AFR.yml",
+        # "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_EAS.yml"
     ]
     # Pattern to extract 'eur_to_region'
     pattern = r"EUR_to_[A-Z]+"
@@ -350,7 +353,7 @@ if __name__ == "__main__":
         )
 
         # 'robustness' combine runs
-        COMBINE_SCRIPT = "robustness_combine_runs.R"
+        COMBINE_SCRIPT = "robustness_combine_runs_01.R"
         NAME = f"{eur_to_region}_robustness_combine_runs"
 
         robustness_combine_runs_job = submit_single_job(
@@ -369,10 +372,23 @@ if __name__ == "__main__":
 
 
     # This analysis only needs to run once per comparison
+    # "descriptive_model_building"
+    SCRIPT_NAME = "descriptive_model_building.R"
+    NAME = "descriptive_statisitics"
+    job_name = submit_single_job(
+            settings_file=SETTINGS_FILE,
+            script_name=SCRIPT_NAME,
+            analysis_name=NAME,
+            singularity=SINGULARITY,
+            hostname=HOSTNAME,
+            wait_for_jobs=False,
+            cpus=1
+        )
+
+
     # 'eur_subsetting' analysis
     SCRIPT_NAME = "eur_subsetting.py"
     NAME = "EUR_subsetting"
-
     # Submit seed jobs and retrieve the job names
     eur_subsetting_jobs, tmp_settings = submit_seed_jobs(
         settings_file=SETTINGS_FILE,
@@ -404,7 +420,7 @@ if __name__ == "__main__":
     COMBINE_ANCESTRIES_SCRIPT = "cross_ancestry_combine_ancestries.R"
     NAME = "combine_ancestries"
     combine_ancestries_wait_jobs.append(eur_subsetting_combine_runs_job)
-
+    
     job_name = submit_single_job(
             settings_file=SETTINGS_FILE,
             script_name=COMBINE_ANCESTRIES_SCRIPT,

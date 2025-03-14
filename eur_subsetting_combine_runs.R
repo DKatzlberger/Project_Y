@@ -12,6 +12,7 @@ suppressPackageStartupMessages(
 )
 # Source custom functions
 source("r_utils.R")
+source("figure_themes.R")
 
 # Parse command-line arguments
 args <- commandArgs(trailingOnly = TRUE)
@@ -33,7 +34,7 @@ if (length(args) > 0) {
 } else {
   print("Running interactive mode for development.")
   # Yaml file used for development (often an actual job script)
-  yaml_file <- "PanCanAtlas_RSEM_covariates_subtype_age_EUR_to_EAS.yml"
+  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_EAS.yml"
   # 1. Check if it's a valid yaml file
   # 2. Load the yaml file
   is_yml_file(yaml_file)
@@ -59,113 +60,296 @@ if (length(args) > 0) {
 }
 
 # Extracting all folders in the 'vscratch_dir' that match 'match_pattern'
-# 1. List all folders in 'vscratch_dir_in'
-# 2. With 'match_pattern' extract matching folders
 all_vscratch_dir_in <- list.dirs(vscratch_dir_in, full.names = TRUE, recursive = FALSE)
-match_vsratch_dir <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
-
-# Check if there were matching folders
-if (length(match_vsratch_dir) == 0) {
-  message("No matching folders found.")
-}
+match_vscratch_dir <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
 
 # Save the results of the analysis: 'EUR_subsetting'
-# 'Vscratch_dir_out' where summarized analysis are stored
 vscratch_dir_out  <- "data/combined_runs"
 path_to_save_location <- file.path(vscratch_dir_out, match_pattern)
-# Create the directory also parents (if it does not exist)
 # Create directory if it does not exists
 if (!dir.exists(path_to_save_location)) {
   dir.create(path_to_save_location, recursive = TRUE)
 }
 
+# Contrast
+# DGE
+contrast_metric_dge <- fload_data(match_vscratch_dir, file = "Contrast_metric_dge.csv")
+raw_metric_dge <- fload_data(match_vscratch_dir, file = "LogFCs.csv")
 
-# Loading and combining the matched folders
-metric_dge <- data.frame()
-metric_ml <- data.frame()
-for (folder in match_vsratch_dir){
-    dge_file <- file.path(folder, "Metric_dge.csv")
-    ml_file <- file.path(folder, "Metric_ml.csv")
+# ML
+contrast_metric_ml <- fload_data(match_vscratch_dir, file = "Contrast_metric_ml.csv")
+raw_metric_ml <- fload_data(match_vscratch_dir, file = "Probabilities.csv")
 
-    # Load and append DGE data for each seed
-    dge_data <- fread(dge_file) 
-    metric_dge <- bind_rows(metric_dge, dge_data) 
+# Aggregate data
+group_seeds <- c(2, 5, 8, "all")
+# DGE - contrast_metric_dge
+aggregated_dfs <- list()
+for (seed_count in group_seeds) {
+  # If seed_count is "all", use all the seeds in the data
+  if (seed_count == "all") {
+    filtered_data <- contrast_metric_dge
+  } else {
+    # Randomly sample the seeds based on the specified seed_count
+    set.seed(42)  # For reproducibility
+    sampled_seeds <- sample(unique(contrast_metric_dge$Seed), seed_count)
+    
+    # Filter the data for the randomly sampled seeds
+    filtered_data <- contrast_metric_dge |>
+      filter(Seed %in% sampled_seeds)
+  }
 
-    # Load and append ML data for each seed
-    ml_data <- fread(ml_file) 
-    metric_ml <- bind_rows(metric_ml, ml_data) 
-}
-
-# Summarize metric across seeds
-# Calculate mean, sd, sem 
-# 1. DGE
-# 2. ML
-summarized_dge <- metric_dge |> 
+  aggregated_df <- filtered_data |> 
     pivot_longer(
-        cols = c(Pearson, Spearman),
-        values_to = "Value",
-        names_to = "Metric"
+      cols = c(Pearson, Spearman),
+      values_to = "Value",
+      names_to = "Metric"
     ) |> 
-    # Dont use 'Seed' in 'group_by'
-    group_by(Metric, 
-             n_test_ancestry,
+    group_by(
+      Metric, 
+      n_test_ancestry,
     ) |>  
     summarize(
-        n_seeds = n(),
-        mean_value = mean(Value, na.rm = TRUE),
-        sd_value = sd(Value, na.rm = TRUE),
-        se_value = sd(Value, na.rm = TRUE) / sqrt(n()),
-        .groups = "drop"
-  ) |>
-  mutate(Algorithm = "limma")
-
-summarized_ml <- metric_ml |> 
-    pivot_longer(
-        cols = c(LogisticRegression, RandomForestClassifier),
-        values_to = "Value",
-        names_to = "Algorithm"
-    ) |> 
-    # Dont use 'Seed' in 'group_by'
-    group_by(Algorithm, 
-             n_test_ancestry,
-             Metric
-    ) |>  
-    summarize(
-        n_seeds = n(),
-        mean_value = mean(Value, na.rm = TRUE),
-        sd_value = sd(Value, na.rm = TRUE),
-        se_value = sd(Value, na.rm = TRUE) / sqrt(n()),
-        .groups = "drop"
-  )
-
-# Combine DGE and ML 
-# Add 'Metric_Type' column
-combined_metric <- bind_rows(summarized_dge, summarized_ml) |>
-  mutate(Metric_type = paste0(Metric, " (", Algorithm, ")")) |>
+      n_seeds = n(),
+      mean_value = mean(Value, na.rm = TRUE),
+      sd_value = sd(Value, na.rm = TRUE),
+      se_value = sd(Value, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop"
+    ) |>
     mutate(
-    Metric_type = factor(Metric_type, 
-                         levels = c(
-                           "ROC_AUC (LogisticRegression)", 
-                           "ROC_AUC (RandomForestClassifier)", 
-                           "Spearman (limma)",
-                           "Pearson (limma)"
-                         ))
-  )
+      Algorithm = "Limma",
+      Method = "Statistics",
+      Aggregation = "R-values",
+      Metric_type = paste0(Metric, " (", Aggregation, ")")
+    )
 
-# Save the combined metric
-fwrite(combined_metric, file.path(path_to_save_location, "Combined_metric.csv"))
+  # Store the aggregated dataframe in the list
+  aggregated_dfs[[paste("aggregated_seed_", seed_count, sep = "")]] <- aggregated_df
+}
+aggregated_contrast_metric_dge <- bind_rows(aggregated_dfs)
+
+# DGE - raw_metric_dge
+aggregated_raw_dfs <- list()
+for (seed_count in group_seeds) {
+  
+  # If seed_count is "all", use all the seeds in the data
+  if (seed_count == "all") {
+    filtered_data <- raw_metric_dge
+  } else {
+    # Randomly sample the seeds based on the specified seed_count
+    set.seed(123)  # For reproducibility
+    sampled_seeds <- sample(unique(raw_metric_dge$Seed), seed_count)
+    
+    # Filter the data for the randomly sampled seeds
+    filtered_data <- raw_metric_dge |>
+      filter(Seed %in% sampled_seeds)
+  }
+  
+  # Perform aggregation for the filtered data
+  aggregated_raw_df <- filtered_data |>
+    filter(coef == unique(filtered_data$coef)[1]) |>
+    group_by(coef, Feature, n_test_ancestry, Ancestry) |>
+    summarise(
+      n_seeds = n(),
+      mean_value = mean(logFC, na.rm = TRUE),
+      sd_value = sd(logFC, na.rm = TRUE),
+      se_value = sd(logFC, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop"
+    )
+  
+  # Correlation
+  wide <- aggregated_raw_df |>
+    select(n_test_ancestry, Feature, mean_value) |>
+    pivot_wider(names_from = n_test_ancestry, values_from = mean_value)
+  
+  cor_pearson <- cor(wide[,-1], method = "pearson")
+  cor_spearman <- cor(wide[,-1], method = "spearman")
+  
+  # Correlation dataframes
+  cor_pearson_df <- tibble(
+      n_test_ancestry = rownames(cor_pearson), 
+      mean_value = cor_pearson[, "constant"],
+      sd_value = NA,
+      n_seeds = unique(aggregated_raw_df$n_seeds)
+    ) |>
+    filter(n_test_ancestry != "constant") |>
+    mutate(n_test_ancestry = as.numeric(n_test_ancestry)) |>
+    mutate(
+      Algorithm = "Limma",
+      Method = "Statistics",
+      Aggregation = "logFCs",
+      Metric = "Pearson",
+      Metric_type = paste0(Metric, " (", Aggregation, ")")
+    )
+  
+  cor_spearman_df <- tibble(
+      n_test_ancestry = rownames(cor_spearman), 
+      mean_value = cor_spearman[, "constant"], 
+      sd_value = NA,
+      n_seeds = unique(aggregated_raw_df$n_seeds)
+    )  |>
+    filter(n_test_ancestry != "constant") |>
+    mutate(n_test_ancestry = as.numeric(n_test_ancestry)) |>
+    mutate(
+      Algorithm = "Limma",
+      Method = "Statistics",
+      Aggregation = "logFCs",
+      Metric = "Spearman",
+      Metric_type = paste0(Metric, " (", Aggregation, ")")
+    )
+  
+  # Combine across metrics
+  combined_contrast_raw_metric <- bind_rows(
+    cor_pearson_df, 
+    cor_spearman_df
+  )
+  
+  # Store the aggregated dataframe in the list
+  aggregated_raw_dfs[[paste("aggregated_seed_", seed_count, sep = "")]] <- combined_contrast_raw_metric
+}
+aggregated_raw_metric_dge <- bind_rows(aggregated_raw_dfs)
+
+# ML - contrast_metric_ml
+aggregated_dfs <- list()
+for (seed_count in group_seeds) {
+  
+  # If "all" is specified, use all available seeds
+  if (seed_count == "all") {
+    filtered_data <- contrast_metric_ml
+  } else {
+    # Set seed for reproducibility
+    set.seed(123)  
+    # Randomly sample the required number of seeds
+    sampled_seeds <- sample(unique(contrast_metric_ml$Seed), seed_count)
+    
+    # Filter data based on sampled seeds
+    filtered_data <- contrast_metric_ml |> 
+      filter(Seed %in% sampled_seeds)
+  }
+  
+  # Perform aggregation
+  aggregated_ml_df <- filtered_data |> 
+    pivot_longer(
+      cols = c(ROC_AUC, Accuracy),
+      values_to = "Value",
+      names_to = "Metric"
+    ) |> 
+    group_by(
+      Algorithm, 
+      n_test_ancestry,
+      Metric
+    ) |>  
+    summarize(
+      n_seeds = n(),
+      mean_value = mean(Value, na.rm = TRUE),
+      sd_value = sd(Value, na.rm = TRUE),
+      se_value = sd(Value, na.rm = TRUE) / sqrt(n()),
+      .groups = "drop"
+    ) |>
+    mutate(
+      Method = "Machine learning",
+      Metric_type = paste0(Metric, " (", Algorithm, ")")
+    ) |>
+    mutate(
+      Metric_type = recode(
+        Metric_type,
+        "Accuracy (LogisticRegression)" = "Accuracy (Logistic Regression)",
+        "ROC_AUC (LogisticRegression)" = "ROC AUC (Logistic Regression)",
+        "Accuracy (RandomForestClassifier)" = "Accuracy (Random Forest)",
+        "ROC_AUC (RandomForestClassifier)" = "ROC AUC (Random Forest)"
+      )
+    )
+  
+  # Store in list
+  aggregated_dfs[[paste("aggregated_seed_", seed_count, sep = "")]] <- aggregated_ml_df
+}
+aggregated_contrast_metric_ml <- bind_rows(aggregated_dfs)
 
 # Visualize
-performance_plot <- combined_metric |>
+point_size = 0.5
+
+algorithm_labels <- c(
+  "LogisticRegression" = "Logistic Regression",
+  "RandomForestClassifier" = "Random Forest")
+
+metric_labels <- c(
+  "ROC_AUC" = "ROC AUC",
+  "Accuracy" = "Accuracy"
+)
+
+
+# ---- Perfromance statisitc (DGE) ----
+# Combine across approaches
+combined_contrast_metric_dge <- bind_rows(
+  aggregated_contrast_metric_dge,
+  aggregated_raw_metric_dge
+  ) 
+
+performance_plot <- combined_contrast_metric_dge |>
   ggplot(
     aes(
       x = n_test_ancestry,
       y = mean_value,
-      color = Metric_type
+      color = Metric,
     )
   ) +
-  geom_point(size = 2) +
-  geom_line() +
+  geom_point(
+    size = point_size
+  ) +
+  geom_line(
+    linewidth = (point_size / 2)
+  ) +
+  geom_errorbar(
+    aes(
+      ymin = mean_value - sd_value, 
+      ymax = mean_value + sd_value
+      ), 
+    linewidth = (point_size / 2)
+  ) +
+  facet_grid(
+    cols = vars(Aggregation),
+    rows = vars(n_seeds)
+  ) +
+  scale_y_continuous(
+    breaks = scales::breaks_extended(n = 3) 
+  ) +
+  labs(
+    x = "n (Testset)",
+    y = "Y",
+    color = "Method"
+  ) +
+  theme_nature_fonts() +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
+  theme(
+    panel.grid.major = element_line(color = "lightgrey", size = (point_size / 3)),
+    legend.title = element_blank(),
+    legend.position = c(1, 0.01),  
+    legend.direction = "vertical",
+    legend.justification = c(1, 0)
+  ) 
+
+# Save
+ggsave(filename = "Performance_by_sample_size_statistic.pdf", 
+       plot = performance_plot, 
+       path = path_to_save_location, 
+       width = 5, height = 3
+       )
+# ---- Perfromance machine learning (ML) ----
+performance_plot_1 <- aggregated_contrast_metric_ml |>
+  ggplot(
+    aes(
+      x = n_test_ancestry,
+      y = mean_value,
+      color = Metric
+    )
+  ) +
+  geom_point(
+    size = point_size
+  ) +
+  geom_line(
+    linewidth = (point_size / 2)
+  ) +
   geom_errorbar(
     aes(
       ymin = mean_value - sd_value, 
@@ -173,39 +357,109 @@ performance_plot <- combined_metric |>
       ), 
     width = 0.1
   ) +
+  facet_grid(
+    cols = vars(Algorithm),
+    rows = vars(n_seeds),
+    labeller = labeller(
+      Algorithm = as_labeller(algorithm_labels)
+      )
+  ) +
   scale_y_continuous(
     limits = c(0, 1.1),
     breaks = c(0.0, 0.5, 1.0)
   ) +
+  scale_color_discrete(
+    labels = metric_labels
+  ) +
   labs(
-    #title = "Performance per sample size",
-    x = "Test sample size (EUR)",
-    y = "Mean value",
+    x = "n (Testset)",
+    y = "Y",
     color = "Method"
-  )
+  ) +
+  theme_nature_fonts() +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
+  theme(
+    panel.grid.major = element_line(color = "lightgrey", size = (point_size / 3)),
+    legend.title = element_blank(),
+    legend.position = c(1, 0.01),  
+    legend.direction = "vertical",
+    legend.justification = c(1, 0)
+  ) 
 
-train_number_plot <- combined_metric |>
-  head(1) |>
+# Save
+ggsave(filename = "Performance_by_sample_size_machine_learning.pdf", 
+       plot = performance_plot_1, 
+       path = path_to_save_location, 
+       width = 4, height = 3
+       )
+
+# ---- Distriubution probabilities (ML) ----
+threshold <- 0.5
+# Conditions
+class_0 <- colnames(raw_metric_ml)[1]
+class_1 <- colnames(raw_metric_ml)[2] 
+
+distribution_probabilities <- raw_metric_ml |>
+  select(-all_of(class_0)) |>
+  mutate(
+    True_labels = as.factor(y)
+  ) |>
+  pivot_longer(
+    cols = 1,
+    names_to = "Condition",
+    values_to = "Probabilities"
+  ) |>
   ggplot(
     aes(
-      x = Ancestry,
-      y = n_train_ancestry
+      x = Condition,
+      y = Probabilities,
+      fill = True_labels
     )
   ) +
-  geom_col() +
+  geom_violin(
+    color = NA
+  ) +
+  geom_hline(
+    yintercept = threshold, 
+    color = "blue", 
+    linetype = "dashed", 
+    linewidth = point_size / 2
+  ) + 
+  facet_grid(
+    cols = vars(factor(n_test_ancestry)),
+    rows = vars(Algorithm),
+    labeller = labeller(
+      Algorithm = as_labeller(algorithm_labels)
+    )
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    breaks = c(0.0, 0.5, 1.0)
+  ) +
+  scale_fill_discrete(
+    name = "True labels",
+    labels = c(class_0, class_1)
+  ) +
   labs(
-    x = "Train ancestry",
-    y = "Sample size"
-  )
+    x = "Target condition"
+  ) +
+  theme_nature_fonts() +
+  theme_white_background() +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() 
 
-# Combine plots
-combined_plot <- train_number_plot + performance_plot + plot_layout(widths = c(1, 4)) +
-  plot_annotation(title = "Performance per sample size")
- 
 # Save
-ggsave(filename = "Performance_by_sample_size.pdf", 
-       plot = performance_plot, 
+ggsave(filename = "Distribution_probabilities.pdf", 
+       plot = distribution_probabilities, 
        path = path_to_save_location, 
-       width = 10, height = 5
+       width = 5, height = 3
        )
+
+
+
+
+
 

@@ -24,22 +24,16 @@ print("Evoking R...")
 
 # Load command line arguments
 args <- commandArgs(trailingOnly = TRUE)
-
 # Check if script is run with a command-line argument
 if (length(args) > 0) {
   yaml_file <- args[1]
-  # 1. Check if it's a valid yaml file
-  # 2. Load the yaml file
+  # Check if it's a valid YAML file
   is_yml_file(yaml_file)
   setup <- yaml.load_file(yaml_file)
-
 } else {
   print("Running interactive mode for development.")
-  # Yaml file used for development (often an actual job script)
+  # Dev settings if no command-line argument provided
   yaml_file <- "dev_settings.yml"
-  # 1. Check if it's a valid yaml file
-  # 2. Load the yaml file
-  is_yml_file(yaml_file)
   setup <- yaml.load_file(yaml_file)
 }
 
@@ -49,22 +43,23 @@ set.seed(setup$seed)
 # Load data
 adata <- read_h5ad(setup$data_path)
 
+# Load the selected feature used in ml
+output_directory <- setup$output_directory
+features <- yaml.load_file(file.path(output_directory, "Features.yml"))
+feature_n <- length(features)
 
 # Start with 'constant_split'
 print("Dealing with constant split.")
-# Load indeces
-constant_idx <- yaml.load_file(file.path(setup$output_directory, "Obs_constant.yml"))
-# Get number of samples
+# Load and subset
+constant_idx <- yaml.load_file(file.path(output_directory, "Obs_constant.yml"))
+constant_split <- adata[constant_idx, features]
 constant_n = length(constant_idx)
-# Subset the data
-constant_split <- adata[adata$obs_names %in% constant_idx, ]
 
 # Assertion: Check arrays
 # Dimensions
 stopifnot(length(constant_idx) == length(constant_split$obs_names))
 # Order
-stopifnot(all(colnames(t(constant_split$X)) ==
-                row.names(constant_split$obs[colnames(t(constant_split$X)), ])))
+stopifnot(all(colnames(t(constant_split$X)) == row.names(constant_split$obs[colnames(t(constant_split$X)), ])))
 
 # Covariate (needs to be treated differently)
 # 1. Extract the covariate, if it exists and has a meaningful value
@@ -78,85 +73,69 @@ if (!is.null(covariate_list)){
   check_covariate_conditions(constant_split$obs, covariates = covariate_types$discrete)
 }
 
-
 # Create design matrix
-constant_design <- create_design(setup$classification$output_column,
-                                 meta = constant_split$obs,
-                                 covariate = covariate_list)
+output_column <- setup$classification$output_column
+constant_design <- create_design(output_column, constant_split$obs, covariate = covariate_list)
 
-# Filter lowley expressed genes bases on 'constant_split'
-keeper_genes <- filterByExpr(t(constant_split$X), constant_design)
-# Subset features
-constant_split <- constant_split[, keeper_genes]
-
-# Save feature names (For use in ML)
-write_yaml(constant_split$var_names,
-           file.path(setup$output_directory, "Features.yml"))
-
-# Normalization 
-constant_norm <- voom(t(constant_split$X), constant_design, plot = FALSE)
-# Limma
+# Limma workflow
 print("Start differential gene expression analysis.")
-# 1. Fit the model (means model)
-# 2. Ebayes
-# 3. Extract results
+# Select normalization method
+data_type <- setup$data_type
+dge_normalization <- setup$dge_normalization
+normalization_method <- normalization_methods[[data_type]][[dge_normalization]]
+
+# Transpose (rows = Genes, cols = Samples)
+constant_split_t <- t(constant_split$X)
+
+# Normalization
+constant_norm <- normalization_method(constant_split_t, constant_design)
+
+# Fit the model (means model)
 constant_limma_fit <- lmFit(constant_norm, design = constant_design)
 constant_limma_fit <- eBayes(constant_limma_fit)
 constant_means_res <- extract_results(constant_limma_fit)
 
-# Hypothesis testing
-print("Fit contrast matrix")
+# Create contrast matrix 
+print("Fit contrast.")
 comparison  <- setup$classification$comparison
 contrast_matrix_constant <- create_contrast(colnames(constant_design), conditions = comparison)
-# 1. Fit contrast
-# 2. Ebayes
-# 3. Extreact results
+# Fit contrast
 constant_limma_fit_contrast <- contrasts.fit(constant_limma_fit, contrast_matrix_constant)
 constant_limma_fit_contrast <- eBayes(constant_limma_fit_contrast)
 constant_contrast_res <- extract_results(constant_limma_fit_contrast)
-
-# From the Toptable only need logFCs are interesting
-# Rename the logFC column to indicate they are from the 'constant_split'
+# Results constant split
 constant_logFC <- constant_contrast_res |>
   select(coef, Feature, logFC) |>
   rename(logFC_constant = logFC) 
 
-# Load subsets
+# Subsets
 vscratch_dir <- setup$output_directory
 match_pattern <- paste0("Obs_proportion_")
 
 # Extracting all folders in the 'vscratch_dir' that match 'match_pattern'
-# 1. List all folders in 'vscratch_dir'
-# 2. With 'match_pattern' extract matching folders
 all_vscratch_dir <- list.files(vscratch_dir, full.names = TRUE, recursive = FALSE)
 match_vscratch_dir <- grep(match_pattern, all_vscratch_dir, value = TRUE)
 
 # Create a list with all subsets
-# 1. Filters 'adata' for observations
-# 2. Filters 'adata' for features
 subset_list <- list()
 for (file in match_vscratch_dir){
     # Filter proportion
-    proportion_pattern <- gsub("Obs_proportion_", "", basename(file))  # Remove prefix
-    proportion_pattern <- gsub(".yml", "", proportion_pattern)         # Remove suffix .yml
+    proportion_pattern <- gsub("Obs_proportion_", "", basename(file))  
+    proportion_pattern <- gsub(".yml", "", proportion_pattern)        
     proportion_pattern <- gsub("_", ".", proportion_pattern)  
-
     # Observations
     index <- yaml.load_file(file)
-    # Subset by index and filtered features
-    subset <- adata[adata$obs_names %in% index, keeper_genes]
+    subset <- adata[index, features]
     # Append to list
    subset_list[[proportion_pattern]] <- subset
 }
 
 # Limma analysis for all other subsets
-# 1. Initalize a instance to store results
-# 2. Iterate over all subsets in 'subset_list'
 logFC_results <- NULL
 for (i in seq_along(subset_list)){
 
   prop <- names(subset_list)[[i]]
-  print(paste("Dealing with", prop, "% of data."))
+  print(paste("Dealing with", prop, "of data."))
 
   subset <- subset_list[[i]]
   # Check if observations in subset are unique
@@ -173,33 +152,24 @@ for (i in seq_along(subset_list)){
     check_covariate_conditions(subset$obs, covariates = covariate_types$discrete)
   }
 
-  # Limma workflow
-  subset_design <- create_design(setup$classification$output_column, 
-                                 meta = subset$obs,
-                                 covariate = covariate_list)
-  # Normalization                               
-  subset_norm <- voom(t(subset$X), subset_design, plot = FALSE)
+  # Design
+  output_column <- setup$classification$output_column
+  subset_design <- create_design(output_column, meta = subset$obs, covariate = covariate_list)
+  # Transpose
+  subset_t <- t(subset$X)
+  # Normalization
+  subset_norm <- normalization_method(subset_t, design = subset_design)
   # Limma
-  print("Start differential gene expression analysis.")
-  # 3. Fit the model (means model)
-  # 4. Ebayes
-  # 5. Extract results
   subset_limma_fit <- lmFit(subset_norm, design = subset_design)
   subset_limma_fit <- eBayes(subset_limma_fit)
   susbet_means_res <- extract_results(subset_limma_fit)
-
-  # Hypothesis testing
-  print("Fit contrast matrix")
+  # Contrast
   contrast_matrix_subset <- create_contrast(colnames(subset_design), conditions = comparison)
-  # 1. Fit contrast
-  # 2. Ebayes
-  # 3. Extract results
+  # Fit contrast
   subset_limma_fit_contrast <- contrasts.fit(subset_limma_fit, contrast_matrix_subset)
   subset_limma_fit_contrast <- eBayes(subset_limma_fit_contrast)
   subset_contrast_res <- extract_results(subset_limma_fit_contrast)
-
-  # Extract logFC for correlation analysis
-  # Uses the subset name to distinguish 
+  # Results
   subset_logFC <- subset_contrast_res |>
     select(coef, Feature, logFC) |>
     rename_with(~ paste0("logFC_", n_obs), .cols = logFC) 
@@ -218,10 +188,27 @@ for (i in seq_along(subset_list)){
 # Add the logFC of the 'constant_split' (ground truth)
 logFC_results <- inner_join(logFC_results, constant_logFC, by = c("coef", "Feature"))
 
-# Correlation of all numeric columns (logFC)
-# 1. Pearson
-# 2. Spearman
-# Only keep correlation with 'constant_split'
+# Per gene metric
+raw_logFC <- logFC_results |>
+  pivot_longer(
+    cols = starts_with("logFC"),
+    names_to = "n_test_ancestry", 
+    values_to = "logFC"
+  ) |>
+  mutate(
+    n_test_ancestry = str_remove(n_test_ancestry, "logFC_")
+  ) |>
+  mutate(
+      Seed = setup$seed,
+      Ancestry = toupper(setup$classification$train_ancestry),
+      n_train_ancestry = constant_n,
+      Status = ifelse(n_test_ancestry == "constant", "Train", "Test")
+  )
+
+# Save
+fwrite(raw_logFC, file.path(setup$output_directory, "LogFCs.csv"))
+
+# Summarized metric
 pearson <- compute_correlation(data = logFC_results, method = "pearson") |>
   filter(str_detect(V2, "constant"))
 spearman <- compute_correlation(data = logFC_results, method = "spearman") |>
@@ -238,7 +225,7 @@ metric_df <- inner_join(pearson, spearman, by = c("V1", "V2")) |>
   )
 
 # Save metric Dataframe
-fwrite(metric_df, file.path(setup$output_directory, "Metric_dge.csv"))
+fwrite(metric_df, file.path(setup$output_directory, "Contrast_metric_dge.csv"))
 
 
 if (setup$visual_val){
