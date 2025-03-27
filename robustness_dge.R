@@ -140,7 +140,7 @@ for (prop in setup$proportion){
   # Select normalization method
   data_type <- setup$data_type
   dge_normalization <- setup$dge_normalization
-  normalization_method <- normalization_methods[[data_type]][[dge_normalization]]
+  normalization_method <- normalization_methods[[data_type]][[dge_normalization]]$"function"
   
   # Transpose (rows = Genes, cols = Samples)
   train_data_t = t(train_data$X)

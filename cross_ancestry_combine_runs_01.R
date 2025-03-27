@@ -38,7 +38,7 @@ if (length(args) > 0) {
 } else {
   print("Running interactive mode for development.")
   # Yaml file used for development (often an actual job script)
-  yaml_file <- "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_ADMIX.yml"
+  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_EAS.yml"
   # 1. Check if it's a valid yaml file
   # 2. Load the yaml file
   is_yml_file(yaml_file)
@@ -79,11 +79,15 @@ match_vscratch_dir <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
 # DGE
 contrast_metric_dge <- fload_data(match_vscratch_dir, file = "Contrast_metric_dge.csv")
 raw_metric_dge <- fload_data(match_vscratch_dir, file = "LogFCs.csv")
+# Save
+fwrite(contrast_metric_dge, file.path(path_to_save_location, "Contrast_metric_dge.csv"))
+
 
 # ML
 contrast_metric_ml <- fload_data(match_vscratch_dir, file = "Contrast_metric_ml.csv")
 raw_metric_ml <- fload_data(match_vscratch_dir, file = "Probabilities.csv")
-
+# Save
+fwrite(contrast_metric_ml, file.path(path_to_save_location, "Contrast_metric_ml.csv"))
 
 # Statisitcs
 # DGE
@@ -323,7 +327,7 @@ modified_all_vscratch_dir_in <- list.dirs(vscratch_dir_in_combined_runs, full.na
 modified_match_vscratch_dir <- grep(modified_pattern, modified_all_vscratch_dir_in, value = TRUE)
 
 # Load data
-interactions <- fload_data(modified_match_vscratch_dir, file = "Interactions.csv")
+interactions <- fload_data(modified_match_vscratch_dir, file = "Interaction.csv")
 baseline <- fload_data(modified_match_vscratch_dir, file = "Baseline.csv")
 
 # Filter sig. features

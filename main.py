@@ -264,12 +264,29 @@ if __name__ == "__main__":
 
     # Ancestry specific settings
     SETTINGS_FILES = [
-        "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml",
-        "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_AFR.yml", 
-        "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_EAS.yml"
-        # "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_ADMIX.yml",
-        # "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_AFR.yml",
-        # "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_EAS.yml"
+        # BRCA
+        # "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml",
+        # "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_AFR.yml", 
+        # "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_EAS.yml"
+
+        # "data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_ADMIX.yml",
+        # "data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_AFR.yml", 
+        # "data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_EAS.yml"
+
+        # "data/inputs/settings/PanCanAtlas_BRCA_RPPA_basal_vs_non-basal_EUR_to_ADMIX.yml",
+        # "data/inputs/settings/PanCanAtlas_BRCA_RPPA_basal_vs_non-basal_EUR_to_AFR.yml", 
+        # "data/inputs/settings/PanCanAtlas_BRCA_RPPA_basal_vs_non-basal_EUR_to_EAS.yml"
+
+        # LUSC LUAD
+        # "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_LUSC_vs_LUAD_EUR_to_ADMIX.yml",
+        # "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_LUSC_vs_LUAD_EUR_to_AFR.yml",
+        # "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_LUSC_vs_LUAD_EUR_to_EAS.yml"
+
+        "data/inputs/settings/Firehose_LUSC_LUAD_BETA_LUSC_vs_LUAD_EUR_to_ADMIX.yml",
+        "data/inputs/settings/Firehose_LUSC_LUAD_BETA_LUSC_vs_LUAD_EUR_to_AFR.yml",
+        "data/inputs/settings/Firehose_LUSC_LUAD_BETA_LUSC_vs_LUAD_EUR_to_EAS.yml"
+
+
     ]
     # Pattern to extract 'eur_to_region'
     pattern = r"EUR_to_[A-Z]+"
@@ -368,8 +385,9 @@ if __name__ == "__main__":
         )
 
         # Add to combine_ancestries_wait_jobs
-        combine_ancestries_wait_jobs.extend([cross_ancestry_combine_runs_job, robustness_combine_runs_job])
-
+        combine_ancestries_wait_jobs.extend(
+            [cross_ancestry_combine_runs_job, robustness_combine_runs_job]
+            )
 
     # This analysis only needs to run once per comparison
     # "descriptive_model_building"
@@ -416,19 +434,19 @@ if __name__ == "__main__":
         cpus=1
     )
 
-    # 'Combine ancestries' script
-    COMBINE_ANCESTRIES_SCRIPT = "cross_ancestry_combine_ancestries.R"
-    NAME = "combine_ancestries"
-    combine_ancestries_wait_jobs.append(eur_subsetting_combine_runs_job)
+    # # 'Combine ancestries' script
+    # COMBINE_ANCESTRIES_SCRIPT = "cross_ancestry_combine_ancestries.R"
+    # NAME = "combine_ancestries"
+    # combine_ancestries_wait_jobs.append(eur_subsetting_combine_runs_job)
     
-    job_name = submit_single_job(
-            settings_file=SETTINGS_FILE,
-            script_name=COMBINE_ANCESTRIES_SCRIPT,
-            analysis_name=NAME,
-            singularity=SINGULARITY,
-            hostname=HOSTNAME,
-            wait_for_jobs=True,
-            job_name_list=combine_ancestries_wait_jobs,
-            cpus=1
-        )
+    # job_name = submit_single_job(
+    #         settings_file=SETTINGS_FILE,
+    #         script_name=COMBINE_ANCESTRIES_SCRIPT,
+    #         analysis_name=NAME,
+    #         singularity=SINGULARITY,
+    #         hostname=HOSTNAME,
+    #         wait_for_jobs=True,
+    #         job_name_list=combine_ancestries_wait_jobs,
+    #         cpus=1
+    #     )
     

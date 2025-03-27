@@ -30,7 +30,7 @@ class Setup(dict):
         
         # Open the default config file
         try:
-            default_config = yaml.safe_load(Path('default_settings.yml').read_text())
+            default_config = yaml.safe_load(Path("default_settings.yml").read_text())
         except yaml.YAMLError as exc:
             print(exc)
 
@@ -51,7 +51,7 @@ class Setup(dict):
             final_config["id"] = uuid.uuid4().hex.upper()[:10]
         
         # Print statement to inform user about their analysis
-        print(f'New analysis with id: {final_config['id']}; created: {final_config['date']}')
+        print(f"New analysis with id: {final_config["id"]}; created: {final_config["date"]}")
 
         # Check required settings
         required_settings = ["classification", "data_path", "data_type", "output_directory", "seed"]
@@ -61,23 +61,23 @@ class Setup(dict):
         # Check required settings in classification
         required_settings = ["comparison", "output_column", "train_ancestry", "infer_ancestry", "ancestry_column"]
         for i in required_settings:
-             assert i in final_config['classification'], f'No {i} in classification but required!'
+             assert i in final_config["classification"], f"No {i} in classification but required!"
         
         # Check that covariate has to be a list
         assert "covariate" not in final_config["classification"] or isinstance(final_config["classification"]["covariate"], list), \
             "If covariate exists, it must be a list."
 
         # Check how many classes
-        if len(final_config['classification']['comparison']) > 2:
-            final_config['classification'].update({'multiclass': True})
-            print(f'Multiclass problem comparing: {final_config['classification']['comparison']}.')
+        if len(final_config["classification"]["comparison"]) > 2:
+            final_config["classification"].update({"multiclass": True})
+            print(f"Multiclass problem comparing: {final_config["classification"]["comparison"]}.")
 
-        elif len(final_config['classification']['comparison']) == 2:
-            final_config['classification'].update({'multiclass': False})
-            print(f'Binaryclass problem comparing: {final_config['classification']['comparison']}.')
+        elif len(final_config["classification"]["comparison"]) == 2:
+            final_config["classification"].update({"multiclass": False})
+            print(f"Binaryclass problem comparing: {final_config["classification"]["comparison"]}.")
         
         else:
-            print(f'Cant do a classification with one assigned class in comparison: {final_config['classification']['comparison']}.')
+            print(f"Cant do a classification with one assigned class in comparison: {final_config["classification"]["comparison"]}.")
 
         # Init
         self.final_config = final_config
@@ -108,13 +108,14 @@ class Setup(dict):
         assert isinstance(self.seed, int)
 
         # Check data
-        assert isinstance(self.data_path, str)
+        assert isinstance(self.data_path, str), \
+            f"{self.data_path} needs to be a string."
         assert os.path.exists(self.data_path), \
             f"{self.data_path} does not exist."
         assert self.data_path.endswith(".h5ad"), \
             f"Only support data files in h5ad format."
         # Type
-        assert self.data_type in ["expression", "methylation"], \
+        assert self.data_type in ["expression", "methylation", "protein"], \
             f"Invalid data type: {self.data_type}. Expected 'expression' or 'methylation'."
 
 
@@ -469,7 +470,7 @@ class ScriptRunner():
         subprocess.run([self.r_execute, "--version"])
 
 # Normalization
-def normalize_log(X, e=0.01):
+def normalize_log(X, e=1):
     """
     Natural log transformation.
     X: Vector or Matrix to be transformed.
@@ -515,36 +516,92 @@ def beta_to_mvalue(X, epsilon=0.00001):
 
     return m_values
 
+def raw(X):
+    return(X)
+
 # Dictionary to look up methods to normalize data
 ml_normalization_methods = {
     "expression": {
         "normalize_log": normalize_log,
-        "normalize_minmax": normalize_minmax
+        "normalize_minmax": normalize_minmax,
+        "raw": raw
     },
     "methylation": {
         "beta_to_mvalue": beta_to_mvalue,
         "normalize_log": normalize_log,
-        "normalize_minmax": normalize_minmax
+        "normalize_minmax": normalize_minmax,
+        "raw": raw
+    },
+    "protein": {
+        "raw": raw
     }
 }
 
 # Filtering features
-def cpm(data, log=False):
+# TMM Norm factors
+def calculate_tmm_norm_factors(data):
     """
-    Converts raw counts to CPM (Counts Per Million).
+    Calculates TMM normalization factors for RNA-Seq data.
     
     Parameters:
-    data (numpy.ndarray): Raw counts (samples x genes).
-    log (bool): Whether to log-transform the CPM values (default is False).
+    - data: A pandas DataFrame with samples as columns and genes as rows.
     
     Returns:
-    numpy.ndarray: CPM or logCPM values (samples x genes).
+    - A pandas Series containing the normalization factors for each sample.
     """
+    # Step 1: Compute the geometric mean of the counts for each gene (row)
+    geometric_mean = data.apply(lambda x: np.exp(np.mean(np.log(x + 1))), axis=1)
+    
+    # Step 2: Compute M-values (log-ratio) between each sample and the geometric mean
+    M_values = data.div(geometric_mean, axis=0)  # Element-wise division by geometric mean
+    M_values = np.log2(M_values + 1)  # Add pseudocount for stability
+    
+    # Step 3: Trim the extreme M-values to reduce the influence of highly differentially expressed genes
+    trim_percent = 0.05
+    def trim_m_values(x):
+        lower = np.quantile(x, trim_percent)
+        upper = np.quantile(x, 1 - trim_percent)
+        x[x < lower] = lower
+        x[x > upper] = upper
+        return x
+    
+    M_values_trimmed = M_values.apply(trim_m_values, axis=0)
+    
+    # Step 4: Calculate the normalization factors
+    # For each sample, calculate the median of the trimmed M-values for all genes
+    norm_factors = M_values_trimmed.median(axis=0)
+    
+    # Normalize by the median normalization factor
+    norm_factors = norm_factors / np.median(norm_factors)
+    
+    return norm_factors
+# CPM
+def cpm(data, norm_factors=None, log=False):
+    """
+    Converts raw counts to CPM (Counts Per Million), optionally using normalization factors.
+    Optionally, log-transform the CPM values.
+    
+    Parameters:
+    - data: A pandas DataFrame with rows as samples and columns as genes (samples x genes).
+    - norm_factors: A pandas Series (or array) with normalization factors for each sample. Default is None.
+    - log: Boolean value, whether to log-transform the CPM values. Default is False.
+    
+    Returns:
+    - A pandas DataFrame with CPM or log-transformed CPM values (samples x genes).
+    """
+    # Check if the number of samples in the data matches the length of norm_factors
+    if norm_factors is not None and len(norm_factors) != data.shape[0]:
+        raise ValueError("The number of samples must match the length of the normalization factors.")
+    
+    # If norm_factors are provided, apply them to the raw counts
+    if norm_factors is not None:
+        data = data.div(norm_factors, axis=0)  # Element-wise division by norm_factors
+    
     # Calculate total reads for each sample (sum of all gene counts in each sample)
     total_reads_per_sample = data.sum(axis=1)
     
     # Convert raw counts to CPM
-    cpm_data = (data.T / total_reads_per_sample).T * 1e6
+    cpm_data = data.div(total_reads_per_sample, axis=0) * 1e6
     
     # Optionally, log-transform the CPM data
     if log:
@@ -552,94 +609,108 @@ def cpm(data, log=False):
     
     return cpm_data
 
-def min_signal_by_percentile(data, percentile=25):
+# By signal
+def signal_by_percentile(data, percentile):
     """
-    Calculates the min_counts threshold for genes based on the specified percentile of their total counts.
+    Calculates the signal threshold for genes based on the specified percentile of their total counts.
     
     Parameters:
-    data (numpy.ndarray): Expression data (samples x genes).
-    percentile (float): Percentile to calculate the min_counts threshold (default: 25).
+    - data: A pandas DataFrame with rows as samples and columns as genes (samples x genes).
+    - percentile: The percentile to calculate the signal threshold (e.g., 25 for 25th percentile).
     
     Returns:
-    float: The calculated min_signal threshold for genes based on the specified percentile.
+    - A numeric value representing the calculated signal threshold for genes based on the specified percentile.
     """
-    # Calculate total counts for each gene across all samples (sum along rows)
-    gene_signal = np.sum(data, axis=0)
+    # Calculate total signal for each gene across all samples (sum along columns)
+    gene_signal = data.sum(axis=0)
     
     # Calculate the threshold using the specified percentile
-    min_signal = np.percentile(gene_signal, percentile)
+    signal_threshold = np.percentile(gene_signal, percentile)
     
-    return min_signal
+    return signal_threshold
 
-def min_variance_by_percentile(data, percentile=25):
+def filter_by_signal(data, min_signal=10, max_signal=None, min_samples_ratio=0.5):
     """
-    Calculates the variance threshold for methylation genes based on the specified percentile.
-
-    Parameters:
-    data (numpy.ndarray): Methylation beta values (samples x genes).
-    percentile (float): Percentile to calculate the variance threshold (default: 25).
-
-    Returns:
-    float: The calculated variance threshold based on the specified percentile.
-    """
-    # Compute variance for each gene across samples
-    gene_variances = np.var(data, axis=0)
-
-    # Determine the variance threshold at the given percentile
-    min_variance = np.percentile(gene_variances, percentile)
-
-    return min_variance
-
-def filter_by_signal(data, min_signal=10, min_samples_ratio=0.5):
-    """
-    Filters genes based on minimum expression counts and presence in at least a given fraction of samples.
+    Filters genes based on minimum and maximum signal and presence in at least a given fraction of samples.
     
     Parameters:
-    data (numpy.ndarray): Expression data (samples x genes).
-    min_signal (int): Minimum total signal required for a gene (default: 10).
-    min_samples_ratio (float): Minimum fraction of samples a gene must be expressed in (default: 50%).
+    - data: A pandas DataFrame with rows as samples and columns as genes (samples x genes).
+    - min_signal: The minimum total signal required for a gene (default: 10).
+    - max_signal: The maximum total signal for a gene (optional).
+    - min_samples_ratio: The minimum fraction of samples a gene must be expressed in (default: 50%).
     
     Returns:
-    np.array: Boolean array indicating which genes were retained.
+    - A boolean pandas Series indicating which genes were retained.
     """
-    num_samples = data.shape[0]  # Number of samples
-    min_samples = int(min_samples_ratio * num_samples)  # Compute threshold based on ratio
+    # Calculate the number of samples
+    num_samples = data.shape[0]
     
-    # Calculate total counts for each gene across all samples
-    gene_counts = np.sum(data, axis=0)
+    # Calculate the minimum number of samples for the given ratio
+    min_samples = int(np.floor(min_samples_ratio * num_samples))
     
-    # Calculate how many samples express each gene (non-zero counts)
-    gene_samples = np.sum(data > 0, axis=0)
+    # Calculate total signal for each gene across all samples (sum along columns)
+    gene_signal = data.sum(axis=0)
     
-    # Filter genes based on min_counts and min_samples_ratio
-    filtered_genes = (gene_counts >= min_signal) & (gene_samples >= min_samples)
+    # Calculate how many samples express each gene (non-zero signal counts)
+    gene_samples = (data > 0).sum(axis=0)
+    
+    # Filter genes based on min_signal, max_signal, and min_samples_ratio
+    if max_signal is None:
+        # If max_signal is not provided, only filter by min_signal and sample count
+        filtered_genes = (gene_signal >= min_signal) & (gene_samples >= min_samples)
+    else:
+        # If max_signal is provided, filter by both min_signal and max_signal
+        filtered_genes = (gene_signal >= min_signal) & (gene_signal <= max_signal) & (gene_samples >= min_samples)
     
     return filtered_genes
 
+# By variance
+def variance_by_percentile(data, percentile=25):
+    """
+    Calculates the variance threshold for genes based on the specified percentile.
+    
+    Parameters:
+    - data: A pandas DataFrame with rows as samples and columns as genes (samples x genes).
+    - percentile: The percentile to calculate the variance threshold (default: 25).
+    
+    Returns:
+    - A numeric value representing the calculated variance threshold based on the specified percentile.
+    """
+    # Compute variance for each gene across samples (variance along columns)
+    gene_variances = data.var(axis=0)
+    
+    # Determine the variance threshold at the given percentile
+    variance_threshold = np.percentile(gene_variances, percentile)
+    
+    return variance_threshold
+
 def filter_by_variance(data, var_threshold=0.01, min_samples_ratio=0.5):
     """
-    Filters methylation genes based on variance and presence in a minimum fraction of samples.
-
+    Filters methylation genes based on variance and presence in at least a given fraction of samples.
+    
     Parameters:
-    data (numpy.ndarray): Methylation beta values (samples x genes).
-    var_threshold (float): Minimum variance threshold to retain a gene (default: 0.01).
-    min_samples_ratio (float): Minimum fraction of samples where the gene must be methylated above 0 (default: 50%).
-
+    - data: A pandas DataFrame with rows as samples and columns as genes (samples x genes).
+    - var_threshold: The minimum variance threshold to retain a gene (default: 0.01).
+    - min_samples_ratio: The minimum fraction of samples where the gene must be methylated above 0 (default: 50%).
+    
     Returns:
-    np.array: Boolean array indicating which genes are retained.
+    - A boolean pandas Series indicating which genes were retained.
     """
-    num_samples = data.shape[0]  # Total number of samples
-    min_samples = int(min_samples_ratio * num_samples)  # Compute sample threshold
-
-    # Calculate variance for each gene across samples
-    gene_variances = np.var(data, axis=0)
-
-    # Count the number of samples where beta value > 0
-    methylated_samples = np.sum(data > 0, axis=0)
-
-    # Apply both filters
+    # Calculate the number of samples
+    num_samples = data.shape[0]
+    
+    # Calculate the minimum number of samples for the given ratio
+    min_samples = int(np.floor(min_samples_ratio * num_samples))
+    
+    # Calculate variance for each gene across samples (variance along columns)
+    gene_variances = data.var(axis=0)
+    
+    # Count how many samples have a methylation value > 0 for each gene (non-zero beta value)
+    methylated_samples = (data > 0).sum(axis=0)
+    
+    # Filter genes based on variance threshold and the number of methylated samples
     filtered_genes = (gene_variances > var_threshold) & (methylated_samples >= min_samples)
-
+    
     return filtered_genes
 
 

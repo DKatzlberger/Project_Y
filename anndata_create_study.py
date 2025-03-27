@@ -7,12 +7,15 @@ import numpy as np
 # 1. Molecular data -> adata.X
 # 2. Meta data -> adata.obs
 # 3. Output path
-molecular_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/protein/brca_tcga_pan_can_atlas_2018.csv"
-meta_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/meta_tcga_pan_can_atlas_protein.csv"
-path_to_save_location = "data/inputs/PanCanAtlas_BRCA_raw_RPPA_subtypeNAremoved.h5ad"
+molecular_data_path = "data/downloads/cbioportal/tcga_firehose/methylation/brca_tcga.csv"
+
+meta_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/meta_tcga_pan_can_atlas_expression.csv"
+
+path_to_save_location = "data/inputs/PanCanAtlas_BRCA_raw_BETA_subtypeNAremoved.h5ad"
 # Load the data
 molecular_data = pd.read_csv(molecular_data_path)
 meta_data = pd.read_csv(meta_data_path)
+# meta_data[meta_data["studyId"] == "brca_tcga_pan_can_atlas_2018"]["CANCER_TYPE_DETAILED"].unique()
 
 # Subset meta data 
 matched_meta_data = meta_data[meta_data["sampleId"].isin(molecular_data["sampleId"])]
@@ -58,6 +61,7 @@ adata.obs["AGE"] = adata.obs["AGE"].cat.codes.astype(int)
 adata.obs.columns = map(str.lower, adata.obs.columns)
 # Replace spaces with '_'
 adata.obs = adata.obs.map(lambda x: x.replace(' ', '_') if isinstance(x, str) else x)
+adata.obs["cancer_type_detailed"].unique()
 
 # Rename some columns
 column_mapping = {

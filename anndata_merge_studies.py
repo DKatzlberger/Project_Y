@@ -2,11 +2,12 @@ import pandas as pd
 import anndata as ad
 import numpy as np
 
-study_I_path = "data/downloads/cbioportal/tcga_pan_can_atlas/expression/lusc_tcga_pan_can_atlas_2018.csv"
-study_II_path= "data/downloads/cbioportal/tcga_pan_can_atlas/expression/luad_tcga_pan_can_atlas_2018.csv"
+study_I_path = "data/downloads/cbioportal/tcga_pan_can_atlas/protein/lusc_tcga_pan_can_atlas_2018.csv"
+study_II_path= "data/downloads/cbioportal/tcga_pan_can_atlas/protein/luad_tcga_pan_can_atlas_2018.csv"
+
 meta_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/meta_tcga_pan_can_atlas_expression.csv"
 # Name
-path_to_save_location = "data/inputs/PanCanAtlas_LUSC_LUAD_raw_RSEM_subtypeNAremoved.h5ad"
+path_to_save_location = "data/inputs/PanCanAtlas_LUSC_LUAD_raw_RPPA_subtypeNAremoved.h5ad"
 # Load the data
 study_I = pd.read_csv(study_I_path)
 study_II = pd.read_csv(study_II_path)
@@ -15,14 +16,21 @@ meta_data = pd.read_csv(meta_data_path)
 # Concat rowwise
 study_merged = pd.concat([study_I, study_II])
 
+num_cols_with_na = study_merged.isna().any().sum()
+# Remove NA columns
+study_merged = study_merged.dropna(axis=1)
+assert study_merged.isna().sum().sum() == 0, "There are still NaN values in the DataFrame!"
+
 # Subset meta data to only include samples that are in molecular data
-matched_meta_data = meta_data[meta_data['sampleId'].isin(study_merged['sampleId'])]
+matched_meta_data = meta_data[meta_data["sampleId"].isin(study_merged["sampleId"])]
+matched_study_merged = study_merged[study_merged["sampleId"].isin(matched_meta_data["sampleId"])]
 
 # Check the number of unique samples
-assert study_merged['sampleId'].nunique() == matched_meta_data['sampleId'].nunique()
+assert study_merged["sampleId"].nunique() == matched_meta_data["sampleId"].nunique()
+assert matched_study_merged["sampleId"].nunique() == matched_meta_data["sampleId"].nunique()
 
-#Counts
-counts = study_merged.select_dtypes(include=np.number)
+# Counts
+counts = matched_study_merged.select_dtypes(include=np.number).reset_index(drop=True)
 # Observations (in form of patient_id)
 # Check if they are unique
 assert matched_meta_data["patientId"].is_unique
@@ -30,7 +38,7 @@ observations = matched_meta_data["patientId"].values
 # Drop so its not doubled
 matched_meta_data = matched_meta_data.drop(columns="patientId")
 # Features 
-features = study_merged.select_dtypes(include=np.number).columns
+features = matched_study_merged.select_dtypes(include=np.number).columns
 
 # Creating Anndata:
 adata = ad.AnnData(counts)

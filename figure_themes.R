@@ -1,11 +1,11 @@
 # COLORS
 genetic_ancestry_colors <- c(
-  "admix"= "#ff4d4d", 
-  "afr" = "#ff9900", 
-  "amr" =  "#33cc33",
-  "eur" = "#3399ff", 
-  "eas" = "#cc33ff", 
-  "sas" = "#ffcc00"
+  "admix" = "#ff4d4d", 
+  "afr"   = "#ff9900", 
+  "amr"   = "#33cc33",
+  "eur"   = "#3399ff", 
+  "eas"   = "#cc33ff", 
+  "sas"   = "#ffcc00"
   )
 
 # THEMES
@@ -66,29 +66,169 @@ theme_zero_margin <- function(...){
 }
 
 # PLOTS
-# Save_function
+# Save function
 save_ggplot <- function(plot, save_path, width = 5, height = 5, with_legend = TRUE) {
-  # Saves a ggplot object with or without the legend.
-  # Args:
-  #   plot (ggplot): The ggplot object to save.
-  #   save_path (string): The file path to save the plot.
-  #   width (numeric): Width of the saved plot (default: 8).
-  #   height (numeric): Height of the saved plot (default: 6).
-  #   with_legend (logical): Whether to keep the legend (default: TRUE).
+  # Try to save the plot
+  tryCatch({
+    # Check if the plot is NULL or not a ggplot object
+    if (is.null(plot) || !inherits(plot, "gg")) {
+      warning("The plot variable is not assigned or is invalid. The plot will not be saved.")
+      return(NULL)  # Exit the function gracefully
+    }
+
+    # Optionally remove the legend if requested
+    if (!with_legend) {
+      plot <- plot + theme(legend.position = "none")  # Remove legend if needed
+    }
+
+    # Save the plot to a file
+    ggsave(filename = save_path, plot = plot, width = width, height = height)
+    
+    # Remove the plot from the global environment using the name of the variable
+    plot_name <- deparse(substitute(plot))
+    rm(list = plot_name, envir = .GlobalEnv)
+
+  }, error = function(e) {
+    # If an error occurs, catch it and show a message without stopping the script
+    warning("Error in creating/saving the plot: ", conditionMessage(e))
+    return(NULL)  # Exit gracefully on error
+  })
   
-  if (!with_legend) {
-    plot <- plot + theme(legend.position = "none")  # Remove legend if needed
-  }
-  
-  ggsave(filename = save_path, plot = plot, width = width, height = height)
+  invisible()  # Ensures nothing is returned after deletion
 }
 
+# DESCRIPTIVE STATISTICS
+plot_density_of_samples <- function(data_matrix, n_samples = 12, x_axis_label) {
+
+  # Extract the first n samples (rows) from the matrix
+  data_subset <- data_matrix[1:n_samples, ]
+  
+  # Convert the matrix to a data frame and reshape it to long format using native pipe
+  data_long <- data_subset |>
+    as.data.frame() |>
+    rownames_to_column("Patient") |>
+    pivot_longer(
+      cols = -Patient, 
+      names_to = "Gene", 
+      values_to = "Value"
+    )
+  
+  # Plot density for the first n samples
+  p <- ggplot(
+    data_long, 
+    aes(
+      x = Value, 
+      color = Patient
+    )
+  ) +
+  geom_density(
+    fill = NA
+  ) +
+  labs(
+    x = x_axis_label,  
+    y = "Density"
+  ) +
+  guides(
+    color = guide_legend(ncol = 3)     
+  ) + 
+  theme_nature_fonts() +
+  theme_white_background() +
+  theme_small_legend() +
+  theme(
+    legend.title = element_blank()
+  )
+  
+  return(p)
+}
+
+plot_qq_of_genes <- function(data_matrix, n_features = 10) {
+
+  # Convert matrix to a long format (samples x genes)
+  expression_df <- as.data.frame(data_matrix) |>
+    pivot_longer(
+      cols = everything(), 
+      names_to = "Gene", 
+      values_to = "Expression"
+    ) 
+
+  # Filter features
+  expression_df <- expression_df |>
+      filter(Gene %in% names(as.data.frame(data_matrix))[1:n_features])
+
+  # Calculate Pearson correlation for each gene (Sample Quantiles vs Theoretical Quantiles)
+  correlation_values <- expression_df |>
+    group_by(Gene) |>
+    summarize(
+      correlation = cor(Expression, qqnorm(Expression, plot.it = FALSE)$x),
+      .groups = 'drop'
+    )
+  
+  # Merge
+  expression_df <- expression_df |>
+    left_join(correlation_values, by = "Gene")
+
+  p <- ggplot(
+    expression_df, 
+    aes(
+      sample = Expression
+    )
+  ) +
+    stat_qq(
+      size = 0.5,
+      shape = 1
+    ) +
+    stat_qq_line(
+      linewidth = (0.5 / 2)
+    ) +
+    geom_text(
+      aes(
+        x = -Inf, 
+        y = Inf, 
+        label = paste("Pearson: ", round(correlation, 3)),
+        hjust = -0.1, 
+        vjust = 1.1
+      ), 
+      size = 2,
+      fontface = "plain"
+    ) +
+    facet_grid(
+      cols = vars(Gene)
+    ) +
+    labs(
+      x = "Theoretical Quantiles", 
+      y = "Sample Quantiles"
+    ) +
+    theme_nature_fonts() +
+    theme_white_background() +
+    theme_white_strip()
+  
+  return(p)
+}
+
+# INTERACTIONS
 # Mean variance trend plot (Voom like plot)
 mean_variance_trend <- function(data, x_axis_label) {
+  # Generate a mean-variance trend plot (Voom-like plot).
   
-  # Step 1: Compute mean and standard deviation for raw counts (no transformation)
-  mean_raw <- rowMeans(data)  # Mean 
-  sd_raw <- apply(data, 1, sd)  # Standard deviation 
+  # This function visualizes the relationship between the mean and variance of gene expression
+  # levels across samples. It assumes that **samples are rows** and **genes are columns**.
+
+  # The function computes the mean and standard deviation of each gene across samples,
+  # applies a square root transformation to the standard deviation, and plots the trend
+  # using a LOESS smoother.
+
+  # Args:
+  #     data (matrix or data frame): A numeric matrix or data frame where **rows represent samples**
+  #                                  and **columns represent genes**. Expression values should be non-negative.
+  #     x_axis_label (str): Label for the x-axis, typically describing the mean expression per gene.
+
+  # Returns:
+  #     ggplot object: A mean-variance trend plot showing the relationship between mean expression and variance.
+
+  
+  # Step 1: Compute mean and standard deviation across samples (columns)
+  mean_raw <- colMeans(data)  # Mean for each gene
+  sd_raw <- apply(data, 2, sd)  # Standard deviation for each gene
   
   # Step 2: Create data frame for plotting
   df <- data.frame(
@@ -99,18 +239,22 @@ mean_variance_trend <- function(data, x_axis_label) {
   # Step 3: Create the plot
   p <- ggplot(df, aes(x = mean_raw, y = sqrt_sd_raw)) +
     geom_point(size = 0.5) +  # Raw data points
-    geom_smooth(method = "loess", color = "red", se = FALSE, linewidth = 0.5) +  # LOESS trend line
+    geom_smooth(
+      method = "loess", 
+      color = "red", 
+      se = FALSE, 
+      linewidth = 0.5
+    ) +  
     labs(
-      title = "Mean-Variance Trend",
-      x = x_axis_label,  # Customizable x-axis label
+      x = x_axis_label,  
       y = "Sqrt(Standard Deviation)"
     ) +
     theme_nature_fonts() +
-    theme_white_background() +
-    theme(plot.title = element_text(hjust = 0.5))  
+    theme_white_background() 
   
   return(p)
 }
+
 
 # Volcano plot
 volcano_plot <- function(data, logFC_thr = 1, point_size = 0.5, alpha_value = 0.5, 

@@ -150,7 +150,8 @@ print("Start differential gene expression analysis.")
 # Select normalization method
 data_type <- setup$data_type
 dge_normalization <- setup$dge_normalization
-normalization_method <- normalization_methods[[data_type]][[dge_normalization]]
+normalization_method <- normalization_methods[[data_type]][[dge_normalization]]$"function"
+values_output_name <- normalization_methods[[data_type]][[dge_normalization]]$"output_name"
 
 # Transpose (rows = Genes, cols = Samples)
 train_data_t = t(train_data$X)
@@ -463,8 +464,8 @@ train_coefficients <- train_limma_fit$coefficients
 test_predictions <- as_tibble(t(train_coefficients %*% t(test_design)), rownames = "Idx")
 inf_predictions <- as_tibble(t(train_coefficients %*% t(inf_design)), rownames = "Idx")
 # Observed
-test_observations <- as_tibble(t(test_norm$E), rownames = "Idx")
-inf_observations <- as_tibble(t(inf_norm$E), rownames = "Idx")
+test_observations <- as_tibble(t(test_norm_matrix), rownames = "Idx")
+inf_observations <- as_tibble(t(inf_norm_matrix), rownames = "Idx")
 # Meta
 test_meta <- as_tibble(test_data$obs, rownames = "Idx") |> select(Idx, setup$classification$output_column)
 inf_meta <- as_tibble(inf_data$obs, rownames = "Idx") |> select(Idx, setup$classification$output_column)

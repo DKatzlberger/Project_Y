@@ -76,9 +76,18 @@ if (!dir.exists(path_to_save_location)) {
 contrast_metric_dge <- fload_data(match_vscratch_dir, file = "Contrast_metric_dge.csv")
 raw_metric_dge <- fload_data(match_vscratch_dir, file = "LogFCs.csv")
 
+# Save
+fwrite(contrast_metric_dge, file.path(path_to_save_location, "Contrast_metric_dge"))
+fwrite(raw_metric_dge, file.path(path_to_save_location, "Raw_metric_dge"))
+
 # ML
 contrast_metric_ml <- fload_data(match_vscratch_dir, file = "Contrast_metric_ml.csv")
 raw_metric_ml <- fload_data(match_vscratch_dir, file = "Probabilities.csv")
+
+# Save
+fwrite(contrast_metric_ml, file.path(path_to_save_location, "Contrast_metric_ml"))
+fwrite(raw_metric_ml, file.path(path_to_save_location, "Raw_metric_ml"))
+
 
 # Aggregate data
 group_seeds <- c(2, 5, 8, "all")
@@ -208,6 +217,7 @@ for (seed_count in group_seeds) {
 }
 aggregated_raw_metric_dge <- bind_rows(aggregated_raw_dfs)
 
+
 # ML - contrast_metric_ml
 aggregated_dfs <- list()
 for (seed_count in group_seeds) {
@@ -263,6 +273,8 @@ for (seed_count in group_seeds) {
   aggregated_dfs[[paste("aggregated_seed_", seed_count, sep = "")]] <- aggregated_ml_df
 }
 aggregated_contrast_metric_ml <- bind_rows(aggregated_dfs)
+
+
 
 # Visualize
 point_size = 0.5

@@ -29,205 +29,484 @@ if (length(args) > 0) {
 } else {
   print("Running interactive mode for development.")
   # Yaml file used for development (often an actual job script)
-  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml"
+  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_EAS.yml"
   # 1. Check if it's a valid yaml file
   # 2. Load the yaml file
   is_yml_file(yaml_file)
   setup <- yaml.load_file(yaml_file)
 }
 
-# Combine all ancestries for a comparison
+# Directory with saved analysis
 vscratch_dir_in = file.path("data", "combined_runs")
-# Construct comparison from setup file
-comparison <- paste0(setup$tag, "_", paste(setup$classification$comparison, collapse = "_vs_"))
+
+# Construct directory name
+tag        <- sub("_RSEM$", "", setup$tag)
+comparison <- paste(setup$classification$comparison, collapse = "_vs_")
+study      <- paste0(tag, "_", comparison)
 
 # Save the results of the analysis
 vscratch_dir_out  <- file.path("data", "combined_ancestries")
-path_to_save_location <- file.path(vscratch_dir_out, comparison)
+path_to_save_location <- file.path(vscratch_dir_out, study)
 if (!dir.exists(path_to_save_location)) {
   dir.create(path_to_save_location, recursive = TRUE)
 }
 
 # Interactions
+# Construct match pattern
 analysis_suffix <- "interactions"
-match_pattern <- paste0(comparison, ".*", analysis_suffix, "$")
+match_pattern   <- paste0(tag, "_[^_]+_", comparison, "_[^_]+_to_[^_]+.*", analysis_suffix, "$")
+
 # Extract files
 all_vscratch_dir_in <- list.dirs(vscratch_dir_in, full.names = TRUE, recursive = FALSE)
-match_vscratch_dir <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
+match_vscratch_dir  <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
 
 # DGE
-interactions <- fload_data(match_vscratch_dir, file = "Interactions.csv")
-baseline <- fload_data(match_vscratch_dir, file = "Baseline.csv")
-enrichment <- fload_data(match_vscratch_dir, file = "Interactions_enrichment.csv")
+interactions <- fload_data(match_vscratch_dir, file = "Interaction.csv")
 
 # Visualize
-logFC_threshold <- 1
-# ---- Interactions venn (DGE) ----
-gene_list <- interactions |>
-  filter(adj.P.Val < 0.05, abs(logFC) > logFC_threshold) |>
-  group_by(Ancestry) |>
-  summarise(Features = list(Feature)) |>
-  deframe()  
-
-# Diagram
-venn_data <- Venn(gene_list)
-venn_data <- process_data(venn_data)
-# Adjust coordinates
-# Adjust coordinates of labels
-venn_data_adjusted <- venn_setlabel(venn_data) |>
-  mutate(
-    adjusted_X = case_when(
-      X == max(X) ~ X * 0.8,  
-      X == min(X) ~ X * 0.8,  
-      TRUE ~ X  
-    ),
-    adjusted_Y = case_when(
-      X == max(X) ~ Y * 0.8,  
-      X == min(X) ~ Y * 1.2,  
-      TRUE ~ Y 
-    )
+logFC_thr <- 1
+tech_levels <- c("methylation", "expression", "protein")
+tech_labels <- c(
+  "methylation" = "Methylation", 
+  "expression"  = "Expression", 
+  "protein"     = "Protein"
   )
 
-vennDiagram <- ggplot() +
-  # 1. region count layer
-  geom_polygon(
-    data = venn_regionedge(venn_data),
-    aes(X, Y, group = id),
-    fill = "white"
-  ) +
-  # 2. set edge layer
-  geom_path(
-    data = venn_setedge(venn_data), 
-    aes(X, Y, group = id), 
-    show.legend = FALSE
-  ) +
-  # 3. set label layer
-  geom_text(
-    data = venn_data_adjusted,
-    aes(adjusted_X, Y, label = name),
-    size = 2
-  ) +
-  # 4. region label layer
-  geom_label(
-    data = venn_regionlabel(venn_data),
-    aes(X , Y, label = count), 
-    size = 2
-  ) +
-  coord_equal() +
-  theme_void() +
-  theme(legend.position = "none")
+# ---- Volcano plot ----
+interactions <- interactions |>
+  mutate(data_type = fct_relevel(data_type, tech_levels))
 
-# Save
-ggsave(filename = "Interactions_venn_diagram.pdf",
-       plot = vennDiagram,
-       path = path_to_save_location,
-       height = 2, width = 2)
-
-# ---- Interactions enrichment ----
-top_fsge <- enrichment |>
-  group_by(Ancestry) |>
-  arrange(desc(abs(NES))) |>
-  filter(row_number() <= 15) |>
-  pull(pathway)
-
-enrichment_plot <- enrichment |>
-  filter(pathway %in% top_fsge) |>
+p <- interactions |>
   ggplot(
     aes(
+      x = logFC,
+      y = -log10(adj.P.Val)
+      )
+    ) +
+    geom_point(
+      data = filter(interactions, adj.P.Val > 0.05 ),
+      shape = 21,
+      fill = "grey",
+      color ="grey",
+      size = 1.5,
+      stroke = 0.1
+    ) +
+    geom_point(
+      data = filter(interactions, adj.P.Val < 0.05),
+      shape = 21,
+      fill = "#B33A3A",
+      size = 1.5,
+      stroke = 0.1
+    ) +
+    geom_point(
+      data = filter(interactions, adj.P.Val < 0.05 & abs(logFC) > logFC_thr),
+      shape = 21,
+      fill = "red",
+      size = 1.5,
+      stroke = 0.1
+    ) +
+    facet_grid(
+      rows = vars(Ancestry),
+      cols = vars(data_type),
+      labeller = labeller(
+        data_type = as_labeller(tech_labels)
+        )
+    ) + 
+    geom_vline(
+      xintercept = c(-logFC_thr, logFC_thr), 
+      linetype = "dashed", 
+      color = "blue",
+      linewidth = (0.5/2),
+      alpha = 0.5
+    ) +
+    geom_hline(
+      yintercept = -log10(0.05), 
+      linetype = "dashed", 
+      color = "blue",
+      linewidth = (0.5/2),
+      alpha = 0.5
+    ) +
+    theme_nature_fonts() +
+    theme_white_background() +
+    theme_white_strip() +
+    theme(legend.position = "none")
+
+# Save
+save_name <- file.path(path_to_save_location, "Volcano.pdf")
+save_ggplot(p, save_name, width = 6, height = 2)
+
+
+
+# Cross-ancestry
+# Construct match pattern
+analysis_suffix <- "cross_ancestry"
+match_pattern   <- paste0(tag, "_[^_]+_", comparison, "_[^_]+_to_[^_]+.*", analysis_suffix, "$")
+
+# Extract files
+all_vscratch_dir_in <- list.dirs(vscratch_dir_in, full.names = TRUE, recursive = FALSE)
+match_vscratch_dir  <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
+
+# Load data
+# DGE
+contrast_metric_dge <- fload_data(match_vscratch_dir, file = "Contrast_metric_dge.csv")
+
+# Statistic (permuatation test)
+p_pearson <- contrast_metric_dge |>
+  group_split(Ancestry, data_type) |>
+  map(
+    function(x) {
+      p_value <- permutation_test(
+        x, 
+        value = "Pearson", 
+        group = "Status", 
+        paired = "Seed", 
+        tail = "left"
+        )
+      
+      tibble(
+        Metric = "Pearson",
+        Ancestry = unique(x$Ancestry),
+        data_type = unique(x$data_type),
+        p_value = p_value
+      )
+    }
+  ) |>
+  bind_rows()
+
+p_spearman <- contrast_metric_dge |>
+  group_split(Ancestry, data_type) |>
+  map(
+    function(x) {
+      p_value <- permutation_test(
+        x, 
+        value = "Spearman", 
+        group = "Status", 
+        paired = "Seed", 
+        tail = "left"
+        )
+      
+      tibble(
+        Metric = "Spearman",
+        Ancestry = unique(x$Ancestry),
+        data_type = unique(x$data_type),
+        p_value = p_value
+      )
+    }
+  ) |>
+  bind_rows()
+
+# Adjust p-values (Bonferroni)
+statistic_df <- bind_rows(p_pearson, p_spearman) |>
+  mutate(
+    adj_p_value = p.adjust(p_value, method = "bonferroni", n = n()),
+    adj_method = "Bonferroni"
+  )
+
+# Visualize
+
+# ---- Correlation of relationship ----
+# Pivot longer
+contrast_metric_dge_long <- contrast_metric_dge |>
+  pivot_longer(
+    cols = c(
+      Pearson,
+      Spearman 
+      ),
+    names_to = "Metric",
+    values_to = "Values"
+  )
+
+# Summarize
+contrast_metric_dge_summary <- contrast_metric_dge_long |>
+  group_by(
+    Prediction,
+    Ancestry, 
+    Status, 
+    data_type, 
+    Metric
+    )  |>
+  summarise(
+    mean = mean(Values, na.rm = TRUE),
+    sd = sd(Values, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Merge (summarized values - statisitc)
+contrast_metric_merged <- contrast_metric_dge_summary |>
+  left_join(
+    statistic_df,
+    by = c("Ancestry", "data_type", "Metric")
+  )
+
+# Merge (raw values - summarized values)
+contrast_metric_dge_merged <- contrast_metric_dge_long |>
+  left_join(
+    contrast_metric_merged, 
+    by = c("Prediction", "Ancestry", "Status", "data_type", "Metric")
+  ) |>
+  mutate(
+    data_type = fct_relevel(data_type, tech_levels),
+    Prediction = fct_rev(Prediction)
+  ) 
+
+# Plot
+p <- contrast_metric_dge_merged |>
+  ggplot(
+    aes(
+      x = Ancestry, 
+      y = Values, 
+      fill = Prediction
+      )
+  ) +
+  geom_bar(
+    aes(
+      y = mean
+      ), 
+    stat = "identity", 
+    position = position_dodge(),
+    alpha = 0.05
+  ) +  
+  geom_point(
+    aes(
+      fill = Prediction
+    ),
+    position = position_jitterdodge(
+      dodge.width = 0.9,
+      jitter.width = 0.5
+    ),
+    shape = 21,
+    stroke = 0.1,
+    size = 1,
+  ) +  
+  geom_errorbar(
+    aes(
+      ymin = mean - sd, 
+      ymax = mean + sd
+      ), 
+    position = position_dodge(width = 0.9), 
+    width = 0.5,
+    linewidth = (0.5 / 2)
+  ) +
+  facet_grid(
+    rows = vars(Metric),
+    cols = vars(data_type),
+    labeller = labeller(
+        data_type = as_labeller(tech_labels)
+        )
+  ) +
+  scale_y_continuous(
+    breaks = c(0.0, 0.25, 0.5, 0.75, 1.0)
+  ) +
+  geom_segment(
+    aes(
+      x = Ancestry, 
+      xend = Ancestry, 
+      y = 1.1, 
+      yend = 1.1
+    ), 
+    linewidth = (0.3 / 2),
+    position = position_dodge(width = 0.9), 
+  ) +
+  geom_segment(
+    aes(
+      x = Ancestry, 
+      y = 1.1, 
+      yend = mean + sd + 0.1 
+    ), 
+    position = position_dodge(width = 0.9),
+    linewidth = (0.3 / 2)
+  ) +
+  geom_text(
+    aes(
       x = Ancestry,
-      y = pathway,
-      color = NES,
-      size = pmin(-log10(padj), 5)
-    )
-  ) +
-  geom_point() +
-  scale_size_binned(
-     range = c(1, 3)    
-  ) +
-  scale_color_gradient2(
-      high = "red", 
-      mid = "white", 
-      low = "blue"
-  ) +
-  labs(
-    y = "MSigDB Hallmark 2020 gene set",
-    size = "-log10(adj.P.Val)"
+      y = 1.1 + 0.05,
+       label = sprintf("%.1e%s", adj_p_value, ifelse(adj_p_value < 0.05, "*", ""))
+    ),
+    size = 1.8, 
+    vjust = 0
   ) +
   theme_nature_fonts() +
-  theme_small_legend() +
   theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
   theme(
-    legend.position = "bottom",
-    legend.box = "horizontal",
-    legend.title.position = "top",
+    legend.position = "bottom"
   )
 
 # Save
-ggsave(filename = "Interactions_fgsea.pdf",
-       plot = enrichment_plot,
-       path = path_to_save_location,
-       height = 4, width = 4)
+save_name <- file.path(path_to_save_location, "Correlation_relationship.pdf")
+save_ggplot(p, save_name, width = 6, height = 3)
 
-# ---- Baseline venn (DGE) ----
-gene_list <- baseline |>
-  filter(adj.P.Val < 0.05, abs(logFC) > logFC_threshold) |>
-  group_by(Ancestry) |>
-  summarise(Features = list(Feature)) |>
-  deframe()  
 
-# Diagram
-venn_data <- Venn(gene_list)
-venn_data <- process_data(venn_data)
-# Adjust coordinates
-# Adjust coordinates of labels
-venn_data_adjusted <- venn_setlabel(venn_data) |>
-  mutate(
-    adjusted_X = case_when(
-      X == max(X) ~ X * 0.8,  
-      X == min(X) ~ X * 0.8,  
-      TRUE ~ X  
-    ),
-    adjusted_Y = case_when(
-      X == max(X) ~ Y * 0.8,  
-      X == min(X) ~ Y * 1.2,  
-      TRUE ~ Y 
-    )
-  )
 
-vennDiagram <- ggplot() +
-  # 1. region count layer
-  geom_polygon(
-    data = venn_regionedge(venn_data),
-    aes(X, Y, group = id),
-    fill = "white"
-  ) +
-  # 2. set edge layer
-  geom_path(
-    data = venn_setedge(venn_data), 
-    aes(X, Y, group = id), 
-    show.legend = FALSE
-  ) +
-  # 3. set label layer
-  geom_text(
-    data = venn_data_adjusted,
-    aes(adjusted_X, Y, label = name),
-    size = 2
-  ) +
-  # 4. region label layer
-  geom_label(
-    data = venn_regionlabel(venn_data),
-    aes(X , Y, label = count), 
-    size = 2
-  ) +
-  coord_equal() +
-  theme_void() +
-  theme(legend.position = "none")
+# # Visualize
+# logFC_threshold <- 1
+# # ---- Interactions venn (DGE) ----
+# gene_list <- interactions |>
+#   filter(adj.P.Val < 0.05, abs(logFC) > logFC_threshold) |>
+#   group_by(Ancestry) |>
+#   summarise(Features = list(Feature)) |>
+#   deframe()  
 
-# Save
-ggsave(filename = "Baseline_venn_diagram.pdf",
-       plot = vennDiagram,
-       path = path_to_save_location,
-       height = 2, width = 2)
+# # Diagram
+# venn_data <- Venn(gene_list)
+# venn_data <- process_data(venn_data)
+# # Adjust coordinates
+# # Adjust coordinates of labels
+# venn_data_adjusted <- venn_setlabel(venn_data) |>
+#   mutate(
+#     adjusted_X = case_when(
+#       X == max(X) ~ X * 0.8,  
+#       X == min(X) ~ X * 0.8,  
+#       TRUE ~ X  
+#     ),
+#     adjusted_Y = case_when(
+#       X == max(X) ~ Y * 0.8,  
+#       X == min(X) ~ Y * 1.2,  
+#       TRUE ~ Y 
+#     )
+#   )
+
+# vennDiagram <- ggplot() +
+#   # 1. region count layer
+#   geom_polygon(
+#     data = venn_regionedge(venn_data),
+#     aes(X, Y, group = id),
+#     fill = "white"
+#   ) +
+#   # 2. set edge layer
+#   geom_path(
+#     data = venn_setedge(venn_data), 
+#     aes(X, Y, group = id), 
+#     show.legend = FALSE
+#   ) +
+#   # 3. set label layer
+#   geom_text(
+#     data = venn_data_adjusted,
+#     aes(adjusted_X, Y, label = name),
+#     size = 2
+#   ) +
+#   # 4. region label layer
+#   geom_label(
+#     data = venn_regionlabel(venn_data),
+#     aes(X , Y, label = count), 
+#     size = 2
+#   ) +
+#   coord_equal() +
+#   theme_void() +
+#   theme(legend.position = "none")
+
+# # Save
+# ggsave(filename = "Interactions_venn_diagram.pdf",
+#        plot = vennDiagram,
+#        path = path_to_save_location,
+#        height = 2, width = 2)
+
+# # ---- Interactions enrichment ----
+# top_fsge <- enrichment |>
+#   group_by(Ancestry) |>
+#   arrange(desc(abs(NES))) |>
+#   filter(row_number() <= 15) |>
+#   pull(pathway)
+
+# enrichment_plot <- enrichment |>
+#   filter(pathway %in% top_fsge) |>
+#   ggplot(
+#     aes(
+#       x = Ancestry,
+#       y = pathway,
+#       color = NES,
+#       size = pmin(-log10(padj), 5)
+#     )
+#   ) +
+#   geom_point() +
+#   scale_size_binned(
+#      range = c(1, 3)    
+#   ) +
+#   scale_color_gradient2(
+#       high = "red", 
+#       mid = "white", 
+#       low = "blue"
+#   ) +
+#   labs(
+#     y = "MSigDB Hallmark 2020 gene set",
+#     size = "-log10(adj.P.Val)"
+#   ) +
+#   theme_nature_fonts() +
+#   theme_small_legend() +
+#   theme_white_background() +
+#   theme(
+#     legend.position = "bottom",
+#     legend.box = "horizontal",
+#     legend.title.position = "top",
+#   )
+
+# # Save
+# ggsave(filename = "Interactions_fgsea.pdf",
+#        plot = enrichment_plot,
+#        path = path_to_save_location,
+#        height = 4, width = 4)
+
+# # ---- Baseline venn (DGE) ----
+# gene_list <- baseline |>
+#   filter(adj.P.Val < 0.05, abs(logFC) > logFC_threshold) |>
+#   group_by(Ancestry) |>
+#   summarise(Features = list(Feature)) |>
+#   deframe()  
+
+# # Diagram
+# venn_data <- Venn(gene_list)
+# venn_data <- process_data(venn_data)
+# # Adjust coordinates
+# # Adjust coordinates of labels
+# venn_data_adjusted <- venn_setlabel(venn_data) |>
+#   mutate(
+#     adjusted_X = case_when(
+#       X == max(X) ~ X * 0.8,  
+#       X == min(X) ~ X * 0.8,  
+#       TRUE ~ X  
+#     ),
+#     adjusted_Y = case_when(
+#       X == max(X) ~ Y * 0.8,  
+#       X == min(X) ~ Y * 1.2,  
+#       TRUE ~ Y 
+#     )
+#   )
+
+# vennDiagram <- ggplot() +
+#   # 1. region count layer
+#   geom_polygon(
+#     data = venn_regionedge(venn_data),
+#     aes(X, Y, group = id),
+#     fill = "white"
+#   ) +
+#   # 2. set edge layer
+#   geom_path(
+#     data = venn_setedge(venn_data), 
+#     aes(X, Y, group = id), 
+#     show.legend = FALSE
+#   ) +
+#   # 3. set label layer
+#   geom_text(
+#     data = venn_data_adjusted,
+#     aes(adjusted_X, Y, label = name),
+#     size = 2
+#   ) +
+#   # 4. region label layer
+#   geom_label(
+#     data = venn_regionlabel(venn_data),
+#     aes(X , Y, label = count), 
+#     size = 2
+#   ) +
+#   coord_equal() +
+#   theme_void() +
+#   theme(legend.position = "none")
+
+# # Save
+# ggsave(filename = "Baseline_venn_diagram.pdf",
+#        plot = vennDiagram,
+#        path = path_to_save_location,
+#        height = 2, width = 2)
 
 
 

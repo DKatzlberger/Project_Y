@@ -27,7 +27,7 @@ is_yml_file <- function(file_path) {
 }
 
 # Normalization functions:
-normalize_log <- function(X, e = 0.01, ...){
+normalize_log <- function(X, e = 1, ...){
   # Log normalization.
   # X: Vector or Matrix to be transformed.
   # e: threshold to correct for infinity values.
@@ -57,37 +57,139 @@ beta_to_mvalue <- function(betas, epsilon = 0.00001, ...) {
 	return(log2(betas / (1 - betas)))
 }
 
+voom_normalization <- function(count_matrix, design_matrix) {
+  # Ensure input is a matrix
+  if (!is.matrix(count_matrix)) {
+    stop("Error: Input count_matrix must be a matrix.")
+  }
+  
+  # Create a DGEList object
+  dge <- DGEList(counts = count_matrix)
+  
+  # Calculate normalization factors
+  dge <- calcNormFactors(dge)
+  
+  # Apply voom transformation
+  voom_res <- voom(dge, design_matrix, plot = FALSE)
+  
+  return(voom_res)
+}
+
 # Normalization lookup list
 normalization_methods <- list(
   "expression" = list(
-    "limma_voom" = function(X, design, ...) voom(X, design, plot = FALSE),  
-    "normalize_log" = function(X, ...) normalize_log(X),
-    "normalize_zscore" = function(X, ...) scale(X),  
-    "raw" = function(X, ...) X 
+    "limma_voom" = list(
+      "function" = function(X, design, ...) voom_normalization(X, design, ...),  
+      "output_name" = "logCPM (voom)"
+    ),
+    "normalize_log" = list(
+      "function" = function(X, ...) normalize_log(X),
+      "output_name" = "log2-transformed values"
+    ),
+    "normalize_zscore" = list(
+      "function" = function(X, ...) scale(X),
+      "output_name" = "Z-score normalized values"
+    ),
+    "raw" = list(
+      "function" = function(X, ...) X,
+      "output_name" = "Input values"
+    )
   ),
   "methylation" = list(
-    "beta_to_mvalue" = function(X, ...) beta_to_mvalue(X),
-    "normalize_log" = function(X, ...) normalize_log(X),
-    "normalize_zscore" = function(X, ...) scale(X),  
-    "raw" = function(X, ...) X  
+    "beta_to_mvalue" = list(
+      "function" = function(X, ...) beta_to_mvalue(X),
+      "output_name" = "M-values"
+    ),
+    "normalize_log" = list(
+      "function" = function(X, ...) normalize_log(X),
+      "output_name" = "log2-transformed values"
+    ),
+    "normalize_zscore" = list(
+      "function" = function(X, ...) scale(X),
+      "output_name" = "Z-score normalized values"
+    ),
+    "raw" = list(
+      "function" = function(X, ...) X,
+      "output_name" = "Input values"
+    )
   ),
   "protein" = list(
-    "normalize_zscore" = function(X, ...) scale(X),  
-    "raw" = function(X, ...) X  
+    "normalize_zscore" = list(
+      "function" = function(X, ...) scale(X),
+      "output_name" = "Z-score normalized values"
+    ),
+    "raw" = list(
+      "function" = function(X, ...) X,
+      "output_name" = "Input values"
+    ),
+    "normalize_log" = list(
+      "function" = function(X, ...) normalize_log(X),
+      "output_name" = "log2-transformed values"
+    )
   )
 )
 
 
 
+
 # Filter features
-cpm <- function(data, log = FALSE) {
-  # Converts raw counts to CPM (Counts Per Million).
+# TMM Norm factors
+calculate_tmm_norm_factors <- function(data) {
+  # 'data' is a matrix with samples as rows and genes as columns (samples x genes)
+  
+  # Transpose the data to get genes as rows and samples as columns (for easier calculation)
+  data_transposed <- t(data)
+  
+  # Step 1: Compute the geometric mean of the counts for each gene (row)
+  geometric_mean <- apply(data_transposed, 1, function(x) exp(mean(log(x + 1))))  # log-transformed for stability
+  
+  # Step 2: Compute M-values (log-ratio) between each sample and the geometric mean
+  # M-value = log2(count_in_sample / geometric_mean)
+  M_values <- sweep(data_transposed, 1, geometric_mean, FUN = "/")  # Element-wise division
+  M_values <- log2(M_values + 1)  # Add pseudocount for stability
+  
+  # Step 3: Trim the extreme M-values to reduce the influence of highly differentially expressed genes
+  # Here we trim the top and bottom 5% of M-values
+  trim_percent <- 0.05
+  M_values_trimmed <- apply(M_values, 2, function(x) {
+    lower <- quantile(x, trim_percent)
+    upper <- quantile(x, 1 - trim_percent)
+    x[x < lower] <- lower
+    x[x > upper] <- upper
+    return(x)
+  })
+  
+  # Step 4: Calculate the normalization factors
+  # For each sample, calculate the median of the trimmed M-values for all genes
+  norm_factors <- apply(M_values_trimmed, 2, median)
+  
+  # Normalize by the median normalization factor
+  norm_factors <- norm_factors / median(norm_factors)
+  
+  return(norm_factors)
+}
+
+# CPM
+cpm <- function(data, norm_factors = NULL, log = FALSE) {
+  # Converts raw counts to CPM (Counts Per Million), optionally using normalization factors.
   # Optionally, log-transform the CPM values.
   # Args:
   #   data (matrix): Raw counts (samples x genes).
+  #   norm_factors (vector, optional): Normalization factors for each sample. Default is NULL.
   #   log (bool): Whether to log-transform the CPM values (default is FALSE).
   # Returns:
   #   matrix: CPM or logCPM values (samples x genes).
+  
+  # Check if the number of samples in the data matches the length of norm_factors
+  if (!is.null(norm_factors) && nrow(data) != length(norm_factors)) {
+    stop("The number of samples must match the length of the normalization factors.")
+  }
+  
+  # If norm_factors are provided, apply them to the raw counts
+  if (!is.null(norm_factors)) {
+    # Apply normalization factors to adjust raw counts (divide by norm factors)
+    data <- sweep(data, 1, norm_factors, FUN = "/")
+  }
   
   # Calculate total reads for each sample (sum of all gene counts in each sample)
   total_reads_per_sample <- rowSums(data)
@@ -156,7 +258,7 @@ filter_by_signal <- function(data, min_signal = 10, max_signal = NULL, min_sampl
 }
 
 # By variance
-min_variance_by_percentile <- function(data, percentile = 25) {
+variance_by_percentile <- function(data, percentile = 25) {
   # Calculates the variance threshold for methylation genes based on the specified percentile.
   # Args:
   #   data (matrix): Methylation beta values (samples x genes).
@@ -168,9 +270,9 @@ min_variance_by_percentile <- function(data, percentile = 25) {
   gene_variances <- apply(data, 2, var)
   
   # Determine the variance threshold at the given percentile
-  min_variance <- quantile(gene_variances, probs = percentile / 100)
+  variance <- quantile(gene_variances, probs = percentile / 100)
   
-  return(min_variance)
+  return(variance)
 }
 
 filter_by_variance <- function(data, var_threshold = 0.01, min_samples_ratio = 0.5) {

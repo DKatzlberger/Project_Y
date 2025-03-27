@@ -48,8 +48,10 @@ if (length(args) > 0) {
   # 
   # data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml
   # data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_ADMIX.yml
+  # data/inputs/settings/PanCanAtlas_BRCA_RPPA_basal_vs_non-basal_EUR_to_ADMIX.yml
+
   # data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_ADMIX.yml
-  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml"
+  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_EAS.yml"
   print("Running interactive mode for development.")
   setup <- yaml.load_file(yaml_file)
 }
@@ -82,15 +84,16 @@ if (!dir.exists(path_to_save_location)) {
 }
 
 # Load data
-data <- read_h5ad(setup$data_path)
+adata <- read_h5ad(setup$data_path)
 # Define classification task 
-data <- data[data$obs[[output_column]] %in% comparison]
+adata <- adata[adata$obs[[output_column]] %in% comparison]
 # Define training and inferred ancestry
-data <- data[data$obs[[ancestry_column]] %in% c(train_ancestry, inf_ancestry)]
+adata <- adata[adata$obs[[ancestry_column]] %in% c(train_ancestry, inf_ancestry)]
+
 
 # Define groups to compare
-data$obs["group"] <- factor(
-  paste(data$obs[[ancestry_column]], data$obs[[output_column]], sep = "."), 
+adata$obs["group"] <- factor(
+  paste(adata$obs[[ancestry_column]], adata$obs[[output_column]], sep = "."), 
   levels = c(
     paste(train_ancestry, comparison[1], sep = "."),  
     paste(train_ancestry, comparison[2], sep = "."),  
@@ -101,52 +104,98 @@ data$obs["group"] <- factor(
 
 # Design matrix for GLM
 # formula <- as.formula(paste0("~", ancestry_column, " * ", output_column))
-interaction_design <- model.matrix(~ 0 + group, data = data$obs)
+interaction_design <- model.matrix(~ 0 + group, data = adata$obs)
 # Human and machine readable terms
 colnames(interaction_design) <- gsub("group", "", colnames(interaction_design))
 colnames(interaction_design) <- gsub("-", "_", colnames(interaction_design))
 
 # Filter features 
-v_name <- file.path(path_to_save_location, "Mean_variance_trend.pdf")
+v_name <- file.path(path_to_save_location, "QC_mean_variance_trend.pdf")
 if (setup$filter_features & setup$data_type == "expression"){
+
+  # Transform to logCPM
+  norm_factors <- calculate_tmm_norm_factors(adata$X)
+  cpm_data <- cpm(adata$X, norm_factors = norm_factors, log = TRUE)
   # Filter by signal/count
-  cpm_data <- cpm(data$X, log = TRUE)
-  min_counts <- signal_by_percentile(cpm_data, percentile = 15)
+  min_counts <- signal_by_percentile(cpm_data, percentile = 25)
   filtered_features <- filter_by_signal(cpm_data, min_counts)
   # Subset
-  filtered_data = data[, filtered_features]
+  filtered_data = adata[, filtered_features]
+
+  # Variance filtering
+  norm_factors <- calculate_tmm_norm_factors(filtered_data$X)
+  cpm_data <- cpm(filtered_data$X, norm_factors = norm_factors, log = TRUE)
+  # Filter by variance
+  min_variance <- variance_by_percentile(cpm_data, percentile = 25)
+  filtered_features <- filter_by_variance(cpm_data, var_threshold = min_variance)
+  # Subset
+  filtered_data = filtered_data[, filtered_features]
 
   # Old filtering (less strict filtering)
   # filtered_features <- filterByExpr(t(data$X), interaction_design)
   # data <- data[, filtered_features]
 
   # Variance trend 
-  trend_data <- log2(t(filtered_data$X) + 0.5)
-  p <- mean_variance_trend(trend_data, x_axis_label = "log2(RSEM + 0.5)")
+  trend_data_before <- log2(adata$X + 0.5)
+  trend_data_after <- log2(filtered_data$X + 0.5)
+
+  # Visualize: Filtering
+  p_before <- mean_variance_trend(trend_data_before, x_axis_label = "log2(RSEM + 0.5)")
+  p_after <- mean_variance_trend(trend_data_after, x_axis_label = "log2(RSEM + 0.5)")
+  # Combine
+  p <- p_before / p_after
   # Save
   save_ggplot(p, v_name, width = 6, height = 4)
 
-
 } else if (setup$filter_features & setup$data_type == "methylation") {
-  # Filter by signal/count
-  min_signal <- signal_by_percentile(data$X, percentile = 0)
-  max_signal <- signal_by_percentile(data$X, percentile = 100)
-  filtered_features  <- filter_by_signal(data$X, min_signal, max_signal)
+
+  # Transform to mvalues
+  mvals <- beta_to_mvalue(adata$X)
+  
+  # Filter by variance
+  min_variance <- variance_by_percentile(mvals, percentile = 25)
+  filtered_features  <- filter_by_variance(mvals, var_threshold = min_variance)
   # Subset
-  filtered_data = data[, filtered_features]
+  filtered_data = adata[, filtered_features]
   
   # Variance trend 
-  trend_data <- t(filtered_data$X)
-  p <- mean_variance_trend(trend_data, x_axis_label = "Beta-values")
+  trend_data_before <- adata$X 
+  trend_data_after <- filtered_data$X
+
+  # Visualize: Filtering
+  p_before <- mean_variance_trend(trend_data_before, x_axis_label = "Beta values") 
+  p_after <- mean_variance_trend(trend_data_after, x_axis_label = "Beta values")
+  # Combine
+  p <- p_before / p_after
+  # Save
+  save_ggplot(p, v_name, width = 6, height = 4)
+
+} else if (setup$filter_features & setup$data_type == "protein"){
+
+  # No filtering
+
+  # Variance trend 
+  trend_data_before <- adata$X 
+  trend_data_after <- adata$X
+
+  # Visualize: Filtering
+  p_before <- mean_variance_trend(trend_data_before, x_axis_label = "Input values") 
+  p_after <- mean_variance_trend(trend_data_after, x_axis_label = "Input values")
+  # Combine
+  p <- p_before / p_after
   # Save
   save_ggplot(p, v_name, width = 6, height = 4)
 
 } else{
+
   # No filtering
-  filtered_data = data
+  filtered_data = adata
+
 }
 # Save feature 
 write_yaml(filtered_data$var_names, file.path(path_to_save_location, "Features.yml"))
+# Number of features
+n_features <- ncol(filtered_data)
 
 
 # Limma workflow
@@ -154,7 +203,8 @@ print("Start differential gene expression analysis.")
 # Select normalization method
 data_type <- setup$data_type
 dge_normalization <- setup$dge_normalization
-normalization_method <- normalization_methods[[data_type]][[dge_normalization]]
+normalization_method <- normalization_methods[[data_type]][[dge_normalization]]$"function"
+values_output_name <- normalization_methods[[data_type]][[dge_normalization]]$"output_name"
 
 # Transpose (rows = Genes, cols = Samples)
 data_t <- t(filtered_data$X)
@@ -163,6 +213,26 @@ data_t <- t(filtered_data$X)
 data_norm <- normalization_method(data_t, interaction_design)
 # Extract normalized matrix (used for plotting)
 data_norm_matrix <- if (is.list(data_norm) && !is.null(data_norm$E)) data_norm$E else data_norm
+
+# Visualize: Normalization
+# Density per sample
+p_before <- plot_density_of_samples(filtered_data$X, x_axis_label = "Input values") 
+p_after <- plot_density_of_samples(t(data_norm_matrix), x_axis_label = values_output_name)
+# Combine
+p <- p_before + p_after + plot_layout(guides = "collect") & theme(legend.position = "bottom")
+# Save
+save_name <- file.path(path_to_save_location, "QC_density_normalized_values.pdf")
+save_ggplot(p, save_name, width = 3, height = 3)
+
+# Q-Q plots per gene
+p_before <- plot_qq_of_genes(filtered_data$X, n_features = 5)
+p_after <- plot_qq_of_genes(t(data_norm_matrix), n_features = 5)
+# Combine
+p <- p_before / p_after 
+# Save
+save_name <- file.path(path_to_save_location, "QC_qq_normalized_values.pdf")
+save_ggplot(p, save_name, width = 6, height = 4)
+
 
 # Fit the model (means model)
 limma_fit <- lmFit(data_norm, design = interaction_design)
@@ -202,6 +272,7 @@ limma_fit_contrast <- contrasts.fit(limma_fit, contrast_matrix)
 limma_fit_contrast <- eBayes(limma_fit_contrast)
 contrast_res <- extract_results(limma_fit_contrast)
 
+# Results
 # Filter coeficients
 new_cols <- c("Ancestry", "Condition", "Difference")
 # Baseline
@@ -243,11 +314,14 @@ logFC_thr <- 1
 sig_baseline <- filter(baseline, adj.P.Val < 0.05 & abs(logFC) > logFC_thr)
 sig_relationship <- filter(relationship, adj.P.Val < 0.05 & abs(logFC) > logFC_thr)
 sig_interaction <- filter(interaction, adj.P.Val < 0.05 & abs(logFC) > logFC_thr)
+
 # Results with trend
 trend_baseline <- filter(baseline, abs(logFC) > logFC_thr) |> 
+  group_by(Condition) |>
   arrange(adj.P.Val, desc(abs(logFC))) |>
   slice_head(n = 10)
 trend_relationship <- filter(relationship, abs(logFC) > logFC_thr) |> 
+  group_by(Ancestry) |>
   arrange(adj.P.Val, desc(abs(logFC))) |>
   slice_head(n = 10)
 trend_interactions <- filter(interaction, abs(logFC) > logFC_thr) |>
@@ -256,6 +330,7 @@ trend_interactions <- filter(interaction, abs(logFC) > logFC_thr) |>
 
 
 # Visualize
+print("Visualize.")
 # ---- Volcano plots ---- 
 # Baseline
 p <- volcano_plot(
@@ -319,10 +394,333 @@ p <- venn_diagram(venn_data)
 save_name <- file.path(path_to_save_location, "Venn_diagram.pdf")
 save_ggplot(p, save_name, width = 3, height = 3)
 
-# ---- Heatmap ----
+# ---- Correlation relationship ----
+sig_baseline_features_1 <- filter(sig_baseline, Condition == comparison[1]) |> pull(Feature)
+sig_baseline_features_2 <- filter(sig_baseline, Condition == comparison[2]) |> pull(Feature)
+sig_interaction_features <- sig_interaction |> pull(Feature)
+
+# Sets
+set_names <- c(
+  paste("Baseline:", comparison[1]),
+  paste("Baseline:", comparison[2]),
+  paste("Interaction + Baseline:", comparison[1]),
+  paste("Interaction + Baseline:", comparison[2]),
+  "Interaction",
+  "Non-significant"
+)
+
+# Colors an fill
+set_colors <- c(
+  "black",  
+  "black", 
+  "black", 
+  "black", 
+  "black", 
+  "grey"
+)
+
+set_fill <- c(
+  "#a3ddcb",  
+  "#e7c6fb",  
+  "#027c58",  
+  "#9c06f9",  
+  "red",  
+  "grey"
+)
+
+# Rename
+names(set_colors) <- set_names
+names(set_fill) <- set_names
+
+# Prepare data
+p_data <- relationship |> 
+  select(-where(is.numeric), -coef, logFC) |>
+  pivot_wider(
+    names_from = Ancestry,
+    values_from = logFC
+  ) |>
+  mutate(
+    with_baseline_1   = Feature %in% sig_baseline_features_1,
+    with_baseline_2   = Feature %in% sig_baseline_features_2,
+    with_interaction  = Feature %in% sig_interaction_features, 
+    coloring          = case_when(
+      !with_interaction & with_baseline_1  ~ set_names[1], 
+      !with_interaction & with_baseline_2  ~ set_names[2],  
+      with_interaction  & with_baseline_1  ~ set_names[3],
+      with_interaction  & with_baseline_2  ~ set_names[4],
+      with_interaction  & !with_baseline_1 ~ set_names[5],    
+      with_interaction  & !with_baseline_2 ~ set_names[5],                
+      TRUE                                 ~ set_names[6]
+      )
+  )
+
+# Threshold line
+lm_formula <- as.formula(paste(toupper(inf_ancestry), "~", toupper(train_ancestry)))
+lm_model <- lm(lm_formula, data = p_data)
+# Add threshold
+residual_thr <- 1
+upper_threshold <- fitted(lm_model) + 1
+lower_threshold <- fitted(lm_model) - 1
+
+# Correlation 
+cor_pearson <- cor(p_data[toupper(train_ancestry)], p_data[toupper(inf_ancestry)], method = "pearson")
+cor_spearman <- cor(p_data[toupper(train_ancestry)], p_data[toupper(inf_ancestry)], method = "spearman")
+# Label
+pearson_label <- bquote(R[Pearson] == .(round(cor_pearson, 3)))
+spearman_label <- bquote(R[Spearman] == .(round(cor_spearman, 3)))
+
+# Axis name
+x_axis <- paste(toupper(train_ancestry), unique(p_data$Condition), "logFC")
+y_axis <- paste(toupper(inf_ancestry), unique(p_data$Condition), "logFC")
+
+# Plot
+p <- p_data |>
+  ggplot(
+    aes(
+      x = !!sym(toupper(train_ancestry)),
+      y = !!sym(toupper(inf_ancestry))
+    )
+  ) +
+  geom_point(
+    data = p_data |> filter(coloring == "Non-significant"),
+    aes(
+      fill = coloring,
+      color = coloring
+      ),
+    shape = 21,
+    size = 1.5,
+    stroke = 0.1
+  ) +
+  geom_point(
+    data = p_data |> filter(coloring %in% c(
+      set_names[1],
+      set_names[2]
+      )
+    ),
+    aes(
+      fill = coloring,
+      color = coloring
+      ),
+    shape = 21,
+    size = 1.5,
+    stroke = 0.1
+  ) +
+  geom_point(
+    data = p_data |> filter(coloring %in% c(
+      set_names[3],
+      set_names[4]
+      )
+    ),
+    aes(
+      fill = coloring,
+      color = coloring
+      ),
+    shape = 21,
+    size = 1.5,
+    stroke = 0.1
+  ) +
+  geom_point(
+    data = p_data |> filter(coloring %in% c(
+      set_names[5]
+      )
+    ),
+    aes(
+      fill = coloring,
+      color = coloring
+      ),
+    shape = 21,
+    size = 1.5,
+    stroke = 0.1
+  ) +
+  geom_point(
+    aes(
+      fill = "dummy1",
+      color = "dummy1"
+      ),
+      shape = 21,
+      size = 0,
+      stroke = 0,
+      alpha = 0
+  ) +
+  geom_point(
+    aes(
+      fill = "dummy2",
+      color = "dummy2"
+      ),
+      shape = 21,
+      size = 0,
+      stroke = 0,
+      alpha = 0
+  ) +
+  geom_smooth(
+    method = "lm",
+    color = "blue",
+    linewidth = (0.5 / 2),
+    alpha = 0.5
+  ) +
+  geom_line(
+    aes(y = upper_threshold),
+    color = "blue", 
+    linetype = "dashed",
+    linewidth = (0.5 / 1.5),
+    alpha = 0.5
+  ) + 
+    geom_line(
+    aes(y = lower_threshold), 
+    color = "blue", 
+    linetype = "dashed",
+    linewidth = (0.5 / 1.5),
+    alpha = 0.5
+  ) + 
+  scale_fill_manual(
+    name = "",
+    values = c(set_fill, "dummy1" = "white", "dummy2" = "white"),
+    breaks = c(set_names, "dummy1", "dummy2"),
+    labels = c(set_names, pearson_label, spearman_label)
+  ) +
+  scale_color_manual(
+    name = "",
+    values = c(set_colors, "dummy1" = "white", "dummy2" = "white"),
+    breaks = c(set_names, "dummy1", "dummy2"),
+    labels = c(set_names, pearson_label, spearman_label)
+  ) +
+  labs(
+    x = x_axis,
+    y = y_axis
+  ) + 
+  theme_nature_fonts() +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
+  theme(
+    legend.position = c(0.05, 0.95),       
+    legend.justification = c(0, 1),  
+    legend.background = element_rect(fill = "transparent", color = NA)
+  )
+
+# Save
+save_name <- file.path(path_to_save_location, "Relationship_correlation.pdf")
+save_ggplot(p, save_name, width = 3, height = 3)
+
+# ---- Quality of DGE -----
+deg_interaction <- interaction |>
+  mutate(
+    Significance = case_when(
+      adj.P.Val < 0.05 & abs(logFC) > logFC_thr & logFC > 0 ~ "Up-regulated",
+      adj.P.Val < 0.05 & abs(logFC) > logFC_thr & logFC < 0 ~ "Down-regulated",
+      TRUE                                                  ~ "Non-significant"
+    )
+  )
+
+# Set names
+set_names <- c(
+  "Up-regulated",
+  "Down-regulated",
+  "Non-significant"
+)
+
+# Colors
+set_colors <- c(
+  "black",  
+  "black", 
+  "grey"
+)
+
+# Fill
+set_fill <- c(
+  "#e7e705",
+  "#02b102",
+  "grey"
+)
+
+# Rename
+names(set_colors) <- set_names
+names(set_fill) <- set_names
+
+p <- deg_interaction |>
+  ggplot(
+    aes(
+      x = AveExpr,
+      y = logFC
+    )
+  ) +
+  geom_point(
+    data = filter(deg_interaction, Significance == "Non-significant"),
+    aes(
+      fill = Significance,
+      color = Significance
+    ),
+    shape = 21,
+    size = 1.5,
+    stroke = 0.1
+  ) +
+  geom_point(
+    data = filter(deg_interaction, Significance == "Up-regulated"),
+    aes(
+      fill = Significance,
+      color = Significance,
+      size = -log(adj.P.Val)
+    ),
+    shape = 21,
+    #size = 1.5,
+    stroke = 0.1
+  ) +
+  geom_point(
+    data = filter(deg_interaction, Significance == "Down-regulated"),
+    aes(
+      fill = Significance,
+      color = Significance,
+      size = -log(adj.P.Val)
+    ),
+    shape = 21,
+    #size = 1.5,
+    stroke = 0.1
+  ) +
+  geom_hline(
+    yintercept = 0, 
+    color = "black", 
+    linewidth = (0.5 / 2)
+  ) +
+  scale_fill_manual(
+    name = "Interaction",
+    values = c(set_fill),
+    breaks = set_names
+  ) +
+  scale_color_manual(
+    name = "Interaction",
+    values = c(set_colors),
+    breaks = set_names
+  ) +
+  scale_size_binned(
+    range = c(0.5, 3)
+  ) +
+  labs(
+    x = paste("Average", values_output_name)
+  ) +
+  guides(
+    size = guide_legend(
+      title.position = "top",  
+      direction = "horizontal"
+    )
+  ) +
+  theme_nature_fonts() +
+  theme_white_background () +
+  theme_small_legend() +
+  theme(
+    legend.position = c(0.95, 0.05),       
+    legend.justification = c("right", "bottom"),  
+    legend.background = element_rect(fill = "transparent", color = NA)
+  )
+
+# Save
+save_name <- file.path(path_to_save_location, "Interaction_MA.pdf")
+save_ggplot(p, save_name, width = 3, height = 3)
+
+if (nrow(sig_interaction) > 0){
+# ---- Interaction Heatmap ----
 exp_list <- list()
 for(gg in sig_interaction$Feature){
-  exp_list[[gg]] <- data$obs |>
+  exp_list[[gg]] <- adata$obs |>
     mutate(z_score = scale(data_norm_matrix[gg,])) |>
     rownames_to_column("patient_id") |>
     remove_rownames()
@@ -337,13 +735,23 @@ expression_matrix <- expression_zscore |>
   as.matrix()
 
 # Condition colors
-condition_colors <- setNames(c("#1b9e77", "purple"), comparison)
+condition_colors <- setNames(c("#027c58", "purple"), comparison)
+genetic_ancestry_colors <- c(
+  "admix"= "#ff4d4d", 
+  "afr" = "#ff9900", 
+  "amr" =  "#33cc33",
+  "eur" = "#3399ff", 
+  "eas" = "#cc33ff", 
+  "sas" = "#ffcc00"
+  )
 
 # Annotation
 annotations <- expression_zscore |>
   select(patient_id, all_of(c(output_column, ancestry_column))) |>
   distinct() |>
-  arrange(match(patient_id, colnames(expression_zscore)))|>
+  arrange(match(patient_id, colnames(expression_zscore)))
+
+annotations <- annotations |>
   mutate(
     group = paste(annotations[[ancestry_column]], annotations[[output_column]], sep = "."),
     group = factor(group, levels = str_replace(colnames(interaction_design), "_", "-")),
@@ -360,7 +768,7 @@ heatmap_annotation <- HeatmapAnnotation(
   Condition = annotations[[output_column]], 
   # Colors
   col = list(
-    Condition = output_column_colors
+    Condition = condition_colors
   ), 
   # Fonts
   annotation_name_gp = gpar(fontsize = 5),
@@ -404,8 +812,8 @@ condition_lgd <- Legend(
     ), 
   legend_gp = gpar(
     fill = c(
-      output_column_colors[comparison[1]], 
-      output_column_colors[comparison[2]]
+      condition_colors[comparison[1]], 
+      condition_colors[comparison[2]]
       )
     ),
   # Font
@@ -449,7 +857,7 @@ heatmap <- Heatmap(
   )
 
 # Save
-save_name <- file.path(path_to_save_location, "Interactions_heatmap.pdf")
+save_name <- file.path(path_to_save_location, "Interaction_heatmap.pdf")
 pdf(save_name, width = 6 , height = 3)
 
 # Add legend
@@ -495,13 +903,14 @@ group_block_anno(
     )
   )
 
-# Close pdf
+# Close pdf and delete heatmap object
 dev.off()  
+rm(heatmap, envir = .GlobalEnv)
 
-# ---- Boxplots -----
+# ---- Interaction Boxplots -----
 exp_list <- list()
 for(gg in head(sig_interaction$Feature, 10)){
-  exp_list[[gg]] <- data$obs |>
+  exp_list[[gg]] <- adata$obs |>
     mutate(z_score = scale(data_norm_matrix[gg,])) |>
     rownames_to_column("patient_id") |>
     remove_rownames()
@@ -524,104 +933,13 @@ p <- interactions_boxplot(
   ncol = n_col
   )
 # Save
-save_name <- file.path(path_to_save_location, "Interactions_boxplots.pdf")
+save_name <- file.path(path_to_save_location, "Interaction_boxplots.pdf")
 save_ggplot(p, save_name, width = 6, height = 3)
-# ---- Correlation relationship ----
-sig_baseline_features_1 <- filter(sig_baseline, Condition == comparison[1]) |> pull(Feature)
-sig_baseline_features_2 <- filter(sig_baseline, Condition == comparison[2]) |> pull(Feature)
-sig_interaction_features <- sig_interaction |> pull(Feature)
 
-# Sets
-sets_names <- list(
-  baseline_set_1              = paste("Baseline:", comparison[1]),
-  baseline_set_2              = paste("Baseline:", comparison[2]),
-  baseline_interaction_set_1  = paste("Interaction + Baseline:", comparison[1]),
-  baseline_interaction_set_2  = paste("Interaction + Baseline:", comparison[2]),
-  interaction_set             = "Interaction",
-  rest                        = "Rest"
-)
 
-# Colors
-set_colors <- c(
-  baseline_set_1              = "#73b7f3",  # Blue
-  baseline_set_2              = "#f4b177",  # Orange
-  baseline_interaction_set_1  = "#0587f8",  # Green
-  baseline_interaction_set_2  =  "#f87807",  # Red
-  interaction_set             = "red",  # Purple
-  rest                        = "grey"
-)
-
-# Rename
-names(set_colors) <- sets_names
-
-# Prepare data
-p_data <- relationship |> 
-  select(-where(is.numeric), -coef, logFC) |>
-  pivot_wider(
-    names_from = Ancestry,
-    values_from = logFC
-  ) |>
-  mutate(
-    with_baseline_1   = Feature %in% sig_baseline_features_1,
-    with_baseline_2   = Feature %in% sig_baseline_features_2,
-    with_interaction  = Feature %in% sig_interaction_features, 
-    coloring          = case_when(
-      with_interaction  & with_baseline_1  ~ sets_names$baseline_interaction_set_1,
-      with_interaction  & with_baseline_2  ~ sets_names$baseline_interaction_set_2,
-      with_interaction  & !with_baseline_1 ~ sets_names$interaction_set,    
-      with_interaction  & !with_baseline_2 ~ sets_names$interaction_set,
-      !with_interaction & with_baseline_1  ~ sets_names$baseline_set_1,   
-      !with_interaction & with_baseline_2  ~ sets_names$baseline_set_2,                  
-      TRUE                                 ~ sets_names$rest  
-      )
-  )
-
-p <- p_data |>
-  ggplot(
-    aes(
-      x = !!sym(toupper(train_ancestry)),
-      y = !!sym(toupper(inf_ancestry))
-    )
-  ) +
-  geom_point(
-    data = p_data |> filter(coloring == "Rest"),
-    aes(color = coloring),
-    show.legend = FALSE
-  ) +
-  geom_point(
-    data = p_data |> filter(coloring %in% c(
-      baseline_set_1,
-      baseline_set_2
-      )
-    ),
-    aes(color = coloring)
-  ) +
-  geom_point(
-    data = p_data |> filter(coloring %in% c(
-      baseline_interaction_set_1,
-      baseline_interaction_set_2
-      )
-    ),
-    aes(color = coloring)
-  ) +
-  geom_point(
-    data = p_data |> filter(coloring %in% c(
-      interaction_set
-      )
-    ),
-    aes(color = coloring)
-  ) +
-  scale_color_manual(
-    values = set_colors
-  ) +
-  theme_nature_fonts() +
-  theme_white_background() +
-  theme_white_strip() +
-  theme_small_legend()
-
-# Save
-save_name <- file.path(path_to_save_location, "Relationship_correlation.pdf")
-save_ggplot(p, save_name, width = 5, height = 5)
+} else{
+  print("Maybe visualize trends.")
+}
 
 
 
@@ -705,31 +1023,31 @@ p <- fgsea_plot(
 save_ggplot(p, save_name, width = 3, height = 5)
 
 
-# Cluster profiler 
-GO_annotations <- fread("data/downloads/geneset-libraries/GO_annotation.csv")
-GO_ids <- inner_join(interactions, GO_annotations, by=c("Feature"="gene_name"))
-# Filter significant genes
-GO_sig_interactions <- filter(GO_ids, adj.P.Val < 0.05) |> pull(gene_id)
-# Background (EUR condition1 vs condition2)
-GO_background <- GO_ids |> pull(gene_id)
-GO_background <- setdiff(GO_background, GO_sig_interactions)
-# Remove input
-GO_background <- setdiff(GO_background, GO_sig_interactions)
+# # Cluster profiler 
+# GO_annotations <- fread("data/downloads/geneset-libraries/GO_annotation.csv")
+# GO_ids <- inner_join(interactions, GO_annotations, by=c("Feature"="gene_name"))
+# # Filter significant genes
+# GO_sig_interactions <- filter(GO_ids, adj.P.Val < 0.05) |> pull(gene_id)
+# # Background (EUR condition1 vs condition2)
+# GO_background <- GO_ids |> pull(gene_id)
+# GO_background <- setdiff(GO_background, GO_sig_interactions)
+# # Remove input
+# GO_background <- setdiff(GO_background, GO_sig_interactions)
 
-# Overrepresentation
-GO_overrepresentation <- enrichGO(
-  gene = GO_sig_interactions,
-  universe = GO_background,
-  keyType = "ENSEMBL",
-  OrgDb = org.Hs.eg.db, 
-  ont = "ALL",
-  pAdjustMethod = "BH", 
-  qvalueCutoff = 0.05, 
-  readable = TRUE)
-GO_results  <- as_tibble(GO_overrepresentation) |>
-  mutate(Ancestry = toupper(inf_ancestry))
-# Save
-fwrite(GO_results, file.path(path_to_save_location, "Interactions_overrepresentation.csv"))
+# # Overrepresentation
+# GO_overrepresentation <- enrichGO(
+#   gene = GO_sig_interactions,
+#   universe = GO_background,
+#   keyType = "ENSEMBL",
+#   OrgDb = org.Hs.eg.db, 
+#   ont = "ALL",
+#   pAdjustMethod = "BH", 
+#   qvalueCutoff = 0.05, 
+#   readable = TRUE)
+# GO_results  <- as_tibble(GO_overrepresentation) |>
+#   mutate(Ancestry = toupper(inf_ancestry))
+# # Save
+# fwrite(GO_results, file.path(path_to_save_location, "Interactions_overrepresentation.csv"))
 
 
 

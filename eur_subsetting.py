@@ -75,7 +75,7 @@ data_validator.data_settings_compatibility()
 # Check for NAs in molecular data
 data_validator.validate_na_counts()
 # Check for negative counts in molecular data
-data_validator.validate_negative_counts()
+data_validator.validate_negative_counts(data_type = setup.data_type)
 
 # Get European data
 setup.log("Define ancestry")
@@ -86,15 +86,45 @@ setup.log("Define classification")
 eur_data = (eur_data[eur_data.obs[setup.classification["output_column"]].isin(setup.classification["comparison"])])
 
 setup.log("Feature selection")
-# Filtering based on eur_data
+# Filtering based on all of the data (consistent with interactions)
 if setup.filter_features and setup.data_type == "expression":
-    # Filter by expression
-    cpm_data = cpm(eur_data.X)
-    min_counts = min_counts_by_percentile(cpm_data, percentile=25)
-    filtered_features = filter_by_expression(cpm_data, min_counts = min_counts)
+
+    # Transform to logCPM
+    norm_factors = calculate_tmm_norm_factors(data.X)
+    cpm_data = cpm(data.X, norm_factors = norm_factors, log = True)
+    # Filter by signal/count
+    min_counts = signal_by_percentile(cpm_data, percentile = 25)
+    filtered_features = filter_by_signal(cpm_data, min_counts)
+    # Subset
+    filtered_data = data[:, filtered_features]
+
+    # Variance filtering
+    norm_factors = calculate_tmm_norm_factors(filtered_data.X)
+    cpm_data = cpm(filtered_data.X, norm_factors = norm_factors, log = True)
+    # Filter by variance
+    min_variance = variance_by_percentile(cpm_data, percentile = 25)
+    filtered_features = filter_by_variance(cpm_data, var_threshold = min_variance)
 
     # Subset features
     eur_data = eur_data[:, filtered_features]
+
+elif setup.filter_features and setup.data_type == "methylation":
+
+    # Transform to mvalues
+    mvals = beta_to_mvalue(data.X)
+    
+    # Filter by variance
+    min_variance = variance_by_percentile(mvals, percentile = 25)
+    filtered_features = filter_by_variance(mvals, var_threshold = min_variance)
+
+    # Subset features
+    eur_data = eur_data[:, filtered_features]
+
+elif setup.filter_features and setup.data_type == "protein":
+
+    # No filtering
+
+    eur_data = eur_data
 
 # Save features (for DGE)
 with open(setup.out("Features.yml"), "w") as f:

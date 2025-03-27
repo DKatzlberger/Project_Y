@@ -41,9 +41,17 @@ if (length(args) > 0) {
 
 } else {
   # Dev settings if no command-line argument provided
-  # data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml
-  # data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_ADMIX.yml
-  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml"
+
+  # data/inputs/settings/PanCanAtlas_BRCA_RSEM_Basal_vs_non-Basal_EUR_to_ADMIX.yml
+  # data/inputs/settings/PanCanAtlas_BRCA_RPPA_Basal_vs_non-Basal_EUR_to_ADMIX.yml
+  # data/inputs/settings/Firehose_BRCA_BETA_Basal_vs_non-Basal_EUR_to_ADMIX.yml
+
+  # data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_LUSC_vs_LUAD_EUR_to_ADMIX.yml
+  # data/inputs/settings/PanCanAtlas_LUSC_LUAD_RPPA_LUSC_vs_LUAD_EUR_to_ADMIX.yml
+  # data/inputs/settings/Firehose_LUSC_LUAD_BETA_LUSC_vs_LUAD_EUR_to_ADMIX.yml
+
+
+  yaml_file <- "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RPPA_LUSC_vs_LUAD_EUR_to_ADMIX.yml"
   print("Running interactive mode for development.")
   setup <- yaml.load_file(yaml_file)
 }
@@ -55,57 +63,104 @@ set.seed(42)
 vscratch_dir_out = "data/combined_runs"
 analysis_name = "descriptive_statisitics"
 
-tag <- setup$tag
-comparison <- paste(setup$classification$comparison, collapse = "_vs_")
-
-# Match pattern
-match_pattern <- paste0(tag, "_", comparison, "_", analysis_name)
-path_to_save_location <- file.path(vscratch_dir_out, match_pattern)
-# Create the directory also parents (if it does not exist)
-# Create directory if it does not exists
-if (!dir.exists(path_to_save_location)) {
-  dir.create(path_to_save_location, recursive = TRUE)
-}
 
 # Transform settings into R useable form
+tag             <- setup$tag
 comparison      <- setup$classification$comparison
 output_column   <- setup$classification$output_column
 ancestry_column <- setup$classification$ancestry_column
 train_ancestry  <- setup$classification$train_ancestry
 inf_ancestry    <- setup$classification$infer_ancestry
 
-# Load the data
-adata_whole <- read_h5ad(setup$data_path)
+# Construct output directory name
+condition <- paste(comparison, collapse = "_vs_")
 
-
-# Clustering -------------------------------------------------------------------
-# Transform data to log2 
-if (setup$data_type == "protein") {
-  # For RPPA (raw data), apply shift to handle negative values
-  min_value <- min(adata_whole$X, na.rm = TRUE)
-  shifted_rppa <- adata_whole$X + abs(min_value) + 1 
-  cluster_data <- log2(shifted_rppa)  
-} else if (setup$data_type == "expression") {
-  # Log2 normalization
-  cluster_data <-  log2(adata_whole$X + 1)
-} else {
-  # Default: Keep input data as is
-  cluster_data <- adata_whole$X
+# Create directory if it does not exists
+match_pattern <- paste0(tag, "_", condition, "_", analysis_name)
+path_to_save_location <- file.path(vscratch_dir_out, match_pattern)
+# Make directory
+if (!dir.exists(path_to_save_location)) {
+  dir.create(path_to_save_location, recursive = TRUE)
 }
-# Clustering (tsne)
-tsne <- Rtsne(cluster_data, dims = 2, perplexity = 50)
+
+# Load data
+adata <- read_h5ad(setup$data_path)
+
+# Clustering 
+# Transform data
+if (setup$data_type == "protein") {
+
+  cluster_data <- adata$X
+
+  # Visualize
+  p_before <- plot_density_of_samples(adata$X, x_axis_label = "Input values") 
+  p_after <- plot_density_of_samples(cluster_data, x_axis_label = "Input values")
+  # Combine
+  p <- p_before + p_after + plot_layout(guides = "collect") & theme(legend.position = "bottom")
+  # Save
+  save_name <- file.path(path_to_save_location, "QC_density_values.pdf")
+  save_ggplot(p, save_name, width = 3, height = 3)
+
+} else if (setup$data_type == "expression") {
+  # Expression (raw RSEM): LogCPM
+  norm_factors <- calculate_tmm_norm_factors(adata$X)
+  cluster_data <- cpm(adata$X, norm_factors = norm_factors, log = TRUE)
+
+  # Visualize
+  p_before <- plot_density_of_samples(adata$X, x_axis_label = "RSEM values") 
+  p_after <- plot_density_of_samples(cluster_data, x_axis_label = "logCPM")
+  # Combine
+  p <- p_before + p_after + plot_layout(guides = "collect") & theme(legend.position = "bottom")
+  # Save
+  save_name <- file.path(path_to_save_location, "QC_density_values.pdf")
+  save_ggplot(p, save_name, width = 3, height = 3)
+
+} else if (setup$data_type == "methylation") {
+  # Methylation (beta-values): M-values
+  cluster_data <- beta_to_mvalue(adata$X)
+
+  # Visualize
+  p_before <- plot_density_of_samples(adata$X, x_axis_label = "Beta values") 
+  p_after <- plot_density_of_samples(cluster_data, x_axis_label = "M-values")
+  # Combine
+  p <- p_before + p_after + plot_layout(guides = "collect") & theme(legend.position = "bottom")
+  # Save
+  save_name <- file.path(path_to_save_location, "QC_density_values.pdf")
+  save_ggplot(p, save_name, width = 3, height = 3)
+
+} else{
+  cluster_data <- adata$X
+}
+
+
+# TSNE
+set.seed(42)
+# Reduce 
+if (ncol(cluster_data) < 300){
+  perplexity = 10
+} else{
+  perplexity = 50
+}
+
+tsne <- Rtsne(cluster_data, dims = 2, perplexity)
 # Coordinates
 tsne_coordinates <- data.frame(TSNE1 = tsne$Y[, 1], TSNE2 = tsne$Y[, 2])
 # Add meta data
-tsne_coordinates  <- bind_cols(tsne_coordinates, adata_whole$obs)
+tsne_coordinates  <- bind_cols(tsne_coordinates, adata$obs)
 
 # Visualize 
+print("Unsupervised clustering.")
 point_size <-  0.5
 
 # ---- Genetic ancestry (tsne_genetic_ancestry_plot) ----
-genetic_ancestry_colors <- c("admix"= "#ff4d4d", "afr" = "#ff9900", "amr" =  "#33cc33",
-                             "eur" = "#3399ff", "eas" = "#cc33ff", "sas" = "#ffcc00"
-                             )
+genetic_ancestry_colors <- c(
+  "admix" = "#ff4d4d",
+  "afr"   = "#ff9900", 
+  "amr"   =  "#33cc33",
+  "eur"   = "#3399ff", 
+  "eas"   = "#cc33ff", 
+  "sas"   = "#ffcc00"
+  )
 
 tsne_genetic_ancestry_plot <- tsne_coordinates |>
   ggplot(
@@ -137,8 +192,10 @@ tsne_genetic_ancestry_plot <- tsne_coordinates |>
 # ---- Cancer type detailed (tsne_cancer_type_detailed_plot) ----
 cancer_type_detailed_colors <- c(
   "#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3", 
-  "#a6d854", "#ffd92f", "#e5c494", "#b3b3b3"
+  "#a6d854", "#ffd92f", "#e5c494", "#b3b3b3",
+  "#f1c40f", "#e74c3c", "#9b59b6", "#2ecc71"
 )
+
 tsne_cancer_type_detailed_plot <- tsne_coordinates |>
   ggplot(
     aes(
@@ -183,8 +240,8 @@ tsne_subtype_plot <- tsne_coordinates |>
     values = subtype_colors
   ) +
   labs(
-    title = "Molecular-subtype",
-    color = "Molecular-subtpye"
+    title = "Molecular subtype",
+    color = "Molecular subtpye"
   ) +
   theme_nature_fonts() +
   theme_small_legend() +
@@ -246,7 +303,13 @@ ggsave(filename = "Patchwork_clustering_plot.pdf",
        height = 3, width = 4.5)
 
 # Save without legend
-tsne_plot_no_legend <- tsne_plot & theme(legend.position = "none")
+cluster_title <- str_to_sentence(setup$data_type)
+tsne_plot_no_legend <- tsne_plot + 
+  plot_annotation(title = cluster_title) & 
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 5),
+    legend.position = "none"
+    )
 
 ggsave(filename = "Patchwork_clustering_plot_no_legend.pdf",
        path = path_to_save_location,
@@ -255,9 +318,10 @@ ggsave(filename = "Patchwork_clustering_plot_no_legend.pdf",
 
 
 # Define classification task
-adata <- adata_whole[adata_whole$obs[[output_column]] %in% comparison]
+adata <- adata[adata$obs[[output_column]] %in% comparison]
 
 # Descriptive statistics 
+print("Descriptive analsyis.")
 alpha_value <- 0.3
 
 # ---- Genetic ancestry (genetic_ancestry_plot) -----
@@ -504,7 +568,7 @@ age_plot <- adata$obs |>
   ) +
   guides(fill = guide_legend(ncol = 1))
 
-# --- Patchwork ----
+# ---- Patchwork ----
 nf_plot <- genetic_ancestry_plot +
   cancer_type_detailed_plot + 
   subtype_plot + 
@@ -535,13 +599,16 @@ ggsave(filename = "Patchwork_descriptive_meta_plot_no_legend.pdf",
        height = 3, width = 3)
 
 
-# Variance --------------------------------------------------
+# Variance 
+print("Variance explained.")
 # Variance by meta variable
 check_variance <- c(
   ancestry_column,
-  "subtype"
-  # "cancer_type_detailed", "subtype",
-  # "sex", "age"
+  "subtype",
+  "cancer_type_detailed", 
+  "subtype",
+  "sex", 
+  "age"
   )
 
 # Meta data
@@ -569,6 +636,9 @@ variance_explained <- calculate_variance_explained(
   batch_size = 1000,
   num_cores = setup$njobs
 ) 
+
+# Save
+fwrite(variance_explained, file.path(path_to_save_location, "Variance_explained.csv"))
 
 # Variance by ancestry
 variance_by_ancestry <- data.table()
@@ -643,19 +713,19 @@ for (condition in unique(adata$obs[[output_column]])){
 # Visualize 
 # Mapping
 variance_mapping <- c(
-  "genetic_ancestry" = "Genetic ancestry",
-  "cancer_type_detailed" = "Histologocal subtype",
-  "subtype" = "Molecular subtype",
-  "sex" = "Sex",
-  "age" = "Age"
+  "genetic_ancestry"      = "Genetic ancestry",
+  "cancer_type_detailed"  = "Histologocal subtype",
+  "subtype"               = "Molecular subtype",
+  "sex"                   = "Sex",
+  "age"                   = "Age"
 )
 
 variance_colors <- c(
-  "Genetic ancestry" = "#1f77b4", 
-  "Histologocal subtype" = "#ff7f0e",  
-  "Molecular subtype" = "#2ca02c",  
-  "Sex" = "#d62728",  
-  "Age" = "#9467bd"  
+  "Genetic ancestry"      = "#1f77b4", 
+  "Histologocal subtype"  = "#ff7f0e",  
+  "Molecular subtype"     = "#2ca02c",  
+  "Sex"                   = "#d62728",  
+  "Age"                   = "#9467bd"  
 )
 
 variance_explained <- variance_explained %>%
@@ -690,8 +760,7 @@ avg_r2_var <- variance_explained[, .(Mean_R2 = mean(R2, na.rm = TRUE)), by = .(V
 avg_r2_cond <- variance_by_ancestry[, .(Mean_R2 = mean(R2, na.rm = TRUE)), by = .(Variable = Condition)]
 # Merge the two datasets
 avg_r2 <- rbind(avg_r2_var, avg_r2_cond, use.names = TRUE, fill = TRUE)
-# Save
-fwrite(avg_r2, file.path(path_to_save_location, "Variance_explained.csv"))
+
 
 # ---- Variance explained (variance_explained_plot) ----
 variance_explained_plot <- variance_explained |>

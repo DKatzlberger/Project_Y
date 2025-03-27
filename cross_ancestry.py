@@ -42,7 +42,7 @@ if len(sys.argv) > 1:
 else:
     # Dev settings 
     # data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_ADMIX.yml
-    YAML_FILE = "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml"
+    YAML_FILE = "data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_ADMIX.yml"
     print("Running interactive mode for development.")
 
 # Here starts the script   
@@ -99,23 +99,46 @@ data_validator.check_min_samples_per_class(
 setup.log("Feature selection")
 # Filtering based on all of the data (consistent with interactions)
 if setup.filter_features and setup.data_type == "expression":
+
+    # Transform to logCPM
+    norm_factors = calculate_tmm_norm_factors(data.X)
+    cpm_data = cpm(data.X, norm_factors = norm_factors, log = True)
     # Filter by signal/count
-    cpm_data = cpm(data.X)
-    min_counts = min_signal_by_percentile(cpm_data, percentile=25)
-    filtered_features = filter_by_signal(cpm_data, min_signal=min_counts)
+    min_counts = signal_by_percentile(cpm_data, percentile = 25)
+    filtered_features = filter_by_signal(cpm_data, min_counts)
+    # Subset
+    filtered_data = data[:, filtered_features]
+
+    # Variance filtering
+    norm_factors = calculate_tmm_norm_factors(filtered_data.X)
+    cpm_data = cpm(filtered_data.X, norm_factors = norm_factors, log = True)
+    # Filter by variance
+    min_variance = variance_by_percentile(cpm_data, percentile = 25)
+    filtered_features = filter_by_variance(cpm_data, var_threshold = min_variance)
 
     # Subset features
     eur_data = eur_data[:, filtered_features]
     inf_data = inf_data[:, filtered_features]
 
 elif setup.filter_features and setup.data_type == "methylation":
+
+    # Transform to mvalues
+    mvals = beta_to_mvalue(data.X)
+    
     # Filter by variance
-    min_variance = min_variance_by_percentile(data.X, percentile=25)
-    filtered_features = filter_by_variance(data.X, var_threshold=min_variance)
+    min_variance = variance_by_percentile(mvals, percentile = 25)
+    filtered_features = filter_by_variance(mvals, var_threshold = min_variance)
 
     # Subset features
     eur_data = eur_data[:, filtered_features]
     inf_data = inf_data[:, filtered_features]
+
+elif setup.filter_features and setup.data_type == "protein":
+
+    # No filtering
+
+    eur_data = eur_data
+    inf_data = inf_data
 
 # Save features (for DGE)
 with open(setup.out("Features.yml"), "w") as f:
@@ -184,6 +207,7 @@ with open(setup.out(save_str), 'w') as f:
 save_str = f"Obs_inf.yml"
 with open(setup.out(save_str), 'w') as f:
     yaml.dump(inf_idx.to_list(), f)
+
 
 # RUN R define R to run
 R = ScriptRunner(r_path="/usr/bin/Rscript", py_path="/opt/conda/envs/ancestry/bin/python3")

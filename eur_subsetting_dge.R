@@ -82,7 +82,7 @@ print("Start differential gene expression analysis.")
 # Select normalization method
 data_type <- setup$data_type
 dge_normalization <- setup$dge_normalization
-normalization_method <- normalization_methods[[data_type]][[dge_normalization]]
+normalization_method <- normalization_methods[[data_type]][[dge_normalization]]$"function"
 
 # Transpose (rows = Genes, cols = Samples)
 constant_split_t <- t(constant_split$X)
