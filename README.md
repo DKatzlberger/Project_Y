@@ -54,7 +54,5 @@ phenotypes            <- paste0(class_0, "_vs_", class_1)
 ancestries            <- paste0(train_ancestry, "_to_", infer_ancestry)
 dir_name              <- paste(c(phenotypes, ancestries, analysis_name), collapse = "_")
 path_to_save_location <- file.path(output_directory, dir_name)
-
-# > path_to_save_location
-# [1] "development/class_0_vs_class_1_ancestry_0_to_ancestry_1_interactions"
+path_to_save_location
 ```
