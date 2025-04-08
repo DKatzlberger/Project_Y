@@ -13,7 +13,8 @@ The script analysis which genes have interactions with ancestry in genotype-phen
 ***Settings:***
 
 The script accepts one commandline argument, which is a path to a settings.yaml file. 
-In the file you need to specify all required settings:
+In the file you need to specify all required settings. In the snipped below some of the settings are displayed.
+An example settings file for "interactions.R" can be found here [example_settings_interactions.yaml]().
 ```yaml
 # Classification
 class_0: your_class_0                  # Healthy, Cancer_1
@@ -26,7 +27,6 @@ ancestry_column: column_with_ancestry  # Genetic, Self_reported
 data_path: your/data/path.h5ad         # The script only works with .h5ad files
 # Output
 output_directory: your/save/location   # The script will create a directory at this place
-...
 ```
 
 ***Data:***
