@@ -12,4 +12,8 @@ Input to the script:
 Output:
 1. A directory with results.
 
-"interactions.R" will create a directory within your specified `output_directory`
+"interactions.R" will create a directory within your specified `output_directory`. 
+The name of this directory is structured as followed
+```r
+library(tidyverse)
+```r
