@@ -26,6 +26,7 @@ ancestry_column: column_with_ancestry  # Genetic, Self_reported
 data_path: your/data/path.h5ad         # The script only works with .h5ad files
 # Output
 output_directory: your/save/location   # The script will create a directory at this place
+...
 ```
 
 ***Data:***

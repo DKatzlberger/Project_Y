@@ -9,7 +9,6 @@ suppressPackageStartupMessages(
     library(edgeR)
     library(fgsea)
     library(Rtsne)
-    library(clusterProfiler)
     library(org.Hs.eg.db)
     # Parallelization
     library(parallel)
