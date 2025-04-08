@@ -10,7 +10,8 @@ Input:
 1. Settings in yaml format
 2. Data in h5ad format
 
-**Settings:**
+***Settings:***
+
 The script accepts one commandline argument, which is a `settings.yaml`file. 
 In the file you specify all your settings:
 ```yaml
