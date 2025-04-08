@@ -11,4 +11,5 @@ Input to the script:
 
 Output:
 1. A directory with results.
+
 "interactions.R" will create a directory within your specified `output_directory`
