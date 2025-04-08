@@ -13,7 +13,7 @@ The script analysis which genes have interactions with ancestry in genotype-phen
 ***Settings:***
 
 The script accepts one commandline argument, which is a path to a settings.yaml file. 
-In the file you specify all your settings:
+In the file you need to specify all required settings:
 ```yaml
 # Classification
 class_0: your_class_0                  # Healthy, Cancer_1
@@ -21,17 +21,17 @@ class_1: your_class_1                  # Disease, Cancer_2
 output_column: column_with_class       # Disease_status, Cancer_type
 train_ancestry: your_train_ancestry    # EUR
 infer_ancestry: your_infer_ancestry    # AFR
-ancestry_column: column_with_ancestry  # Genetic_ancestry, Self_reported
+ancestry_column: column_with_ancestry  # Genetic, Self_reported
 # Input
-data_path: your/data/path.h5ad          # The script only works with .h5ad files
+data_path: your/data/path.h5ad         # The script only works with .h5ad files
 # Output
-output_directory: 
+output_directory: your/save/location   # The script will create a directory at this place
 ```
 
 ***Data:***
 
 The data is structured in an [anndata](https://anndata.readthedocs.io/en/stable/) object. 
-The `obs` (meta data) is required to include the `output_column` with the specified classes 
+The `obs` (meta data) is required to include the `output_column` with specified classes and it requires to contain the `ancestry_column` with specified ancestries.
 
 
 **Output:**
