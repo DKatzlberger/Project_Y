@@ -31,7 +31,8 @@ output_directory: your/save/location   # The script will create a directory at t
 ***Data:***
 
 The data is structured in an [anndata](https://anndata.readthedocs.io/en/stable/) object. 
-The `obs` (meta data) is required to include the `output_column` with specified `class_0`, `class_1` and it requires to contain the `ancestry_column` with specified `train_ancestry` and `infer_ancestry`.
+*X* is required to contain your molecular data in format *observations* x *features*.
+*obs* (meta data) is required to include the `output_column` with specified `class_0`, `class_1` and it requires to contain the `ancestry_column` with specified `train_ancestry`, `infer_ancestry`.
 
 
 **Output:**
