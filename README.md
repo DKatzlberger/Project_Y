@@ -36,11 +36,12 @@ The data is structured in an [anndata](https://anndata.readthedocs.io/en/stable/
 ```r
 data_path <- "your/data/path.h5ad"
 adata     <- read_h5ad(data_path)
-# > adata
-# AnnData object with n_obs × n_vars = 794 × 20338
+adata
+```
+```r
+AnnData object with n_obs × n_vars = 794 × 20338
     obs: column_with_class, column_with_ancestry
 ```
-
 
 **Output:**
 1. A directory with results.
