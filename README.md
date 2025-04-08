@@ -22,4 +22,6 @@ output_directory <- "development"  # modified by user
 
 dir_name              <- paste0(class_0, "_vs_", class_1, "_", analysis_name)
 path_to_save_location <- file.path(output_directory, dir_name)
+# > dir_name
+# [1] "development/class_0_vs_class_1_interactions"
 ```
