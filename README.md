@@ -1,2 +1,4 @@
 # Project_Y
-Cross-ancestry machine learning.
+Genotype-phenotype generalizability across ancestries
+
+The repository (currently) contains one running script "interactions.R"
