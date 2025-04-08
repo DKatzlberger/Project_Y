@@ -38,8 +38,8 @@ data_path <- "your/data/path.h5ad"
 adata     <- read_h5ad(data_path)
 adata
 ```
-```r
-AnnData object with n_obs × n_vars = 794 × 20338
+```
+AnnData object with n_obs × n_vars = n_observations × n_features
     obs: column_with_class, column_with_ancestry
 ```
 
