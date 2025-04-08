@@ -6,9 +6,10 @@ The repository (currently) contains:
 
 The script analysis which genes have interactions with ancestry in genotype-phenotype relationships.
 
-Input to the script:
+Input:
+1. A yaml file
 The script accepts one commandline argument, which is a `settings.yaml`file. 
-In `settings.yaml` file you specify all your settings.
+In the file you specify all your settings.
 1. Settings in yml format.
 ```yaml
 class_0: your_class_0
