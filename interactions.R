@@ -63,22 +63,24 @@ if (length(args) > 0) {
 set.seed(42)
 
 # 'vscratch_dir_out' for summarized analysis
-vscratch_dir_out = "data/combined_runs"
-analysis_name = "interactions"
+vscratch_dir_out  <-  "data/combined_runs"
+analysis_name     <-  "interactions"
 
-# Transform settings into variables
-tag             <- setup$tag
-comparison      <- setup$classification$comparison
-output_column   <- setup$classification$output_column
-ancestry_column <- setup$classification$ancestry_column
-train_ancestry  <- setup$classification$train_ancestry
-inf_ancestry    <- setup$classification$infer_ancestry
+# Settings (transform settings into variables)
+# Input
+tag               <- setup$tag
+class_0           <- setup$class_0
+class_1           <- setup$class_1
+output_column     <- setup$output_column
+ancestry_column   <- setup$ancestry_column
+train_ancestry    <- setup$train_ancestry
+inf_ancestry      <- setup$infer_ancestry
+data_path         <- setup$data_path
+# Output
+output_directory  <- setup$output_directory
 
-# Construct output directory name
-condition <- paste(comparison, collapse = "_vs_")
-ancestry  <- paste0(toupper(train_ancestry), "_to_", toupper(inf_ancestry))
+# Create output directory
 
-# Create directory if it does not exists
 match_pattern         <- paste0(tag, "_", condition, "_", ancestry, "_", analysis_name)
 path_to_save_location <- file.path(vscratch_dir_out, match_pattern)
 # Make directory

@@ -5,5 +5,10 @@ The repository (currently) contains:
 1. A running script "interactions.R"
 
 Input to the script:
-1. Data in anndata format 
-2. Settings in yml format
+1. Settings in yml format.
+
+
+
+Output:
+1. A directory with results.
+"interactions.R" will create a directory within your specified `output_directory`
