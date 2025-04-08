@@ -6,13 +6,13 @@ The repository (currently) contains:
 
 The script analysis which genes have interactions with ancestry in genotype-phenotype relationships.
 
-Input:
+**Input:**
 1. Settings in yaml format
 2. Data in h5ad format
 
 ***Settings:***
 
-The script accepts one commandline argument, which is a `settings.yaml`file. 
+The script accepts one commandline argument, which is a path to a settings.yaml file. 
 In the file you specify all your settings:
 ```yaml
 # Classification
@@ -26,8 +26,12 @@ ancestry_column: column_with_ancestry
 data_path: your/data/path.h5ad          # The script only works with .h5ad files
 ```
 
+***Data:***
 
-Output:
+The data is structured in an [anndata](https://anndata.readthedocs.io/en/stable/) object.
+
+
+**Output:**
 1. A directory with results.
 
 "interactions.R" will create a directory within your specified `output_directory`. 
