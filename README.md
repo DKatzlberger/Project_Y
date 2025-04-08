@@ -16,19 +16,22 @@ The script accepts one commandline argument, which is a path to a settings.yaml 
 In the file you specify all your settings:
 ```yaml
 # Classification
-class_0: your_class_0
-class_1: your_class_1
-output_column: column_with_class
-train_ancestry: your_train_ancestry
-infer_ancestry: your_infer_ancestry
-ancestry_column: column_with_ancestry
+class_0: your_class_0                  # Healthy, Cancer_1
+class_1: your_class_1                  # Disease, Cancer_2
+output_column: column_with_class       # Disease_status, Cancer_type
+train_ancestry: your_train_ancestry    # EUR
+infer_ancestry: your_infer_ancestry    # AFR
+ancestry_column: column_with_ancestry  # Genetic_ancestry, Self_reported
 # Input
 data_path: your/data/path.h5ad          # The script only works with .h5ad files
+# Output
+output_directory: 
 ```
 
 ***Data:***
 
-The data is structured in an [anndata](https://anndata.readthedocs.io/en/stable/) object.
+The data is structured in an [anndata](https://anndata.readthedocs.io/en/stable/) object. 
+The `obs` (meta data) is required to include the `output_column` with the specified classes 
 
 
 **Output:**
@@ -37,12 +40,14 @@ The data is structured in an [anndata](https://anndata.readthedocs.io/en/stable/
 "interactions.R" will create a directory within your specified `output_directory`. 
 The name of this directory is structured as followed
 ```r
+# Specified settings:
 class_0          <- "class_0"      # modified by user
 class_1          <- "class_1"      # modified by user
 train_ancestry   <- "ancestry_0"   # modified by user
 infer_ancestry   <- "ancestry_1"   # modified by user
 output_directory <- "development"  # modified by user
 
+# Script code:
 analysis_name         <- "interactions"
 phenotypes            <- paste0(class_0, "_vs_", class_1)
 ancestries            <- paste0(train_ancestry, "_to_", infer_ancestry)
