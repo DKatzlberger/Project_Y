@@ -27,6 +27,7 @@ suppressPackageStartupMessages(
 # Custom functions
 source("r_utils.R")
 source("figure_themes.R")
+font_size = 8
 
 # Here starts the script
 
@@ -42,16 +43,21 @@ if (length(args) > 0) {
 } else {
   # Dev settings if no command-line argument provided
 
+  # BRCA
   # data/inputs/settings/PanCanAtlas_BRCA_RSEM_Basal_vs_non-Basal_EUR_to_ADMIX.yml
   # data/inputs/settings/PanCanAtlas_BRCA_RPPA_Basal_vs_non-Basal_EUR_to_ADMIX.yml
   # data/inputs/settings/Firehose_BRCA_BETA_Basal_vs_non-Basal_EUR_to_ADMIX.yml
 
+  # LUSC LUAD
   # data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_LUSC_vs_LUAD_EUR_to_ADMIX.yml
   # data/inputs/settings/PanCanAtlas_LUSC_LUAD_RPPA_LUSC_vs_LUAD_EUR_to_ADMIX.yml
   # data/inputs/settings/Firehose_LUSC_LUAD_BETA_LUSC_vs_LUAD_EUR_to_ADMIX.yml
 
+  # UCEC
+  # data/inputs/settings/PanCanAtlas_UCEC_RSEM_CN-high_vs_non-CN-high_EUR_to_ADMIX.yml
 
-  yaml_file <- "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RPPA_LUSC_vs_LUAD_EUR_to_ADMIX.yml"
+
+  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RPPA_Basal_vs_non-Basal_EUR_to_ADMIX.yml"
   print("Running interactive mode for development.")
   setup <- yaml.load_file(yaml_file)
 }
@@ -132,16 +138,14 @@ if (setup$data_type == "protein") {
   cluster_data <- adata$X
 }
 
-
 # TSNE
-set.seed(42)
-# Reduce 
+# Reduce perpelexity
 if (ncol(cluster_data) < 300){
   perplexity = 10
 } else{
   perplexity = 50
 }
-
+set.seed(42)
 tsne <- Rtsne(cluster_data, dims = 2, perplexity)
 # Coordinates
 tsne_coordinates <- data.frame(TSNE1 = tsne$Y[, 1], TSNE2 = tsne$Y[, 2])
@@ -179,7 +183,7 @@ tsne_genetic_ancestry_plot <- tsne_coordinates |>
     title = "Genetic ancestry",
     color = "Genetic ancestry"
   ) +
-  theme_nature_fonts() +
+  theme_nature_fonts(font_size) +
   theme_small_legend() +
   theme_white_background() +
   theme(
@@ -212,7 +216,7 @@ tsne_cancer_type_detailed_plot <- tsne_coordinates |>
     title = "Histological subtype",
     color = "Histological subtype"
   ) +
-  theme_nature_fonts() +
+  theme_nature_fonts(font_size) +
   theme_small_legend() +
   theme_white_background() +
   theme(
@@ -243,7 +247,7 @@ tsne_subtype_plot <- tsne_coordinates |>
     title = "Molecular subtype",
     color = "Molecular subtpye"
   ) +
-  theme_nature_fonts() +
+  theme_nature_fonts(font_size) +
   theme_small_legend() +
   theme_white_background() +
   theme(
@@ -270,7 +274,7 @@ tsne_sex_plot <- tsne_coordinates |>
     title = "Sex",
     color = "Sex"
   ) +
-  theme_nature_fonts() +
+  theme_nature_fonts(font_size) +
   theme_small_legend() +
   theme_white_background() +
   theme(
@@ -281,15 +285,22 @@ tsne_sex_plot <- tsne_coordinates |>
   guides(color = guide_legend(ncol = 1))
 
 # ---- Patchwork ----
+cluster_title <- str_to_sentence(setup$data_type)
+# Plot
 tsne_plot <- tsne_genetic_ancestry_plot +
   tsne_cancer_type_detailed_plot +
   tsne_subtype_plot +
   tsne_sex_plot +
+  plot_annotation(
+    title = cluster_title
+  ) +
   plot_layout(
-    nrow = 2, ncol = 2,
+    nrow = 2, 
+    ncol = 2,
     guides = "collect"
   ) &
   theme(
+    plot.title = element_text(hjust = 0.5, size = font_size),
     legend.spacing = unit(2, "mm"), 
     legend.key.height = unit(5, "point"),         
     legend.key.width = unit(5, "point"),
@@ -300,14 +311,15 @@ tsne_plot <- tsne_genetic_ancestry_plot +
 ggsave(filename = "Patchwork_clustering_plot.pdf",
        path = path_to_save_location,
        plot = tsne_plot,
-       height = 3, width = 4.5)
+       height = 3.5, width = 4.5)
 
 # Save without legend
-cluster_title <- str_to_sentence(setup$data_type)
 tsne_plot_no_legend <- tsne_plot + 
-  plot_annotation(title = cluster_title) & 
+  plot_annotation(
+    title = cluster_title
+  ) & 
   theme(
-    plot.title = element_text(hjust = 0.5, size = 5),
+    plot.title = element_text(hjust = 0.5, size = font_size),
     legend.position = "none"
     )
 
@@ -637,8 +649,15 @@ variance_explained <- calculate_variance_explained(
   num_cores = setup$njobs
 ) 
 
+# Additional information
+variance_explained <- variance_explained |>
+  mutate(
+    data_type = setup$data_type
+  )
+
 # Save
 fwrite(variance_explained, file.path(path_to_save_location, "Variance_explained.csv"))
+
 
 # Variance by ancestry
 variance_by_ancestry <- data.table()
@@ -675,6 +694,15 @@ for (condition in unique(adata$obs[[output_column]])){
   variance_by_ancestry <- bind_rows(variance_by_ancestry, con_variance_by_ancestry)
 }
 
+# Additional information
+variance_by_ancestry <- variance_by_ancestry |>
+  mutate(
+    data_type = setup$data_type
+  )
+
+# Save
+fwrite(variance_by_ancestry, file.path(path_to_save_location, "Variance_by_ancestry.csv"))
+
 # Variance across ancestries
 variance_across_ancestry <- data.table()
 for (condition in unique(adata$obs[[output_column]])){
@@ -709,6 +737,7 @@ for (condition in unique(adata$obs[[output_column]])){
   # Combine
   variance_across_ancestry <- bind_rows(variance_across_ancestry, con_variance_across_ancestry)
 }
+
 
 # Visualize 
 # Mapping
@@ -791,7 +820,7 @@ variance_explained_plot <- variance_explained |>
     y = "Number of genes",
     fill = "Variable"
   ) +
-  theme_nature_fonts() +
+  theme_nature_fonts(font_size) +
   theme_small_legend() +
   theme_white_background() +
   theme(
@@ -808,6 +837,13 @@ ggsave(filename = "Variance_explained.pdf",
 
 # ---- Variance by ancestry (variance_by_ancestry_plot) ----
 variance_by_ancestry_plot <- variance_by_ancestry |>
+  left_join(
+    avg_r2_cond,
+    by = c("Condition" = "Variable")
+  ) |>
+  mutate(
+    Condition = paste0(Condition, " ~ ", round(Mean_R2 * 100, 2))
+  ) |>
   ggplot(
     aes(
       x = R2,
@@ -831,11 +867,11 @@ variance_by_ancestry_plot <- variance_by_ancestry |>
     y = "Number of genes",
     fill = "Condition"
   ) +
-  theme_nature_fonts() +
+  theme_nature_fonts(font_size) +
   theme_small_legend() +
   theme_white_background() +
   theme(
-    legend.position = c(legend_x_pos, legend_y_pos),  
+    legend.position = c(0.8, 0.8),  
     legend.direction = "vertical",
     legend.title = element_blank()
   ) 
@@ -875,7 +911,7 @@ variance_across_ancestry_plot <- variance_across_ancestry |>
     x = "Ancestry",
     y = "Variance"
   ) +
-  theme_nature_fonts() +
+  theme_nature_fonts(font_size) +
   theme_white_background() +
   theme_white_strip() +
   theme(legend.position = "none") 

@@ -18,6 +18,7 @@ suppressPackageStartupMessages(
 # Source custom functions
 source("r_utils.R")
 source("figure_themes.R")
+base_size = 8
 
 # Parse command-line arguments
 args <- commandArgs(trailingOnly = TRUE)
@@ -38,7 +39,11 @@ if (length(args) > 0) {
 } else {
   print("Running interactive mode for development.")
   # Yaml file used for development (often an actual job script)
-  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_EAS.yml"
+
+  # data/inputs/settings/Firehose_BRCA_BETA_Basal_vs_non-Basal_EUR_to_EAS.yml
+  # data/inputs/settings/PanCanAtlas_BRCA_RSEM_Basal_vs_non-Basal_EUR_to_EAS.yml
+
+  yaml_file <- "data/inputs/settings/Firehose_BRCA_BETA_Basal_vs_non-Basal_EUR_to_EAS.yml"
   # 1. Check if it's a valid yaml file
   # 2. Load the yaml file
   is_yml_file(yaml_file)
@@ -75,7 +80,6 @@ if (!dir.exists(path_to_save_location)) {
 all_vscratch_dir_in <- list.dirs(vscratch_dir_in, full.names = TRUE, recursive = FALSE)
 match_vscratch_dir <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
 
-# Contrast
 # DGE
 contrast_metric_dge <- fload_data(match_vscratch_dir, file = "Contrast_metric_dge.csv")
 raw_metric_dge <- fload_data(match_vscratch_dir, file = "LogFCs.csv")
@@ -88,6 +92,9 @@ contrast_metric_ml <- fload_data(match_vscratch_dir, file = "Contrast_metric_ml.
 raw_metric_ml <- fload_data(match_vscratch_dir, file = "Probabilities.csv")
 # Save
 fwrite(contrast_metric_ml, file.path(path_to_save_location, "Contrast_metric_ml.csv"))
+fwrite(raw_metric_ml, file.path(path_to_save_location, "Probabilities.csv"))
+
+# ---------------------------------------------------------------------------------------------------------------------
 
 # Statisitcs
 # DGE
@@ -1747,14 +1754,13 @@ contrast_density_R <- contrast_metric_dge |>
   facet_grid(
     rows = vars(Metric),
     col = vars(Ancestry),
-    # labeller = labeller(Ancestry = as_labeller(ancestry_labels))
   ) +
   labs(
     x = "Correlation coefficient",
     y = "Density",
     fill = "Prediction"
   ) +
-  theme_nature_fonts() +
+  theme_nature_fonts(base_size) +
   theme_small_legend() +
   theme_white_background() +
   theme_white_strip() +
@@ -1768,7 +1774,7 @@ contrast_density_R <- contrast_metric_dge |>
 ggsave(filename = "Contrast_density_R_values.pdf", 
        plot = contrast_density_R, 
        path = path_to_save_location, 
-       width = 3, height = 3
+       width = 5, height = 2.5
        )
 
 # ---- Contrast prediction phenotype (ML) ----

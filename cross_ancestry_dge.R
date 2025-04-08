@@ -33,55 +33,48 @@ if (length(args) > 0) {
 } else {
   print("Running interactive mode for development.")
   # Dev settings if no command-line argument provided
-  # data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_ADMIX.yml
-  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_ADMIX.yml"
+  yaml_file <- "dev_settings.yml"
   setup <- yaml.load_file(yaml_file)
 }
 
-# Set seed (because why not)
+output_directory  <- setup$output_directory
+ancestry_column   <- setup$ancestry_column
+infer_ancestry    <- setup$infer_ancestry
+comparison        <- setup$comparison
+output_column     <- setup$output_column
+
+# Set seed
 set.seed(setup$seed)
 
 # Load data
 adata <- read_h5ad(setup$data_path)
 
 # Load the selected feature used in ml
-output_directory <- setup$output_directory
 features <- yaml.load_file(file.path(output_directory, "Features.yml"))
-feature_n <- length(features)
 
 # Load the observation used in ml
 train_idx <- yaml.load_file(file.path(output_directory, "Obs_train.yml"))
-test_idx <- yaml.load_file(file.path(output_directory, "Obs_test.yml"))
-inf_idx <- yaml.load_file(file.path(output_directory, "Obs_inf.yml"))
-
-# Get number of samples
-train_n = length(train_idx)
-test_n = length(test_idx)
-inf_n = length(inf_idx)
+test_idx  <- yaml.load_file(file.path(output_directory, "Obs_test.yml"))
+inf_idx   <- yaml.load_file(file.path(output_directory, "Obs_inf.yml"))
 
 # Subset the data by the indexes create in python
-train_data <- adata[train_idx, features]
-test_data <- adata[test_idx, features]
-inf_data <- adata[inf_idx, features]
+train_data  <- adata[train_idx, features]
+test_data   <- adata[test_idx, features]
+inf_data    <- adata[inf_idx, features]
 
-# Assertion: Check if saved observation origin from the correct ancestry 
-ancestry_column <- setup$classification$ancestry_column
-infer_ancestry  <- setup$classification$infer_ancestry
-comparison <- setup$classification$comparison
-output_column <- setup$classification$output_column
-
-inf_adata <-  adata[adata$obs[ancestry_column] == infer_ancestry]
-inf_adata <-  inf_adata[inf_adata$obs[[output_column]] %in% comparison]
+# Check if saved observation origin from the correct ancestry
+inf_adata     <-  adata[adata$obs[ancestry_column] == infer_ancestry]
+inf_adata     <-  inf_adata[inf_adata$obs[[output_column]] %in% comparison]
 inf_adata_obs <- inf_adata$obs_names
 stopifnot(length(inf_adata_obs) == length(inf_idx))
 
 # Number of samples per output
-condition_count <- group_by(inf_adata$obs, !!sym(output_column)) |> count()
+# condition_count <- group_by(inf_adata$obs, !!sym(output_column)) |> count()
 
 # Covariate:
 # 1. Extract the covariate, if it exists and has a meaningful value
 covariate_list <- get_covariate(setup)
-# 2. Check if there are replicates and at least two levels for the covariate 
+# 2. Check if there are replicates and at least two levels for the covariate
 if (!is.null(covariate_list)) {
   # Covariate processing
   print("Checking covariates.")
@@ -113,75 +106,80 @@ if (!is.null(covariate_list)) {
       path = setup$output_directory,
       width = 5, height = 5
     )
-  }
-} else {
-  # Visualization when no covariates but visual_val is TRUE
-  if (setup$visual_val) {
-    # Visualize only the output column
-    to_visualize_columns <- setup$classification$output_column
-    # Datasets to visualize
-    datasets <- list(
-      Train = train_data$obs,
-      Test = test_data$obs,
-      `Inf` = inf_data$obs
-    )
-    # Create and save the plot
-    patchwork_plot <- create_stratification_plot(
-      datasets = datasets,
-      to_visualize_columns = to_visualize_columns
-    )
-    ggsave(
-      filename = "Validation_stratification_no_covariates.pdf",
-      plot = patchwork_plot,
-      path = setup$output_directory,
-      width = 5, height = 5
-    )
-  }
-}
+    }
+  } else {
+    # Visualization when no covariates but visual_val is TRUE
+    if (setup$visual_val) {
+      # Visualize only the output column
+      to_visualize_columns <- setup$output_column
+      # Datasets to visualize
+      datasets <- list(
+        Train = train_data$obs,
+        Test = test_data$obs,
+        `Inf` = inf_data$obs
+      )
+      # Create and save the plot
+      patchwork_plot <- create_stratification_plot(
+        datasets = datasets,
+        to_visualize_columns = to_visualize_columns
+      )
+      ggsave(
+        filename = "Validation_stratification_no_covariates.pdf",
+        plot = patchwork_plot,
+        path = setup$output_directory,
+        width = 5, height = 5
+      )
+    }
+    }
 
 # Design matrix for GLM
-output_column <- setup$classification$output_column
-train_design <- create_design(output_column, train_data$obs, covariate = covariate_list)                                                       
-test_design <- create_design(output_column, test_data$obs, covariate = covariate_list)
-inf_design <- create_design(output_column, inf_data$obs, covariate = covariate_list)
+output_column <- setup$output_column
+train_design  <- create_design(output_column, train_data$obs, covariate = covariate_list)                                                       
+test_design   <- create_design(output_column, test_data$obs, covariate = covariate_list)
+inf_design    <- create_design(output_column, inf_data$obs, covariate = covariate_list)
 
 # Limma workflow
 print("Start differential gene expression analysis.")
 # Select normalization method
-data_type <- setup$data_type
-dge_normalization <- setup$dge_normalization
-normalization_method <- normalization_methods[[data_type]][[dge_normalization]]$"function"
-values_output_name <- normalization_methods[[data_type]][[dge_normalization]]$"output_name"
+tech <- setup$tech
+dge_normalization     <- setup$dge_normalization
+normalization_method  <- normalization_methods[[tech]][[dge_normalization]]$"function"
+values_output_name    <- normalization_methods[[tech]][[dge_normalization]]$"output_name"
 
 # Transpose (rows = Genes, cols = Samples)
-train_data_t = t(train_data$X)
-test_data_t = t(test_data$X)
-inf_data_t = t(inf_data$X)
+train_data_t  <- t(train_data$X)
+test_data_t   <- t(test_data$X)
+inf_data_t    <- t(inf_data$X)
 
 # Normalization
-train_norm <- normalization_method(train_data_t, train_design)
-test_norm <- normalization_method(test_data_t, test_design)
-inf_norm <- normalization_method(inf_data_t, inf_design)
+train_norm  <- normalization_method(train_data_t, train_design)
+test_norm   <- normalization_method(test_data_t, test_design)
+inf_norm    <- normalization_method(inf_data_t, inf_design)
 
 # Extract matrix (used for plotting)
 train_norm_matrix <- if (is.list(train_norm) && !is.null(train_norm$E)) train_norm$E else train_norm
-test_norm_matrix <- if (is.list(test_norm) && !is.null(test_norm$E)) test_norm$E else test_norm
-inf_norm_matrix <- if (is.list(inf_norm) && !is.null(inf_norm$E)) inf_norm$E else inf_norm
+test_norm_matrix  <- if (is.list(test_norm) && !is.null(test_norm$E)) test_norm$E else test_norm
+inf_norm_matrix   <- if (is.list(inf_norm) && !is.null(inf_norm$E)) inf_norm$E else inf_norm
 
 # Fit the model (means model)
 train_limma_fit <- lmFit(train_norm, design = train_design)
-test_limma_fit <- lmFit(test_norm, design = test_design)
-inf_limma_fit <- lmFit(inf_norm, design = inf_design)
+test_limma_fit  <- lmFit(test_norm, design = test_design)
+inf_limma_fit   <- lmFit(inf_norm, design = inf_design)
 
 # Ebayes
 train_limma_fit <- eBayes(train_limma_fit)
-test_limma_fit <- eBayes(test_limma_fit)
-inf_limma_fit <- eBayes(inf_limma_fit)
+test_limma_fit  <- eBayes(test_limma_fit)
+inf_limma_fit   <- eBayes(inf_limma_fit)
 
 # Results means model
-train_mean_res <- extract_results(train_limma_fit)
-test_mean_res <- extract_results(test_limma_fit)
-inf_mean_res <- extract_results(inf_limma_fit)
+train_mean_res  <- extract_results(train_limma_fit)
+test_mean_res   <- extract_results(test_limma_fit)
+inf_mean_res    <- extract_results(inf_limma_fit)
+
+# Add status (information on subset)
+train_mean_res$Status <- "Train"
+test_mean_res$Status  <- "Test"
+inf_mean_res$Status   <- "Inference"
 
 # Save results
 output_directory <- setup$output_directory
@@ -192,25 +190,40 @@ fwrite(inf_mean_res, file.path(output_directory, "Limma_means_inf.csv"))
 # Create contrast matrix 
 print("Fit contrast.")
 # Used for hypothesis testing between groups
-comparison <- setup$classification$comparison
+comparison <- setup$comparison
 contrast_matrix_train <- create_contrast(colnames(train_design), conditions = comparison)
-contrast_matrix_test <- create_contrast(colnames(test_design), conditions = comparison)
-contrast_matrix_inf <- create_contrast(colnames(inf_design), conditions = comparison)
+contrast_matrix_test  <- create_contrast(colnames(test_design), conditions = comparison)
+contrast_matrix_inf   <- create_contrast(colnames(inf_design), conditions = comparison)
+
+# Remove inverse comparison
+if (setup$multiclass){
+  print("Multiclass does not need pruning of coefficients.")
+}else{
+  print("Removing inverse testing.")
+  contrast_matrix_train <- contrast_matrix_train[, 1, drop = FALSE]
+  contrast_matrix_test  <- contrast_matrix_test[, 1, drop = FALSE]
+  contrast_matrix_inf   <- contrast_matrix_inf[, 1, drop = FALSE]
+}
 
 # Fit contrast
 train_limma_fit_contrast <- contrasts.fit(train_limma_fit, contrast_matrix_train)
-test_limma_fit_contrast <- contrasts.fit(test_limma_fit, contrast_matrix_test)
-inf_limma_fit_contrast <- contrasts.fit(inf_limma_fit, contrast_matrix_inf)
+test_limma_fit_contrast  <- contrasts.fit(test_limma_fit, contrast_matrix_test)
+inf_limma_fit_contrast   <- contrasts.fit(inf_limma_fit, contrast_matrix_inf)
 
 # Ebayes
 train_limma_fit_contrast <- eBayes(train_limma_fit_contrast)
-test_limma_fit_contrast <- eBayes(test_limma_fit_contrast)
-inf_limma_fit_contrast <- eBayes(inf_limma_fit_contrast)
+test_limma_fit_contrast  <- eBayes(test_limma_fit_contrast)
+inf_limma_fit_contrast   <- eBayes(inf_limma_fit_contrast)
 
 # Results contrast
 train_contrast_res <- extract_results(train_limma_fit_contrast)
-test_contrast_res <- extract_results(test_limma_fit_contrast)
-inf_contrast_res <- extract_results(inf_limma_fit_contrast)
+test_contrast_res  <- extract_results(test_limma_fit_contrast)
+inf_contrast_res   <- extract_results(inf_limma_fit_contrast)
+
+# Add status (information on subset)
+train_contrast_res$Status <- "Train"
+test_contrast_res$Status  <- "Test"
+inf_contrast_res$Status   <- "Inference"
 
 # Save results
 output_directory <- setup$output_directory
@@ -218,10 +231,10 @@ fwrite(train_contrast_res, file.path(output_directory, "Limma_contrast_train.csv
 fwrite(test_contrast_res, file.path(output_directory, "Limma_contrast_test.csv"))
 fwrite(inf_contrast_res,file.path(output_directory, "Limma_contrast_inf.csv"))
 
-# Filter coef that are in comparison (only interested in those)
-train_contrast_res <- filter(train_contrast_res, coef %in% setup$classification$comparison)
-test_contrast_res <- filter(test_contrast_res, coef %in% setup$classification$comparison)
-inf_contrast_res <- filter(inf_contrast_res, coef %in% setup$classification$comparison)
+# # Filter coef that are in comparison (only interested in those)
+# train_contrast_res <- filter(train_contrast_res, coef %in% setup$comparison)
+# test_contrast_res  <- filter(test_contrast_res, coef %in% setup$comparison)
+# inf_contrast_res   <- filter(inf_contrast_res, coef %in% setup$comparison)
 
 
 # Visualization (Validation of models) -----------------------------------------------------------------------------------------
@@ -248,7 +261,7 @@ if (setup$visual_val) {
     mean_stats = train_mean_res,
     contrast_stats = train_contrast_res,
     goi = goi,
-    data_output_column = setup$classification$output_column
+    data_output_column = setup$output_column
   )
 
   i <- visual_validation(
@@ -257,7 +270,7 @@ if (setup$visual_val) {
     mean_stats = inf_mean_res,
     contrast_stats = inf_contrast_res,
     goi = goi,
-    data_output_column = setup$classification$output_column
+    data_output_column = setup$output_column
   )
 
   # Save the pictures
@@ -268,78 +281,78 @@ if (setup$visual_val) {
 }
 
 
-# Raw logFC
-train_log_FC <- train_contrast_res |>
-  select(coef, Feature, logFC) |>
-  mutate(
-    Status = "Train",
-    Ancestry = toupper(setup$classification$train_ancestry),
-  )
+# # Raw logFC
+# train_log_FC <- train_contrast_res |>
+#   select(coef, Feature, logFC) |>
+#   mutate(
+#     Status = "Train",
+#     Ancestry = toupper(setup$classification$train_ancestry),
+#   )
 
-test_log_FC <- test_contrast_res |>
-  select(coef, Feature, logFC) |>
-  mutate(
-    Status = "Test",
-    Ancestry = toupper(setup$classification$train_ancestry),
-  )
+# test_log_FC <- test_contrast_res |>
+#   select(coef, Feature, logFC) |>
+#   mutate(
+#     Status = "Test",
+#     Ancestry = toupper(setup$classification$train_ancestry),
+#   )
 
-inf_log_FC <- inf_contrast_res |>
-  select(coef, Feature, logFC) |>
-  mutate(
-    Status = "Inference",
-    Ancestry = toupper(setup$classification$infer_ancestry)
-  )
+# inf_log_FC <- inf_contrast_res |>
+#   select(coef, Feature, logFC) |>
+#   mutate(
+#     Status = "Inference",
+#     Ancestry = toupper(setup$classification$infer_ancestry)
+#   )
 
-# Combine
-raw_logFC <- bind_rows(train_log_FC, test_log_FC, inf_log_FC) |>
-  mutate(
-    Seed = setup$seed,
-    n_train_ancestry = train_n,
-    n_inf_ancestry = inf_n,
-    data_type = setup$data_type
-  )
+# # Combine
+# raw_logFC <- bind_rows(train_log_FC, test_log_FC, inf_log_FC) |>
+#   mutate(
+#     Seed = setup$seed,
+#     n_train_ancestry = train_n,
+#     n_inf_ancestry = inf_n,
+#     data_type = setup$data_type
+#   )
 
-# Save
-fwrite(raw_logFC, file.path(setup$output_directory, "LogFCs.csv"))
+# # Save
+# fwrite(raw_logFC, file.path(setup$output_directory, "LogFCs.csv"))
 
-# Calculate metric
-print("Correlation of logFCs.")
-# Select and rename logFC columns from each data frame for clarity
-train_log_FC <- train_contrast_res |>
-  select(coef, Feature, logFC) |>
-  rename(logFC_train = logFC)
+# # Calculate metric
+# print("Correlation of logFCs.")
+# # Select and rename logFC columns from each data frame for clarity
+# train_log_FC <- train_contrast_res |>
+#   select(coef, Feature, logFC) |>
+#   rename(logFC_train = logFC)
 
-test_log_FC <- test_contrast_res |>
-  select(coef, Feature, logFC) |>
-  rename(logFC_test = logFC)
+# test_log_FC <- test_contrast_res |>
+#   select(coef, Feature, logFC) |>
+#   rename(logFC_test = logFC)
 
-inf_log_FC <- inf_contrast_res |>
-  select(coef, Feature, logFC) |>
-  rename(logFC_inf = logFC)
+# inf_log_FC <- inf_contrast_res |>
+#   select(coef, Feature, logFC) |>
+#   rename(logFC_inf = logFC)
 
-# Merge all three data frames (aligned by coef and feature)
-merged_log_FC <- train_log_FC |>
-  inner_join(test_log_FC, by = c("coef", "Feature")) |>
-  inner_join(inf_log_FC, by = c("coef", "Feature"))
+# # Merge all three data frames (aligned by coef and feature)
+# merged_log_FC <- train_log_FC |>
+#   inner_join(test_log_FC, by = c("coef", "Feature")) |>
+#   inner_join(inf_log_FC, by = c("coef", "Feature"))
 
-# Correlation summarized across genes
-pearson <- head(compute_correlation(data = merged_log_FC, method = "pearson"), 2)
-spearman <- head(compute_correlation(data = merged_log_FC, method = "spearman"), 2)
+# # Correlation summarized across genes
+# pearson <- head(compute_correlation(data = merged_log_FC, method = "pearson"), 2)
+# spearman <- head(compute_correlation(data = merged_log_FC, method = "spearman"), 2)
 
-# Make metric dataframe
-metric_df <- inner_join(pearson, spearman, by = c("V1", "V2")) |>
-  mutate(
-    Seed = setup$seed,
-    Status = ifelse(V1 == "logFC_test", "Test", "Inference"),
-    Ancestry = toupper(setup$classification$infer_ancestry),
-    Prediction = ifelse(V1 == "logFC_test", "Subset", "Ancestry"),
-    n_train_ancestry = train_n,
-    n_inf_ancestry = inf_n,
-    data_type = setup$data_type
-  )
+# # Make metric dataframe
+# metric_df <- inner_join(pearson, spearman, by = c("V1", "V2")) |>
+#   mutate(
+#     Seed = setup$seed,
+#     Status = ifelse(V1 == "logFC_test", "Test", "Inference"),
+#     Ancestry = toupper(setup$classification$infer_ancestry),
+#     Prediction = ifelse(V1 == "logFC_test", "Subset", "Ancestry"),
+#     n_train_ancestry = train_n,
+#     n_inf_ancestry = inf_n,
+#     data_type = setup$data_type
+#   )
 
-# Save
-fwrite(metric_df, file.path(setup$output_directory, "Contrast_metric_dge.csv"))
+# # Save
+# fwrite(metric_df, file.path(setup$output_directory, "Contrast_metric_dge.csv"))
 
 
 
@@ -457,147 +470,147 @@ fwrite(metric_df, file.path(setup$output_directory, "Contrast_metric_dge.csv"))
 # fwrite(metric_prediction, file.path(setup$output_directory, "Metric_contrast.csv"))
 
 
-# Predicting regression (Baseline differences) ----------------------------------------------------------------------
-print("Predicting baseline differences.")
-train_coefficients <- train_limma_fit$coefficients
-# Prediction
-test_predictions <- as_tibble(t(train_coefficients %*% t(test_design)), rownames = "Idx")
-inf_predictions <- as_tibble(t(train_coefficients %*% t(inf_design)), rownames = "Idx")
-# Observed
-test_observations <- as_tibble(t(test_norm_matrix), rownames = "Idx")
-inf_observations <- as_tibble(t(inf_norm_matrix), rownames = "Idx")
-# Meta
-test_meta <- as_tibble(test_data$obs, rownames = "Idx") |> select(Idx, setup$classification$output_column)
-inf_meta <- as_tibble(inf_data$obs, rownames = "Idx") |> select(Idx, setup$classification$output_column)
-# Merge
-test_predictions <- left_join(test_meta, test_predictions, by = "Idx")
-inf_predictions <- left_join(inf_meta, inf_predictions, by = "Idx")
+# # Predicting regression (Baseline differences) ----------------------------------------------------------------------
+# print("Predicting baseline differences.")
+# train_coefficients <- train_limma_fit$coefficients
+# # Prediction
+# test_predictions <- as_tibble(t(train_coefficients %*% t(test_design)), rownames = "Idx")
+# inf_predictions <- as_tibble(t(train_coefficients %*% t(inf_design)), rownames = "Idx")
+# # Observed
+# test_observations <- as_tibble(t(test_norm_matrix), rownames = "Idx")
+# inf_observations <- as_tibble(t(inf_norm_matrix), rownames = "Idx")
+# # Meta
+# test_meta <- as_tibble(test_data$obs, rownames = "Idx") |> select(Idx, setup$classification$output_column)
+# inf_meta <- as_tibble(inf_data$obs, rownames = "Idx") |> select(Idx, setup$classification$output_column)
+# # Merge
+# test_predictions <- left_join(test_meta, test_predictions, by = "Idx")
+# inf_predictions <- left_join(inf_meta, inf_predictions, by = "Idx")
 
-test_observations <- left_join(test_meta, test_observations, by = "Idx")
-inf_observations <- left_join(inf_meta, inf_observations, by = "Idx")
+# test_observations <- left_join(test_meta, test_observations, by = "Idx")
+# inf_observations <- left_join(inf_meta, inf_observations, by = "Idx")
 
-# Reshape
-test_observations <- test_observations |>
-  pivot_longer(
-    cols = -c(Idx, setup$classification$output_column), 
-    names_to = "Feature", 
-    values_to = "Observed"
-    )
+# # Reshape
+# test_observations <- test_observations |>
+#   pivot_longer(
+#     cols = -c(Idx, setup$classification$output_column), 
+#     names_to = "Feature", 
+#     values_to = "Observed"
+#     )
 
-inf_observations <- inf_observations |>
-  pivot_longer(
-    cols = -c(Idx, setup$classification$output_column), 
-    names_to = "Feature", 
-    values_to = "Observed"
-    )
+# inf_observations <- inf_observations |>
+#   pivot_longer(
+#     cols = -c(Idx, setup$classification$output_column), 
+#     names_to = "Feature", 
+#     values_to = "Observed"
+#     )
 
-test_predictions <- test_predictions |>
-  pivot_longer(
-    cols = -c(Idx, setup$classification$output_column), 
-    names_to = "Feature", 
-    values_to = "Predicted"
-    )
+# test_predictions <- test_predictions |>
+#   pivot_longer(
+#     cols = -c(Idx, setup$classification$output_column), 
+#     names_to = "Feature", 
+#     values_to = "Predicted"
+#     )
 
-inf_predictions <- inf_predictions |>
-  pivot_longer(
-    cols = -c(Idx, setup$classification$output_column), 
-    names_to = "Feature", 
-    values_to = "Predicted"
-    )
+# inf_predictions <- inf_predictions |>
+#   pivot_longer(
+#     cols = -c(Idx, setup$classification$output_column), 
+#     names_to = "Feature", 
+#     values_to = "Predicted"
+#     )
 
-# Merge (Observed, predicted)
-test_obs_pred <- left_join(test_observations, test_predictions, by = c("Idx", setup$classification$output_column, "Feature"))
-inf_obs_pred <- left_join(inf_observations, inf_predictions, by = c("Idx", setup$classification$output_column, "Feature"))
+# # Merge (Observed, predicted)
+# test_obs_pred <- left_join(test_observations, test_predictions, by = c("Idx", setup$classification$output_column, "Feature"))
+# inf_obs_pred <- left_join(inf_observations, inf_predictions, by = c("Idx", setup$classification$output_column, "Feature"))
 
-# ---- Per gene metric ----
-test_gene_error <- test_obs_pred |>
-  group_by(!!sym(setup$classification$output_column), Feature) |>
-  summarise(
-    RMSE = sqrt(mean((Observed - Predicted)^2)),  
-    MAE  = mean(abs(Observed - Predicted)),   
-    R2 = 1 - sum((Observed - Predicted)^2) / sum((Observed - mean(Observed))^2),   
-    .groups = "drop"
-  ) |>
-  mutate(
-    Status = "Test",
-    Prediction = "Subset"
-  )
+# # ---- Per gene metric ----
+# test_gene_error <- test_obs_pred |>
+#   group_by(!!sym(setup$classification$output_column), Feature) |>
+#   summarise(
+#     RMSE = sqrt(mean((Observed - Predicted)^2)),  
+#     MAE  = mean(abs(Observed - Predicted)),   
+#     R2 = 1 - sum((Observed - Predicted)^2) / sum((Observed - mean(Observed))^2),   
+#     .groups = "drop"
+#   ) |>
+#   mutate(
+#     Status = "Test",
+#     Prediction = "Subset"
+#   )
 
-inf_gene_error <- inf_obs_pred |>
-  group_by(!!sym(setup$classification$output_column), Feature) |>
-  summarise(
-    RMSE = sqrt(mean((Observed - Predicted)^2)),  
-    MAE  = mean(abs(Observed - Predicted)),
-    R2 = 1 - sum((Observed - Predicted)^2) / sum((Observed - mean(Observed))^2),  
-    .groups = "drop"
-  ) |>
-  mutate(
-    Status = "Inference",
-    Prediction = "Ancestry"
-  )
+# inf_gene_error <- inf_obs_pred |>
+#   group_by(!!sym(setup$classification$output_column), Feature) |>
+#   summarise(
+#     RMSE = sqrt(mean((Observed - Predicted)^2)),  
+#     MAE  = mean(abs(Observed - Predicted)),
+#     R2 = 1 - sum((Observed - Predicted)^2) / sum((Observed - mean(Observed))^2),  
+#     .groups = "drop"
+#   ) |>
+#   mutate(
+#     Status = "Inference",
+#     Prediction = "Ancestry"
+#   )
 
-# Combine
-baseline_per_gene_metric <- bind_rows(test_gene_error, inf_gene_error) |>
-  mutate(
-    Seed = setup$seed,
-    Ancestry = toupper(setup$classification$infer_ancestry),
-    n_train_ancestry = train_n,
-    n_inf_ancestry = inf_n,
-    data_type = setup$data_type
-  )
+# # Combine
+# baseline_per_gene_metric <- bind_rows(test_gene_error, inf_gene_error) |>
+#   mutate(
+#     Seed = setup$seed,
+#     Ancestry = toupper(setup$classification$infer_ancestry),
+#     n_train_ancestry = train_n,
+#     n_inf_ancestry = inf_n,
+#     data_type = setup$data_type
+#   )
 
-baseline_per_gene_metric <- baseline_per_gene_metric |>
-  left_join(condition_count, by = setup$classification$output_column) |>
-  rename(n_condition = n) |>
-  rename(Condition = !!sym(setup$classification$output_column))
+# baseline_per_gene_metric <- baseline_per_gene_metric |>
+#   left_join(condition_count, by = setup$classification$output_column) |>
+#   rename(n_condition = n) |>
+#   rename(Condition = !!sym(setup$classification$output_column))
 
-# Save
-fwrite(baseline_per_gene_metric, file.path(setup$output_directory, "Baseline_metric_per_gene_dge.csv"))
+# # Save
+# fwrite(baseline_per_gene_metric, file.path(setup$output_directory, "Baseline_metric_per_gene_dge.csv"))
 
-# ---- Summarized metric ----
-test_metric <- test_obs_pred |>
-  group_by(!!sym(setup$classification$output_column)) |>
-  summarise(
-    RMSE = sqrt(mean((Observed - Predicted)^2)),  
-    MAE  = mean(abs(Observed - Predicted)),      
-    R2   = 1 - (sum((Observed - Predicted)^2) / sum((Observed - mean(Observed))^2)),
-    .groups = "drop"
-  ) |>
-  mutate(
-    Status = "Test",
-    Prediction = "Subset"
-    )
+# # ---- Summarized metric ----
+# test_metric <- test_obs_pred |>
+#   group_by(!!sym(setup$classification$output_column)) |>
+#   summarise(
+#     RMSE = sqrt(mean((Observed - Predicted)^2)),  
+#     MAE  = mean(abs(Observed - Predicted)),      
+#     R2   = 1 - (sum((Observed - Predicted)^2) / sum((Observed - mean(Observed))^2)),
+#     .groups = "drop"
+#   ) |>
+#   mutate(
+#     Status = "Test",
+#     Prediction = "Subset"
+#     )
 
-inf_metric <- inf_obs_pred |>
-  group_by(!!sym(setup$classification$output_column)) |>
-  summarise(
-    RMSE = sqrt(mean((Observed - Predicted)^2)),  
-    MAE  = mean(abs(Observed - Predicted)),      
-    R2   = 1 - (sum((Observed - Predicted)^2) / sum((Observed - mean(Observed))^2)),
-    .groups = "drop"
-  ) |>
-  mutate(
-    Status = "Inference",
-    Prediction = "Ancestry"
-  )
+# inf_metric <- inf_obs_pred |>
+#   group_by(!!sym(setup$classification$output_column)) |>
+#   summarise(
+#     RMSE = sqrt(mean((Observed - Predicted)^2)),  
+#     MAE  = mean(abs(Observed - Predicted)),      
+#     R2   = 1 - (sum((Observed - Predicted)^2) / sum((Observed - mean(Observed))^2)),
+#     .groups = "drop"
+#   ) |>
+#   mutate(
+#     Status = "Inference",
+#     Prediction = "Ancestry"
+#   )
 
-# Combine test_metric and inf_metric
-baseline_metric <- bind_rows(test_metric, inf_metric) |>
-  mutate(
-    Seed = setup$seed,
-    Ancestry = toupper(setup$classification$infer_ancestry),
-    n_train_ancestry = train_n,
-    n_inf_ancestry = inf_n,
-    data_type = setup$data_type
-  )
+# # Combine test_metric and inf_metric
+# baseline_metric <- bind_rows(test_metric, inf_metric) |>
+#   mutate(
+#     Seed = setup$seed,
+#     Ancestry = toupper(setup$classification$infer_ancestry),
+#     n_train_ancestry = train_n,
+#     n_inf_ancestry = inf_n,
+#     data_type = setup$data_type
+#   )
 
-baseline_metric <- baseline_metric |>
-  left_join(condition_count, by = setup$classification$output_column) |>
-  rename(n_condition = n) |>
-  rename(Condition = !!sym(setup$classification$output_column))
+# baseline_metric <- baseline_metric |>
+#   left_join(condition_count, by = setup$classification$output_column) |>
+#   rename(n_condition = n) |>
+#   rename(Condition = !!sym(setup$classification$output_column))
 
-# Save 
-fwrite(baseline_metric, file.path(setup$output_directory, "Baseline_metric_dge.csv"))
+# # Save 
+# fwrite(baseline_metric, file.path(setup$output_directory, "Baseline_metric_dge.csv"))
 
 
 print("Switching back to Python.")

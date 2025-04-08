@@ -77,7 +77,7 @@ voom_normalization <- function(count_matrix, design_matrix) {
 
 # Normalization lookup list
 normalization_methods <- list(
-  "expression" = list(
+  "transcriptomics" = list(
     "limma_voom" = list(
       "function" = function(X, design, ...) voom_normalization(X, design, ...),  
       "output_name" = "logCPM (voom)"
@@ -113,7 +113,7 @@ normalization_methods <- list(
       "output_name" = "Input values"
     )
   ),
-  "protein" = list(
+  "proteomics" = list(
     "normalize_zscore" = list(
       "function" = function(X, ...) scale(X),
       "output_name" = "Z-score normalized values"
@@ -309,10 +309,10 @@ filter_by_variance <- function(data, var_threshold = 0.01, min_samples_ratio = 0
 # Function to check if covariate is present in settings
 get_covariate <- function(setup) {
   # Function to extract the covariate if present and valid
-  if ("covariate" %in% names(setup$classification) && 
-      !is.null(setup$classification$covariate) &&
-      any(nzchar(setup$classification$covariate))) {
-    return(setup$classification$covariate)
+  if ("covariate" %in% names(setup) && 
+      !is.null(setup$covariate) &&
+      any(nzchar(setup$covariate))) {
+    return(setup$covariate)
   } else {
     return(NULL)
   }

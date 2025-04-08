@@ -41,8 +41,13 @@ if len(sys.argv) > 1:
     YAML_FILE = args.settings_yml
 else:
     # Dev settings 
-    # data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_ADMIX.yml
-    YAML_FILE = "data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_ADMIX.yml"
+    # BRCA
+    # data/inputs/settings/PanCanAtlas_BRCA_BETA_Basal_vs_non-Basal_EUR_to_ADMIX.yml
+
+    # UCEC
+    # data/inputs/settings/PanCanAtlas_UCEC_RSEM_CN-high_vs_non-CN-high_EUR_to_ADMIX.yml
+
+    YAML_FILE = "dev_settings.yml"
     print("Running interactive mode for development.")
 
 # Here starts the script   
@@ -51,6 +56,7 @@ else:
 setup = Setup(YAML_FILE)
 # Create output directory
 setup.make_output_directory()
+
 # Save settings
 with open(setup.out("Settings.yml"), 'w') as f:
     yaml.dump(setup.final_config, f)
@@ -78,27 +84,16 @@ data_validator.data_settings_compatibility()
 # Check for NAs in molecular data
 data_validator.validate_na_counts()
 # Check for negative counts in molecular data
-data_validator.validate_negative_counts(data_type = setup.data_type)
+data_validator.validate_negative_counts()
+
 
 # Define classification task 
 setup.log("Define classification")
-data = (data[data.obs[setup.classification["output_column"]].isin(setup.classification["comparison"])])
-# Define training and inferred ancestry
-setup.log("Define ancestries")
-eur_data = data[data.obs[setup.classification["ancestry_column"]] == setup.classification["train_ancestry"]]
-inf_data = data[data.obs[setup.classification["ancestry_column"]] == setup.classification["infer_ancestry"]]
-
-# Assertion: Check min sample sizes per class in the eur data
-data_validator.check_min_samples_per_class(
-    data=eur_data.obs,
-    column=setup.classification["output_column"],
-    min_samples=setup.sample_cutoff,
-    data_name="All train data"
-    )
+data = (data[data.obs[setup.output_column].isin(setup.comparison)])
 
 setup.log("Feature selection")
 # Filtering based on all of the data (consistent with interactions)
-if setup.filter_features and setup.data_type == "expression":
+if setup.filter_features and setup.tech == "transcriptomics" and setup.data_type == "RSEM":
 
     # Transform to logCPM
     norm_factors = calculate_tmm_norm_factors(data.X)
@@ -117,10 +112,9 @@ if setup.filter_features and setup.data_type == "expression":
     filtered_features = filter_by_variance(cpm_data, var_threshold = min_variance)
 
     # Subset features
-    eur_data = eur_data[:, filtered_features]
-    inf_data = inf_data[:, filtered_features]
+    filtered_data = filtered_data[:, filtered_features]
 
-elif setup.filter_features and setup.data_type == "methylation":
+elif setup.filter_features and setup.tech == "methylation" and setup.data_type == "Beta":
 
     # Transform to mvalues
     mvals = beta_to_mvalue(data.X)
@@ -130,59 +124,80 @@ elif setup.filter_features and setup.data_type == "methylation":
     filtered_features = filter_by_variance(mvals, var_threshold = min_variance)
 
     # Subset features
-    eur_data = eur_data[:, filtered_features]
-    inf_data = inf_data[:, filtered_features]
+    filtered_data = data[:, filtered_features]
 
-elif setup.filter_features and setup.data_type == "protein":
+elif setup.filter_features and setup.data_type == "proteomics":
 
     # No filtering
-
-    eur_data = eur_data
-    inf_data = inf_data
+    filtered_data = data
 
 # Save features (for DGE)
 with open(setup.out("Features.yml"), "w") as f:
-    yaml.dump(eur_data.var_names.to_list(), f)
+    yaml.dump(filtered_data.var_names.to_list(), f)
+
+# Number of features
+n_features = filtered_data.shape[1]
+setup.add_settings({"n_features": n_features})
+
+# Define training and inferred ancestry
+setup.log("Define ancestries")
+eur_data = filtered_data[filtered_data.obs[setup.ancestry_column] == setup.train_ancestry]
+inf_data = filtered_data[filtered_data.obs[setup.ancestry_column] == setup.infer_ancestry]
+
+# Assertion: Check min sample sizes per class in the eur data
+data_validator.check_min_samples_per_class(
+    data=eur_data.obs,
+    column=setup.output_column,
+    min_samples=setup.sample_cutoff,
+    data_name="All train data"
+    )
 
 
 setup.log("Create subset")
 # Classify covariates
-covariate_list = setup.classification.get("covariate", None)
+covariate_list = setup.get("covariate", None)
 if covariate_list:
     covariate_types = classify_covariates(eur_data.obs, covariates=covariate_list)
 else:
     covariate_types = {"continuous": [], "discrete": []}
 
 # Stratify based on output column and discrete covariates
-to_stratify_columns = [setup.classification["output_column"]] + covariate_types["discrete"]
+stratification = [setup.output_column] + covariate_types["discrete"]
 # Create dictionary with frequencies
-frequencies = inf_data.obs.groupby(to_stratify_columns, observed=False).size().to_dict()
+strata = inf_data.obs.groupby(stratification, observed=False).size().to_dict()
 
-# Split the training data into train and test set (Based on frequency of compared ancestry)
-train_data, test_data = stratified_subset(eur_data, group_columns=to_stratify_columns, freq_dict=frequencies, seed=seed)
-train_idx, test_idx, inf_idx = train_data.obs_names, test_data.obs_names, inf_data.obs_names
-
+# Stratified subset
+train_data, test_data = stratified_subset(
+    eur_data, 
+    group_columns=stratification, 
+    freq_dict=strata, 
+    seed=seed
+    )
+train_idx = train_data.obs_names
+test_idx = test_data.obs_names
+inf_idx = inf_data.obs_names
 # Assertion: Check for data leakage
 data_validator.check_data_leakage(train_idx, test_idx)
+
 # Assertion: Check min sample size per class
 # Train data
 data_validator.check_min_samples_per_class(
     data=train_data.obs,
-    column=setup.classification["output_column"],
+    column=setup.output_column,
     min_samples=2,
     data_name="Train data"
     )
 # Test data
 data_validator.check_min_samples_per_class(
     data=test_data.obs,
-    column=setup.classification["output_column"],
+    column=setup.output_column,
     min_samples=2,
     data_name="Test data"
     )
 # Inf data
 data_validator.check_min_samples_per_class(
     data=inf_data.obs,
-    column=setup.classification["output_column"],
+    column=setup.output_column,
     min_samples=2,
     data_name="Inf data"
     )
@@ -199,14 +214,23 @@ data_validator.check_min_samples_per_class(
 save_str = f"Obs_train.yml"
 with open(setup.out(save_str), 'w') as f:
     yaml.dump(train_idx.to_list(), f)
+# Add to settings
+n_train = len(train_idx)
+setup.add_settings({"n_train_obs": n_train})
 
 save_str = f"Obs_test.yml"
 with open(setup.out(save_str), 'w') as f:
     yaml.dump(test_idx.to_list(), f)
+# Add to settings
+n_test = len(test_idx)
+setup.add_settings({"n_test_obs": n_test})
 
 save_str = f"Obs_inf.yml"
 with open(setup.out(save_str), 'w') as f:
     yaml.dump(inf_idx.to_list(), f)
+# Add to settings
+n_inf = len(inf_idx)
+setup.add_settings({"n_inf_obs": n_inf})
 
 
 # RUN R define R to run
@@ -221,12 +245,12 @@ R.run_script(script_path=os.path.join(os.getcwd(), script), args=[settings_file]
 # Machine learning
 setup.log("Sklearn data")
 # Encoding for the output column
-comparison = setup.classification["comparison"]
+comparison = setup.comparison
 encoder = {j: i for i, j in enumerate(comparison)}
 inv_encoder = {v: k for k, v in encoder.items()}
 
 # Transform anndata to np.array
-output_column = setup.classification["output_column"]
+output_column = setup.output_column
 train_X, train_y = np.array(train_data.X), encode_y(train_data.obs[output_column], encoder)
 test_X, test_y = np.array(test_data.X), encode_y(test_data.obs[output_column], encoder)
 inf_X, inf_y = np.array(inf_data.X), encode_y(inf_data.obs[output_column], encoder)
@@ -245,9 +269,9 @@ assert np.unique(inf_y).shape[0] == 2
 # Normalization of features 
 setup.log("Normalization")
 # Select normalization method
-data_type = setup.data_type
+tech = setup.tech
 ml_normalization = setup.ml_normalization
-normalization_method = ml_normalization_methods[data_type][ml_normalization]
+normalization_method = ml_normalization_methods[tech][ml_normalization]
 # Normalization
 train_X = normalization_method(train_X)
 test_X = normalization_method(test_X)
@@ -302,6 +326,7 @@ for algo_name, best_model in zip(setup.algorithms, best_models):
 # Probabilities
 y_hat = pd.concat(y_hat_list)
 # Add information
+y_hat["Ancestry"] = setup.classification["infer_ancestry"]
 y_hat["n_train_ancestry"] = len(train_idx)
 y_hat["n_inf_ancestry"] = len(inf_idx)
 y_hat["data_type"] = setup.data_type
@@ -311,6 +336,7 @@ y_hat.to_csv(setup.out(f"Probabilities.csv"), index=False)
 # Interpretations
 interpretaions = pd.concat(interpretations_list)
 # Add information
+interpretaions["Ancestry"] = setup.classification["infer_ancestry"]
 interpretaions["n_train_ancestry"] = len(train_idx)
 interpretaions["n_inf_ancestry"] = len(inf_idx)
 interpretations["data_type"] = setup.data_type
@@ -320,6 +346,7 @@ interpretaions.to_csv(setup.out(f"Interpretations.csv"), index=False)
 # Hyperparamters
 hyperparameters = pd.concat(hyperparameters_list)
 # Add information
+hyperparameters["Ancestry"] = setup.classification["infer_ancestry"]
 hyperparameters["n_train_ancestry"] = len(train_idx)
 hyperparameters["n_inf_ancestry"] = len(inf_idx)
 hyperparameters["data_type"] = setup.data_type
@@ -390,15 +417,18 @@ else:
     output_directory = setup["output_directory"]
     metric_across_algo.to_csv(os.path.join(output_directory, "Contrast_metric_ml.csv"), index=False)
 
-# Visualization
-if setup.visual_val:
-    setup.log('ML visualization')
+# # Visualization
+# if setup.visual_val:
+#     setup.log('ML visualization')
 
-    # Run the script to visualize
-    R.run_script(script_path=os.path.join(os.getcwd(), "run_visualization.R"), 
-                 args=[settings_file])
+#     # Run the script to visualize
+#     R.run_script(script_path=os.path.join(os.getcwd(), "run_visualization.R"), 
+#                  args=[settings_file])
 
-
+# Save settings (overwrite with new settings)
+with open(setup.out("Settings.yml"), 'w') as f:
+    yaml.dump(setup.final_config, f)
+setup.log("Settings done")
 
 
 # # Loop to train 

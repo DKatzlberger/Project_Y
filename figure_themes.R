@@ -314,7 +314,12 @@ volcano_plot <- function(data, logFC_thr = 1, point_size = 0.5, alpha_value = 0.
 }
 
 # Venn diagram
-venn_diagram <- function(venn_data) {
+venn_diagram <- function(venn_data, title = NULL, base_size) {
+
+  region_data <- venn_data$regionData
+
+  venn_data_intersections <- region_data |>
+    filter(count > 0 & grepl("/", name))
 
   # Adjust coordinates of labels
   venn_data_adjusted <- venn_setlabel(venn_data) |>
@@ -330,14 +335,21 @@ venn_diagram <- function(venn_data) {
         TRUE ~ Y 
       )
     )
+  
   # Create the plot and store it in variable 'p'
   p <- ggplot() +
-    # 1. region count layer
     geom_polygon(
-      data = venn_regionedge(venn_data),
-      aes(X, Y, group = id),
-      fill = "white"
+      data = venn_regionedge(venn_data_intersections),  # Use only intersection data
+      aes(X, Y, group = id, fill = count),  # Fill by count of the intersection
+      color = "black",  # Set a border color to distinguish the regions
+      size = 0.5
     ) +
+    # 1. region count layer
+    # geom_polygon(
+    #   data = venn_regionedge(venn_data),
+    #   aes(X, Y, group = id, fill = (1/count)),
+    #   # fill = "white"
+    # ) +
     # 2. set edge layer
     geom_path(
       data = venn_setedge(venn_data), 
@@ -358,11 +370,22 @@ venn_diagram <- function(venn_data) {
     ) +
     coord_equal() +
     theme_void() +
+    scale_fill_gradient(low = "white", high = "blue") + 
     theme(legend.position = "none")
+  
+  # If title is provided, add it
+  if (!is.null(title)) {
+      p <- p + ggtitle(title) + 
+        theme(
+          plot.title = element_text(size = base_size, hjust = 0.5)  
+        )
+    }
   
   # Return the plot object
   return(p)
 }
+
+
 
 # Interaction boxplots
 interactions_boxplot <- function(expression, ancestry_column, output_column, nrow, ncol) {

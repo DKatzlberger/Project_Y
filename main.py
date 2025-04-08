@@ -136,11 +136,11 @@ def submit_seed_jobs(settings_file,
         # Update settings
         settings["seed"] = int(seed)
         tag = settings['tag']
-        comparison = "_vs_".join(settings['classification']['comparison'])
+        comparison = "_vs_".join(settings['comparison'])
         analysis_name_seed = f"{analysis_name}_{seed}"
         modified_path = f"{tag}_{comparison}_{analysis_name_seed}"
 
-        settings['output_directory'] = os.path.join("data", "runs", modified_path)
+        settings['output_directory'] = os.path.join("data", "runs1", modified_path)
         job_name_list.append(modified_path)
 
         # Save modified settings
@@ -204,7 +204,7 @@ def submit_single_job(settings_file,
 
     # Create job name
     tag = settings['tag']
-    comparison = "_vs_".join(settings['classification']['comparison'])
+    comparison = "_vs_".join(settings['comparison'])
     job_name = f"{tag}_{comparison}_{analysis_name}"
 
     # Define paths and directories
@@ -260,14 +260,14 @@ if __name__ == "__main__":
     # Fixed arguments
     SINGULARITY = "data/ancestry_dk.sif"
     HOSTNAME = "trude.came.sbg.ac.at"
-    SEEDS = np.arange(1, 11)
+    SEEDS = np.arange(101, 1001)
 
     # Ancestry specific settings
     SETTINGS_FILES = [
         # BRCA
-        # "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml",
-        # "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_AFR.yml", 
-        # "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_EAS.yml"
+        "data/inputs/settings/PanCanAtlas_BRCA_RSEM_Basal_vs_non-Basal_EUR_to_ADMIX.yml",
+        # "data/inputs/settings/PanCanAtlas_BRCA_RSEM_Basal_vs_non-Basal_EUR_to_AFR.yml", 
+        # "data/inputs/settings/PanCanAtlas_BRCA_RSEM_Basal_vs_non-Basal_EUR_to_EAS.yml"
 
         # "data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_ADMIX.yml",
         # "data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_AFR.yml", 
@@ -282,9 +282,18 @@ if __name__ == "__main__":
         # "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_LUSC_vs_LUAD_EUR_to_AFR.yml",
         # "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_LUSC_vs_LUAD_EUR_to_EAS.yml"
 
-        "data/inputs/settings/Firehose_LUSC_LUAD_BETA_LUSC_vs_LUAD_EUR_to_ADMIX.yml",
-        "data/inputs/settings/Firehose_LUSC_LUAD_BETA_LUSC_vs_LUAD_EUR_to_AFR.yml",
-        "data/inputs/settings/Firehose_LUSC_LUAD_BETA_LUSC_vs_LUAD_EUR_to_EAS.yml"
+        # "data/inputs/settings/Firehose_LUSC_LUAD_BETA_LUSC_vs_LUAD_EUR_to_ADMIX.yml",
+        # "data/inputs/settings/Firehose_LUSC_LUAD_BETA_LUSC_vs_LUAD_EUR_to_AFR.yml",
+        # "data/inputs/settings/Firehose_LUSC_LUAD_BETA_LUSC_vs_LUAD_EUR_to_EAS.yml"
+
+        # "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RPPA_LUSC_vs_LUAD_EUR_to_ADMIX.yml",
+        # "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RPPA_LUSC_vs_LUAD_EUR_to_AFR.yml",
+        # "data/inputs/settings/PanCanAtlas_LUSC_LUAD_RPPA_LUSC_vs_LUAD_EUR_to_EAS.yml"
+
+        # UCEC
+        # "data/inputs/settings/PanCanAtlas_UCEC_RSEM_CN-high_vs_non-CN-high_EUR_to_ADMIX.yml",
+        # "data/inputs/settings/PanCanAtlas_UCEC_RSEM_CN-high_vs_non-CN-high_EUR_to_AFR.yml",
+        # "data/inputs/settings/PanCanAtlas_UCEC_RSEM_CN-high_vs_non-CN-high_EUR_to_EAS.yml"
 
 
     ]
@@ -320,119 +329,119 @@ if __name__ == "__main__":
             cpus=available_cpus
         )
 
-        # 'Interactions'
-        INTERACTIONS_SCRIPT = "interactions.R"
-        NAME = f"{eur_to_region}_interactions"
+    #     # 'Interactions'
+    #     INTERACTIONS_SCRIPT = "interactions.R"
+    #     NAME = f"{eur_to_region}_interactions"
 
-        interactions = submit_single_job(
-            settings_file=tmp_settings,
-            script_name=INTERACTIONS_SCRIPT,
-            analysis_name=NAME,
-            singularity=SINGULARITY,
-            hostname=HOSTNAME,
-            wait_for_jobs=True,
-            job_name_list=cross_ancestry_jobs,
-            cpus=available_cpus
-        )
+    #     interactions = submit_single_job(
+    #         settings_file=tmp_settings,
+    #         script_name=INTERACTIONS_SCRIPT,
+    #         analysis_name=NAME,
+    #         singularity=SINGULARITY,
+    #         hostname=HOSTNAME,
+    #         wait_for_jobs=True,
+    #         job_name_list=cross_ancestry_jobs,
+    #         cpus=available_cpus
+    #     )
 
-        # Combine wait jobs
-        interactions_wait_jobs = cross_ancestry_jobs
-        interactions_wait_jobs.append(interactions)
+    #     # Combine wait jobs
+    #     interactions_wait_jobs = cross_ancestry_jobs
+    #     interactions_wait_jobs.append(interactions)
 
-        # 'cross_ancestry' combine runs
-        COMBINE_SCRIPT = "cross_ancestry_combine_runs_01.R"
-        NAME = f"{eur_to_region}_cross_ancestry_combine_runs"
+    #     # 'cross_ancestry' combine runs
+    #     COMBINE_SCRIPT = "cross_ancestry_combine_runs_01.R"
+    #     NAME = f"{eur_to_region}_cross_ancestry_combine_runs"
 
-        cross_ancestry_combine_runs_job = submit_single_job(
-            settings_file=tmp_settings,
-            script_name=COMBINE_SCRIPT,
-            analysis_name=NAME,
-            singularity=SINGULARITY,
-            hostname=HOSTNAME,
-            wait_for_jobs=True,
-            job_name_list=interactions_wait_jobs,
-            cpus=available_cpus
-        )
+    #     cross_ancestry_combine_runs_job = submit_single_job(
+    #         settings_file=tmp_settings,
+    #         script_name=COMBINE_SCRIPT,
+    #         analysis_name=NAME,
+    #         singularity=SINGULARITY,
+    #         hostname=HOSTNAME,
+    #         wait_for_jobs=True,
+    #         job_name_list=interactions_wait_jobs,
+    #         cpus=available_cpus
+    #     )
 
-        # 'robustness' analysis
-        SCRIPT = "robustness.py"
-        ANALYSIS_NAME = f"{eur_to_region}_robustness"
+    #     # 'robustness' analysis
+    #     SCRIPT = "robustness.py"
+    #     ANALYSIS_NAME = f"{eur_to_region}_robustness"
 
-        # Submit seed jobs and retrieve the job names
-        robustness_jobs, tmp_settings = submit_seed_jobs(
-            settings_file=SETTINGS_FILE,
-            seeds=SEEDS,
-            hostname=HOSTNAME,
-            singularity=SINGULARITY,
-            script_name=SCRIPT,
-            analysis_name=ANALYSIS_NAME,
-            cpus=available_cpus
-        )
+    #     # Submit seed jobs and retrieve the job names
+    #     robustness_jobs, tmp_settings = submit_seed_jobs(
+    #         settings_file=SETTINGS_FILE,
+    #         seeds=SEEDS,
+    #         hostname=HOSTNAME,
+    #         singularity=SINGULARITY,
+    #         script_name=SCRIPT,
+    #         analysis_name=ANALYSIS_NAME,
+    #         cpus=available_cpus
+    #     )
 
-        # 'robustness' combine runs
-        COMBINE_SCRIPT = "robustness_combine_runs_01.R"
-        NAME = f"{eur_to_region}_robustness_combine_runs"
+    #     # 'robustness' combine runs
+    #     COMBINE_SCRIPT = "robustness_combine_runs_01.R"
+    #     NAME = f"{eur_to_region}_robustness_combine_runs"
 
-        robustness_combine_runs_job = submit_single_job(
-            settings_file=tmp_settings,
-            script_name=COMBINE_SCRIPT,
-            analysis_name=NAME,
-            singularity=SINGULARITY,
-            hostname=HOSTNAME,
-            wait_for_jobs=True,
-            job_name_list=robustness_jobs,
-            cpus=1
-        )
+    #     robustness_combine_runs_job = submit_single_job(
+    #         settings_file=tmp_settings,
+    #         script_name=COMBINE_SCRIPT,
+    #         analysis_name=NAME,
+    #         singularity=SINGULARITY,
+    #         hostname=HOSTNAME,
+    #         wait_for_jobs=True,
+    #         job_name_list=robustness_jobs,
+    #         cpus=1
+    #     )
 
-        # Add to combine_ancestries_wait_jobs
-        combine_ancestries_wait_jobs.extend(
-            [cross_ancestry_combine_runs_job, robustness_combine_runs_job]
-            )
+    #     # Add to combine_ancestries_wait_jobs
+    #     combine_ancestries_wait_jobs.extend(
+    #         [cross_ancestry_combine_runs_job, robustness_combine_runs_job]
+    #         )
 
-    # This analysis only needs to run once per comparison
-    # "descriptive_model_building"
-    SCRIPT_NAME = "descriptive_model_building.R"
-    NAME = "descriptive_statisitics"
-    job_name = submit_single_job(
-            settings_file=SETTINGS_FILE,
-            script_name=SCRIPT_NAME,
-            analysis_name=NAME,
-            singularity=SINGULARITY,
-            hostname=HOSTNAME,
-            wait_for_jobs=False,
-            cpus=1
-        )
+    # # This analysis only needs to run once per comparison
+    # # "descriptive_model_building"
+    # SCRIPT_NAME = "descriptive_model_building.R"
+    # NAME = "descriptive_statisitics"
+    # job_name = submit_single_job(
+    #         settings_file=SETTINGS_FILE,
+    #         script_name=SCRIPT_NAME,
+    #         analysis_name=NAME,
+    #         singularity=SINGULARITY,
+    #         hostname=HOSTNAME,
+    #         wait_for_jobs=False,
+    #         cpus=1
+    #     )
 
 
-    # 'eur_subsetting' analysis
-    SCRIPT_NAME = "eur_subsetting.py"
-    NAME = "EUR_subsetting"
-    # Submit seed jobs and retrieve the job names
-    eur_subsetting_jobs, tmp_settings = submit_seed_jobs(
-        settings_file=SETTINGS_FILE,
-        seeds=SEEDS,
-        hostname=HOSTNAME,
-        singularity=SINGULARITY,
-        script_name=SCRIPT_NAME,
-        analysis_name=NAME,
-        cpus=available_cpus
-    )
+    # # 'eur_subsetting' analysis
+    # SCRIPT_NAME = "eur_subsetting.py"
+    # NAME = "EUR_subsetting"
+    # # Submit seed jobs and retrieve the job names
+    # eur_subsetting_jobs, tmp_settings = submit_seed_jobs(
+    #     settings_file=SETTINGS_FILE,
+    #     seeds=SEEDS,
+    #     hostname=HOSTNAME,
+    #     singularity=SINGULARITY,
+    #     script_name=SCRIPT_NAME,
+    #     analysis_name=NAME,
+    #     cpus=available_cpus
+    # )
 
-    # 'eur-subsetting' combine runs
-    COMBINE_SCRIPT_NAME = "eur_subsetting_combine_runs.R"
-    NAME = f"{eur_to_region}_eur_subsetting_combine_runs"
+    # # 'eur-subsetting' combine runs
+    # COMBINE_SCRIPT_NAME = "eur_subsetting_combine_runs.R"
+    # NAME = f"{eur_to_region}_eur_subsetting_combine_runs"
 
-    # Submit combine job that depends on seed jobs
-    eur_subsetting_combine_runs_job = submit_single_job(
-        settings_file=tmp_settings,
-        script_name=COMBINE_SCRIPT_NAME,
-        analysis_name=NAME,
-        singularity=SINGULARITY,
-        hostname=HOSTNAME,
-        wait_for_jobs=True,
-        job_name_list=eur_subsetting_jobs,
-        cpus=1
-    )
+    # # Submit combine job that depends on seed jobs
+    # eur_subsetting_combine_runs_job = submit_single_job(
+    #     settings_file=tmp_settings,
+    #     script_name=COMBINE_SCRIPT_NAME,
+    #     analysis_name=NAME,
+    #     singularity=SINGULARITY,
+    #     hostname=HOSTNAME,
+    #     wait_for_jobs=True,
+    #     job_name_list=eur_subsetting_jobs,
+    #     cpus=1
+    # )
 
     # # 'Combine ancestries' script
     # COMBINE_ANCESTRIES_SCRIPT = "cross_ancestry_combine_ancestries.R"

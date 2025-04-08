@@ -81,9 +81,17 @@ match_vscratch_dir <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
 contrast_metric_dge <- fload_data(match_vscratch_dir, file = "Contrast_metric_dge.csv")
 raw_metric_dge <- fload_data(match_vscratch_dir, file = "LogFCs.csv")
 
+# Save
+fwrite(contrast_metric_dge, file.path(path_to_save_location, "Contrast_metric_dge.csv"))
+fwrite(raw_metric_dge, file.path(path_to_save_location, "Raw_metric_dge.csv"))
+
 # ML
 contrast_metric_ml <- fload_data(match_vscratch_dir, file = "Contrast_metric_ml.csv")
 raw_metric_ml <- fload_data(match_vscratch_dir, file = "Probabilities.csv")
+
+# Save
+fwrite(contrast_metric_ml, file.path(path_to_save_location, "Contrast_metric_ml.csv"))
+fwrite(raw_metric_ml, file.path(path_to_save_location, "Raw_metric_ml.csv"))
 
 # Statistics (for each proportion)
 # DGE

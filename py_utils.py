@@ -54,27 +54,36 @@ class Setup(dict):
         print(f"New analysis with id: {final_config["id"]}; created: {final_config["date"]}")
 
         # Check required settings
-        required_settings = ["classification", "data_path", "data_type", "output_directory", "seed"]
+        required_settings = [
+            # Classification
+            "output_column",
+            "comparison",
+            "train_ancestry",
+            "infer_ancestry",
+            "ancestry_column",
+            # Input
+            "seed",
+            "data_path", 
+            "data_type",
+            "tech",
+            # Output
+            "output_directory", 
+            ]
         for i in required_settings:
             assert i in final_config, f"No {i} defined but required!"  
         
-        # Check required settings in classification
-        required_settings = ["comparison", "output_column", "train_ancestry", "infer_ancestry", "ancestry_column"]
-        for i in required_settings:
-             assert i in final_config["classification"], f"No {i} in classification but required!"
-        
         # Check that covariate has to be a list
-        assert "covariate" not in final_config["classification"] or isinstance(final_config["classification"]["covariate"], list), \
+        assert "covariate" not in final_config or isinstance(final_config["covariate"], list), \
             "If covariate exists, it must be a list."
 
         # Check how many classes
-        if len(final_config["classification"]["comparison"]) > 2:
-            final_config["classification"].update({"multiclass": True})
-            print(f"Multiclass problem comparing: {final_config["classification"]["comparison"]}.")
+        if len(final_config["comparison"]) > 2:
+            final_config.update({"multiclass": True})
+            print(f"Multiclass problem comparing: {final_config["comparison"]}.")
 
-        elif len(final_config["classification"]["comparison"]) == 2:
-            final_config["classification"].update({"multiclass": False})
-            print(f"Binaryclass problem comparing: {final_config["classification"]["comparison"]}.")
+        elif len(final_config["comparison"]) == 2:
+            final_config.update({"multiclass": False})
+            print(f"Binaryclass problem comparing: {final_config["comparison"]}.")
         
         else:
             print(f"Cant do a classification with one assigned class in comparison: {final_config["classification"]["comparison"]}.")
@@ -86,20 +95,20 @@ class Setup(dict):
         # Check all the settings
         self.check_settings()
 
+    def __getattr__(self, name):
+        return self[name]
+
     def make_output_directory(self):
         # Create output directory
-        Path(self.final_config['output_directory']).mkdir(parents=True, exist_ok=self.overwrite)
-        save_location = os.path.join(os.getcwd(), self.final_config['output_directory'])
+        Path(self.final_config["output_directory"]).mkdir(parents=True, exist_ok=self.overwrite)
+        save_location = os.path.join(os.getcwd(), self.final_config["output_directory"])
         # Print tatement to inform about save location
-        print(f'Output will be saved to {save_location}')
+        print(f"Output will be saved to {save_location}")
 
         # Create a log file
         with open(self.out("Log.tsv"),"w") as file:
             file.write("Step\tMemory_MB\tTime\n")
         
-    def __getattr__(self, name):
-        return self[name]
-    
     def out(self, x):
         return os.path.join(self.output_directory, x)
     
@@ -108,21 +117,19 @@ class Setup(dict):
         assert isinstance(self.seed, int)
 
         # Check data
-        assert isinstance(self.data_path, str), \
-            f"{self.data_path} needs to be a string."
-        assert os.path.exists(self.data_path), \
-            f"{self.data_path} does not exist."
-        assert self.data_path.endswith(".h5ad"), \
-            f"Only support data files in h5ad format."
+        assert isinstance(self.data_path, str),     f"{self.data_path} needs to be a string."
+        assert os.path.exists(self.data_path),      f"{self.data_path} does not exist."
+        assert self.data_path.endswith(".h5ad"),    f"Only support data files in h5ad format."
+        
         # Type
-        assert self.data_type in ["expression", "methylation", "protein"], \
-            f"Invalid data type: {self.data_type}. Expected 'expression' or 'methylation'."
+        assert self.tech in ["methylation", "transcriptomics", "proteomics"], \
+            f"Invalid data type: {self.data_type}."
 
 
         # Classification
-        assert isinstance(self.classification["train_ancestry"], str)
-        assert isinstance(self.classification["infer_ancestry"], str)
-        assert isinstance(self.classification["ancestry_column"], str)
+        assert isinstance(self.ancestry_column, str)
+        assert isinstance(self.train_ancestry, str)
+        assert isinstance(self.infer_ancestry, str)
 
     
         # Machine learning
@@ -143,10 +150,30 @@ class Setup(dict):
                 "\t" + 
                 time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()) + 
                 "\n")
-    
+
     def return_settings(self):
         return self.final_config
-    
+
+    def add_settings(self, new_settings: dict, overwrite=False):
+        """
+        Add new key-value pairs to the settings.
+
+        Parameters:
+        -----------
+        new_settings : dict
+            A dictionary containing the new settings to add.
+        overwrite : bool, optional (default=False)
+            If True, existing settings with the same key will be replaced.
+            If False, a warning will be printed if a key already exists.
+        """
+        for key, value in new_settings.items():
+            if key in self and not overwrite:
+                print(f"Setting '{key}' already exists. Use `overwrite=True` to modify it.")
+            else:
+                self.final_config[key] = value  # Update internal dictionary
+                self[key] = value  # Ensure settings are accessible as attribute    
+        
+        
 class ErrorHandler():
     def __init__(self, log_file):
         """
@@ -222,7 +249,7 @@ class DataValidator():
         Check that output column is in the data.
         """
         try:
-            output_column = self.setup['classification']['output_column']
+            output_column = self.setup.output_column
             assert output_column in self.data.obs.columns, \
                 f"Output column '{output_column}' not in the data."
             
@@ -237,8 +264,8 @@ class DataValidator():
         Check that class labels of comparisons are present in the output column of the data.
         """
         try:
-            required_labels = self.setup['classification']['comparison']
-            output_column = self.setup['classification']['output_column']
+            required_labels = self.setup.comparison
+            output_column = self.setup.output_column
             
             for label in required_labels:
                 assert self.data.obs[output_column].str.contains(label).any(), \
@@ -251,7 +278,7 @@ class DataValidator():
         Check if the ancestry column is present in the data.
         """
         try:
-            ancestry_column = self.setup['classification']['ancestry_column']
+            ancestry_column = self.setup.ancestry_column
             assert ancestry_column in self.data.obs.columns, \
                 f"Ancestry column '{ancestry_column}' not in the data."
             
@@ -266,9 +293,9 @@ class DataValidator():
         Check if ancestries are present in ancestry column.
         """
         try:
-            ancestry_column = self.setup['classification']['ancestry_column']
-            train_ancestry = self.setup['classification']['train_ancestry']
-            inf_ancestry = self.setup['classification']['infer_ancestry']
+            ancestry_column = self.setup.ancestry_column
+            train_ancestry = self.setup.train_ancestry
+            inf_ancestry = self.setup.infer_ancestry
 
             assert self.data.obs[ancestry_column].str.contains(train_ancestry).any(), \
                 f"No '{train_ancestry}' in ancestry_column: '{ancestry_column}'."
@@ -283,8 +310,7 @@ class DataValidator():
         Check that there are no NA values in the covariate column(s).
         """
         try:
-            classification_settings = self.setup.get('classification', {})
-            covariates = classification_settings.get('covariate')
+            covariates = self.setup.get("covariate")
             if covariates:  
                 if not isinstance(covariates, list):
                     covariates = [covariates]  
@@ -338,38 +364,35 @@ class DataValidator():
         except ValueError as e:
             self.error_handler.handle_error(e)
     
-    def validate_negative_counts(self, data_type):
+    def validate_negative_counts(self):
         """
         Check if there are any negative values in the count matrix (.X).
         Raise an error with the proportion of negative values if present.
         """
-        if data_type in ["expression", "methylation"]:
-            try:
-                if hasattr(self.data.X, "toarray"):  
-                    dense_matrix = self.data.X.toarray()  # Convert sparse matrix to dense if needed
-                else:
-                    dense_matrix = self.data.X  # Already a dense matrix
+        try:
+            if hasattr(self.data.X, "toarray"):  
+                dense_matrix = self.data.X.toarray()  # Convert sparse matrix to dense if needed
+            else:
+                dense_matrix = self.data.X  # Already a dense matrix
 
-                # Calculate the total number of elements in the matrix
-                total_elements = dense_matrix.size
+            # Calculate the total number of elements in the matrix
+            total_elements = dense_matrix.size
 
-                # Count how many negative values are in the matrix
-                negative_elements = np.sum(dense_matrix < 0)
+            # Count how many negative values are in the matrix
+            negative_elements = np.sum(dense_matrix < 0)
 
-                # Calculate the proportion of negative values
-                proportion_negative = negative_elements / total_elements
+            # Calculate the proportion of negative values
+            proportion_negative = negative_elements / total_elements
 
-                # Raise error if there are any negative values and include the proportion in the error message
-                if negative_elements > 0:
-                    raise ValueError(f"Negative values found in the count matrix. " 
-                                    f"Proportion of negative values: {proportion_negative:.4f}.\n"
-                                    f"Please check the data preprocessing steps.")
-            
-            except ValueError as e:
-                self.error_handler.handle_error(e)
+            # Raise error if there are any negative values and include the proportion in the error message
+            if negative_elements > 0:
+                raise ValueError(f"Negative values found in the count matrix. " 
+                                f"Proportion of negative values: {proportion_negative:.4f}.\n"
+                                f"Please check the data preprocessing steps.")
+        
+        except ValueError as e:
+            self.error_handler.handle_error(e)
 
-        elif data_type in ["protein"]:
-            print(f"{data_type} data allows negative values")
 
     def check_min_samples_per_class(self, data, column, min_samples, data_name):
         """
@@ -521,7 +544,7 @@ def raw(X):
 
 # Dictionary to look up methods to normalize data
 ml_normalization_methods = {
-    "expression": {
+    "transcriptomics": {
         "normalize_log": normalize_log,
         "normalize_minmax": normalize_minmax,
         "raw": raw
@@ -532,28 +555,27 @@ ml_normalization_methods = {
         "normalize_minmax": normalize_minmax,
         "raw": raw
     },
-    "protein": {
+    "proteomics": {
         "raw": raw
     }
 }
 
 # Filtering features
-# TMM Norm factors
 def calculate_tmm_norm_factors(data):
     """
     Calculates TMM normalization factors for RNA-Seq data.
     
     Parameters:
-    - data: A pandas DataFrame with samples as columns and genes as rows.
+    - data: A numpy array with samples as rows and genes as columns (samples x genes).
     
     Returns:
-    - A pandas Series containing the normalization factors for each sample.
+    - A numpy array containing the normalization factors for each sample.
     """
-    # Step 1: Compute the geometric mean of the counts for each gene (row)
-    geometric_mean = data.apply(lambda x: np.exp(np.mean(np.log(x + 1))), axis=1)
-    
+    # Step 1: Compute the geometric mean of the counts for each gene (column)
+    geometric_mean = np.exp(np.mean(np.log(data + 1), axis=0))  # Axis 0: Across samples
+
     # Step 2: Compute M-values (log-ratio) between each sample and the geometric mean
-    M_values = data.div(geometric_mean, axis=0)  # Element-wise division by geometric mean
+    M_values = data / geometric_mean  # Element-wise division by geometric mean
     M_values = np.log2(M_values + 1)  # Add pseudocount for stability
     
     # Step 3: Trim the extreme M-values to reduce the influence of highly differentially expressed genes
@@ -561,52 +583,55 @@ def calculate_tmm_norm_factors(data):
     def trim_m_values(x):
         lower = np.quantile(x, trim_percent)
         upper = np.quantile(x, 1 - trim_percent)
-        x[x < lower] = lower
-        x[x > upper] = upper
+        x = np.clip(x, lower, upper)  # Clip values to the trim range
         return x
     
-    M_values_trimmed = M_values.apply(trim_m_values, axis=0)
-    
+    # Apply trimming to each sample (row-wise)
+    M_values_trimmed = np.apply_along_axis(trim_m_values, axis=1, arr=M_values)
+
     # Step 4: Calculate the normalization factors
-    # For each sample, calculate the median of the trimmed M-values for all genes
-    norm_factors = M_values_trimmed.median(axis=0)
-    
+    norm_factors = np.median(M_values_trimmed, axis=1)  # Median across genes for each sample
+
     # Normalize by the median normalization factor
     norm_factors = norm_factors / np.median(norm_factors)
     
     return norm_factors
+
 # CPM
 def cpm(data, norm_factors=None, log=False):
     """
     Converts raw counts to CPM (Counts Per Million), optionally using normalization factors.
     Optionally, log-transform the CPM values.
-    
+
     Parameters:
-    - data: A pandas DataFrame with rows as samples and columns as genes (samples x genes).
-    - norm_factors: A pandas Series (or array) with normalization factors for each sample. Default is None.
+    - data: A numpy array with rows as samples and columns as genes (samples x genes).
+    - norm_factors: A numpy array with normalization factors for each sample (length = n_samples). Default is None.
     - log: Boolean value, whether to log-transform the CPM values. Default is False.
-    
+
     Returns:
-    - A pandas DataFrame with CPM or log-transformed CPM values (samples x genes).
+    - A numpy array with CPM or log-transformed CPM values (samples x genes).
     """
-    # Check if the number of samples in the data matches the length of norm_factors
-    if norm_factors is not None and len(norm_factors) != data.shape[0]:
-        raise ValueError("The number of samples must match the length of the normalization factors.")
-    
-    # If norm_factors are provided, apply them to the raw counts
+    data = np.asarray(data)  # Ensure data is a NumPy array
+
+    # Check that norm_factors matches the number of samples
     if norm_factors is not None:
-        data = data.div(norm_factors, axis=0)  # Element-wise division by norm_factors
-    
-    # Calculate total reads for each sample (sum of all gene counts in each sample)
-    total_reads_per_sample = data.sum(axis=1)
-    
+        norm_factors = np.asarray(norm_factors)
+        if norm_factors.shape[0] != data.shape[0]:
+            raise ValueError("The number of samples must match the length of the normalization factors.")
+
+        # Apply normalization factors (element-wise division across rows)
+        data = data / norm_factors[:, np.newaxis]  # Broadcast over columns
+
+    # Calculate total reads per sample (sum of counts for each sample)
+    total_reads_per_sample = np.sum(data, axis=1) + 1e-6  # Prevent division by zero
+
     # Convert raw counts to CPM
-    cpm_data = data.div(total_reads_per_sample, axis=0) * 1e6
-    
-    # Optionally, log-transform the CPM data
+    cpm_data = (data / total_reads_per_sample[:, np.newaxis]) * 1e6  # Broadcast over columns
+
+    # Apply log transformation if requested
     if log:
-        cpm_data = np.log2(cpm_data + 1)  # Add pseudocount to avoid log(0)
-    
+        cpm_data = np.log2(cpm_data + 1)  # Add pseudocount for stability
+
     return cpm_data
 
 # By signal

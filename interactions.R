@@ -45,13 +45,16 @@ if (length(args) > 0) {
 
 } else {
   # Dev settings if no command-line argument provided
-  # 
-  # data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_ADMIX.yml
-  # data/inputs/settings/PanCanAtlas_BRCA_BETA_basal_vs_non-basal_EUR_to_ADMIX.yml
-  # data/inputs/settings/PanCanAtlas_BRCA_RPPA_basal_vs_non-basal_EUR_to_ADMIX.yml
 
-  # data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_Lung_Adenocarcinoma_vs_Lung_Squamous_Cell_Carcinoma_EUR_to_ADMIX.yml
-  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_EAS.yml"
+  # BRCA
+  # data/inputs/settings/PanCanAtlas_BRCA_RSEM_Basal_vs_non-Basal_EUR_to_ADMIX.yml
+  # data/inputs/settings/Firehose_BRCA_BETA_Basal_vs_non-Basal_EUR_to_ADMIX.yml
+  # data/inputs/settings/PanCanAtlas_BRCA_RPPA_Basal_vs_non-Basal_EUR_to_ADMIX.yml
+
+  # LUSC LUAD
+  # data/inputs/settings/PanCanAtlas_LUSC_LUAD_RPPA_LUSC_vs_LUAD_EUR_to_ADMIX.yml
+
+  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_Basal_vs_non-Basal_EUR_to_ADMIX.yml"
   print("Running interactive mode for development.")
   setup <- yaml.load_file(yaml_file)
 }
@@ -73,10 +76,10 @@ inf_ancestry    <- setup$classification$infer_ancestry
 
 # Construct output directory name
 condition <- paste(comparison, collapse = "_vs_")
-ancestry <- paste0(toupper(train_ancestry), "_to_", toupper(inf_ancestry))
+ancestry  <- paste0(toupper(train_ancestry), "_to_", toupper(inf_ancestry))
 
 # Create directory if it does not exists
-match_pattern <- paste0(tag, "_", condition, "_", ancestry, "_", analysis_name)
+match_pattern         <- paste0(tag, "_", condition, "_", ancestry, "_", analysis_name)
 path_to_save_location <- file.path(vscratch_dir_out, match_pattern)
 # Make directory
 if (!dir.exists(path_to_save_location)) {
@@ -129,7 +132,7 @@ if (setup$filter_features & setup$data_type == "expression"){
   min_variance <- variance_by_percentile(cpm_data, percentile = 25)
   filtered_features <- filter_by_variance(cpm_data, var_threshold = min_variance)
   # Subset
-  filtered_data = filtered_data[, filtered_features]
+  filtered_data <- filtered_data[, filtered_features]
 
   # Old filtering (less strict filtering)
   # filtered_features <- filterByExpr(t(data$X), interaction_design)
@@ -173,6 +176,7 @@ if (setup$filter_features & setup$data_type == "expression"){
 } else if (setup$filter_features & setup$data_type == "protein"){
 
   # No filtering
+  filtered_data = adata
 
   # Variance trend 
   trend_data_before <- adata$X 
@@ -306,7 +310,7 @@ interaction <- separate(interaction, coef, into = new_cols, sep = "\\.", fill = 
 
 # Save 
 fwrite(baseline, file.path(path_to_save_location, "Baseline.csv"))
-fwrite(relationship, file.path(path_to_save_location, "Baseline.csv"))
+fwrite(relationship, file.path(path_to_save_location, "Relationship.csv"))
 fwrite(interaction, file.path(path_to_save_location, "Interaction.csv"))
 
 # Results with significants
@@ -716,6 +720,7 @@ p <- deg_interaction |>
 save_name <- file.path(path_to_save_location, "Interaction_MA.pdf")
 save_ggplot(p, save_name, width = 3, height = 3)
 
+
 if (nrow(sig_interaction) > 0){
 # ---- Interaction Heatmap ----
 exp_list <- list()
@@ -956,7 +961,8 @@ baseline_enrich <- baseline |>
       mutate(
         Ancestry    = unique(x$Ancestry),
         Condition   = unique(x$Condition),
-        Difference  = unique(x$Difference)
+        Difference  = unique(x$Difference),
+        data_type   = setup$data_type
         )
     }
   ) |>
@@ -971,7 +977,8 @@ relationship_enrich <- relationship |>
       mutate(
         Ancestry    = unique(x$Ancestry),
         Condition   = unique(x$Condition),
-        Difference  = unique(x$Difference)
+        Difference  = unique(x$Difference),
+        data_type   = setup$data_type
         )
     }
   ) |>
@@ -982,7 +989,8 @@ interaction_enrich <- perform_gsea(interaction, database, rank_by = "logFC") |>
   mutate(
     Ancestry    = unique(interaction$Ancestry),
     Condition   = NA_character_,
-    Difference  = unique(interaction$Difference)
+    Difference  = unique(interaction$Difference),
+    data_type   = setup$data_type
   )
 
 # Save

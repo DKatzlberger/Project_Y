@@ -7,11 +7,11 @@ import numpy as np
 # 1. Molecular data -> adata.X
 # 2. Meta data -> adata.obs
 # 3. Output path
-molecular_data_path = "data/downloads/cbioportal/tcga_firehose/methylation/brca_tcga.csv"
+molecular_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/protein/ucec_tcga_pan_can_atlas_2018.csv"
 
-meta_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/meta_tcga_pan_can_atlas_expression.csv"
+meta_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/meta_tcga_pan_can_atlas_protein.csv"
 
-path_to_save_location = "data/inputs/PanCanAtlas_BRCA_raw_BETA_subtypeNAremoved.h5ad"
+path_to_save_location = "data/inputs/PanCanAtlas_UCEC_raw_RPPA_subtypeNAremoved.h5ad"
 # Load the data
 molecular_data = pd.read_csv(molecular_data_path)
 meta_data = pd.read_csv(meta_data_path)
@@ -82,13 +82,18 @@ adata.obs = adata.obs.rename(columns=column_mapping)
 
 # Custom modifications
 
-# BRCA
-# Remove all NAs
+# Remove all NAs in subtype
 adata = adata[adata.obs.dropna(subset="subtype").index]
 
+# BRCA
 # Include subtype_pooled
-adata.obs["subtype_pooled"] = adata.obs["subtype"].apply(
-    lambda x: "Basal" if x == "BRCA_Basal" else "non-Basal"
+# adata.obs["subtype_pooled"] = adata.obs["subtype"].apply(
+#     lambda x: "Basal" if x == "BRCA_Basal" else "non-Basal"
+# )
+
+# UCEC
+adata.obs["subtype"] = adata.obs["subtype"].apply(
+    lambda x: "CN-high" if x == "UCEC_CN_HIGH" else "non-CN-high"
 )
 
 # UCEC

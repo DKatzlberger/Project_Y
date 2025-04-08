@@ -8,6 +8,8 @@ suppressPackageStartupMessages(
     # Statistics 
     library(coin)
     # Visualization
+    library(hexbin)
+    library(scales)
     library(patchwork)
     library(ggVennDiagram)
     }
@@ -15,6 +17,8 @@ suppressPackageStartupMessages(
 # Source custom functions
 source("r_utils.R")
 source("figure_themes.R")
+# Fontsize for powerpoint
+ppx = 8
 
 # Parse command-line arguments
 args <- commandArgs(trailingOnly = TRUE)
@@ -29,7 +33,13 @@ if (length(args) > 0) {
 } else {
   print("Running interactive mode for development.")
   # Yaml file used for development (often an actual job script)
-  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_basal_vs_non-basal_EUR_to_EAS.yml"
+
+  # data/inputs/settings/PanCanAtlas_BRCA_RSEM_Basal_vs_non-Basal_EUR_to_ADMIX.yml
+
+  # data/inputs/settings/PanCanAtlas_LUSC_LUAD_RPPA_LUSC_vs_LUAD_EUR_to_ADMIX.yml
+
+
+  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_Basal_vs_non-Basal_EUR_to_ADMIX.yml"
   # 1. Check if it's a valid yaml file
   # 2. Load the yaml file
   is_yml_file(yaml_file)
@@ -42,11 +52,10 @@ vscratch_dir_in = file.path("data", "combined_runs")
 # Construct directory name
 tag        <- sub("_RSEM$", "", setup$tag)
 comparison <- paste(setup$classification$comparison, collapse = "_vs_")
-study      <- paste0(tag, "_", comparison)
 
 # Save the results of the analysis
-vscratch_dir_out  <- file.path("data", "combined_ancestries")
-path_to_save_location <- file.path(vscratch_dir_out, study)
+vscratch_dir_out      <- file.path("data", "combined_ancestries")
+path_to_save_location <- file.path(vscratch_dir_out, comparison)
 if (!dir.exists(path_to_save_location)) {
   dir.create(path_to_save_location, recursive = TRUE)
 }
@@ -54,14 +63,16 @@ if (!dir.exists(path_to_save_location)) {
 # Interactions
 # Construct match pattern
 analysis_suffix <- "interactions"
-match_pattern   <- paste0(tag, "_[^_]+_", comparison, "_[^_]+_to_[^_]+.*", analysis_suffix, "$")
+match_pattern   <- paste0("_[^_]+_", comparison, "_[^_]+_to_[^_]+.*", analysis_suffix, "$")
 
 # Extract files
 all_vscratch_dir_in <- list.dirs(vscratch_dir_in, full.names = TRUE, recursive = FALSE)
 match_vscratch_dir  <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
 
 # DGE
-interactions <- fload_data(match_vscratch_dir, file = "Interaction.csv")
+interactions  <- fload_data(match_vscratch_dir, file = "Interaction.csv")
+baselines     <- fload_data(match_vscratch_dir, file = "Baseline.csv")
+enrichments   <- fload_data(match_vscratch_dir, file = "Interaction_enrichment.csv")
 
 # Visualize
 logFC_thr <- 1
@@ -72,6 +83,7 @@ tech_labels <- c(
   "protein"     = "Protein"
   )
 
+# Interactions
 # ---- Volcano plot ----
 interactions <- interactions |>
   mutate(data_type = fct_relevel(data_type, tech_levels))
@@ -126,7 +138,10 @@ p <- interactions |>
       linewidth = (0.5/2),
       alpha = 0.5
     ) +
-    theme_nature_fonts() +
+    scale_y_continuous(
+      breaks = extended_breaks(n = 3) 
+    ) +
+    theme_nature_fonts(base_size = ppx) +
     theme_white_background() +
     theme_white_strip() +
     theme(legend.position = "none")
@@ -135,18 +150,308 @@ p <- interactions |>
 save_name <- file.path(path_to_save_location, "Volcano.pdf")
 save_ggplot(p, save_name, width = 6, height = 2)
 
+# ---- Hex volcano plot -----
+p <- interactions |>
+  ggplot(
+    aes(
+      x = logFC,
+      y = -log10(adj.P.Val)
+      )
+    ) +
+    geom_hex(
+      aes(
+        fill = after_stat(count)/sum(after_stat(count))
+      ),
+      bins = 15
+    ) +
+    facet_grid(
+      rows = vars(Ancestry),
+      cols = vars(data_type),
+      labeller = labeller(
+        data_type = as_labeller(tech_labels)
+        )
+    ) + 
+    geom_vline(
+      xintercept = c(-logFC_thr, logFC_thr), 
+      linetype = "dashed", 
+      color = "blue",
+      linewidth = (0.5/2),
+      alpha = 0.5
+    ) +
+    geom_hline(
+      yintercept = -log10(0.05), 
+      linetype = "dashed", 
+      color = "blue",
+      linewidth = (0.5/2),
+      alpha = 0.5
+    ) +
+    scale_y_continuous(
+      breaks = extended_breaks(n = 3) 
+    ) +
+    scale_fill_gradient(
+      name = "Proportion",
+      low = "#5f5fff",  
+      high = "red"
+    ) +
+    theme_nature_fonts(base_size = ppx) +
+    theme_white_background() +
+    theme_white_strip() +
+    # theme_small_legend() +
+    theme(legend.position = "bottom")
+
+# Save
+save_name <- file.path(path_to_save_location, "Volcano_hex.pdf")
+save_ggplot(p, save_name, width = 6, height = 2.5)
+# ---- Venn diagram -----
+# Generate combinations
+full_combinations <- expand.grid(
+  data_type = unique(interactions$data_type),
+  Ancestry = unique(interactions$Ancestry)
+)
+
+# Split data
+venn_df <- interactions |>
+  filter(adj.P.Val < 0.05) |>
+  group_by(data_type, Ancestry) |>
+  summarise(
+    Features = list(Feature), 
+    .groups = "drop"
+  ) 
+
+# Merge
+venn_df <- full_combinations |>
+  left_join(
+    venn_df, 
+    by = c("data_type", "Ancestry")
+  ) 
+
+# Plot
+for (ancestry in unique(venn_df$Ancestry)){
+
+  # Deframe to lists
+  venn_list <- venn_df |>
+    filter(Ancestry == ancestry) |>
+    select(-Ancestry) |>
+    mutate(data_type = str_to_title(data_type)) |>
+    deframe()
+  
+  venn_list <- lapply(venn_list, function(x) if (is.null(x)) character(0) else x)
+
+  # Plot
+  venn_data <- process_data(Venn(venn_list))
+  p <- venn_diagram(venn_data, title = ancestry, base_size = ppx)
+  # Save
+  name <- paste0("Venn_diagram_", ancestry, ".pdf")
+  save_name <- file.path(path_to_save_location, name)
+  save_ggplot(p, save_name, width = 2, height = 2)
+}
+
+# ---- Number of significant genes -----
+sig_interactions <- interactions |>
+  filter(adj.P.Val < 0.05) |>
+  group_by(Ancestry, data_type) |>
+  summarise(Count = n(), .groups = "drop")
+
+p <- sig_interactions |>
+  ggplot(
+    aes(
+      x = Ancestry,
+      y = Count
+    )
+  ) +
+  geom_bar(
+    stat = "identity", 
+    position = "dodge"
+  ) +
+  facet_grid(
+    cols = vars(data_type),
+    labeller = labeller(
+        data_type = as_labeller(tech_labels)
+        )
+  ) +
+  theme_nature_fonts(base_size = ppx) +
+  theme_white_background() +
+  theme_white_strip() 
+
+# Save
+save_name <- file.path(path_to_save_location, "Number_sig_genes.pdf")
+save_ggplot(p, save_name, width = 6, height = 1.5)
+
+# ---- Functional analysis ----
+top_paths <- enrichments |>
+  filter(padj < 0.05) |>
+  group_by(Ancestry, data_type) |>
+  slice_max(order_by = abs(NES), n = 10, with_ties = FALSE) |>
+  ungroup() |>
+  select(pathway, data_type) |>  
+  distinct()
+
+enrichments_filtered <- enrichments |>
+  inner_join(top_paths, by = c("pathway", "data_type"))
+
+p <- enrichments_filtered |>
+  mutate(data_type = fct_relevel(data_type, tech_levels)) |>
+  filter(padj < 0.05) |>
+  ggplot(
+    aes(
+      x = Ancestry,
+      y = pathway,
+      color = NES,
+      size = -log10(padj)
+    )
+  ) +
+  geom_point() +
+  facet_grid(
+    rows = vars(data_type),
+    labeller = labeller(
+      data_type = as_labeller(tech_labels)
+      ),
+    scale = "free",
+    space = "free"
+  ) +
+  scale_size_binned(
+      range = c(1, 5),
+      breaks = c(1, 2, 3, 4, 5)   
+  ) +
+  scale_color_gradient2(
+      high = "red", 
+      mid = "white", 
+      low = "blue"
+  ) +
+  labs(
+    y = "MSigDB Hallmark 2020 gene set",
+    size = "-log10(adj.P.Val)"
+  ) +
+  theme_nature_fonts(base_size = ppx) +
+  theme_white_background() +
+  theme_white_strip() +
+  theme(
+    legend.position = "bottom",
+    legend.box = "horizontal",
+    legend.title.position = "top",
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5), 
+    panel.grid.major = element_line(color = "grey80"),  
+  )
+
+# Save
+save_name <- file.path(path_to_save_location, "Enrichment.pdf")
+save_ggplot(p, save_name, width = 6, height = 5.5)
+
+
+# Baslines
+# ---- Volcano plot ----
+baselines <- baselines |>
+  mutate(data_type = fct_relevel(data_type, tech_levels)) |>
+  mutate(
+    significance = ifelse(adj.P.Val < 0.05 & abs(logFC) > logFC_thr, "Significant", "Non-significant") 
+  )
+
+p <- baselines |>
+  filter(data_type != "protein") |>
+  ggplot(
+    aes(
+      x = logFC,
+      y = -log10(adj.P.Val),
+      color = significance
+      )
+    ) +
+    geom_point() +
+    facet_grid(
+      rows = vars(Ancestry, Condition),
+      cols = vars(data_type),
+      labeller = labeller(
+        data_type = as_labeller(tech_labels)
+        )
+    ) + 
+    geom_vline(
+      xintercept = c(-logFC_thr, logFC_thr), 
+      linetype = "dashed", 
+      color = "blue",
+      linewidth = (0.5/2),
+      alpha = 0.5
+    ) +
+    geom_hline(
+      yintercept = -log10(0.05), 
+      linetype = "dashed", 
+      color = "blue",
+      linewidth = (0.5/2),
+      alpha = 0.5
+    ) +
+    scale_y_continuous(
+      breaks = extended_breaks(n = 3) 
+    ) +
+    scale_color_manual(
+      values = c(
+        "Non-significant" = "grey", 
+        "Significant" = "red"
+        )
+    ) +
+    theme_nature_fonts(base_size = ppx) +
+    theme_white_background() +
+    theme_white_strip() +
+    theme(legend.position = "none")
+
+# Save
+save_name <- file.path(path_to_save_location, "Volcano_baseline.pdf")
+save_ggplot(p, save_name, width = 6, height = 5.5)
+# ---- Venn diagrams ----
+# Baseline
+venn_plots <- baselines |>
+  bind_rows(interactions) |>
+  filter(data_type != "protein") |>
+  filter(adj.P.Val < 0.05 & abs(logFC) > logFC_thr) |>
+  group_split(data_type, Ancestry) |>
+  map(
+    function(x){
+      # Make list
+      venn_names  <- c(unique(baselines$Condition), "Interaction")
+      venn_names  <- venn_names[!is.na(venn_names)]
+      venn_list   <- setNames(vector("list", length(venn_names)), venn_names)
+      # Create title
+      venn_title  <- paste(unique(x$Ancestry),  "|", str_to_title(unique(x$data_type)))
+
+      # Create baseline lists
+      features <- x |>
+        group_by(Condition) |>
+        summarise(Features = list(Feature)) |>
+        deframe()
+      
+      # Rename Condition NA to Interaction
+      names(features)[is.na(names(features))] <- "Interaction"
+      
+      # Add to venn_list
+      venn_list[names(features)] <- features
+
+      # Replace emtpy lists
+      venn_list <- lapply(venn_list, function(x) if (is.null(x)) character(0) else x)
+
+      # Transform to venn readable data
+      venn_data <- process_data(Venn(venn_list))
+      # Plot
+      p <- venn_diagram(
+        venn_data, 
+        # venn_title, 
+        base_size = ppx
+        )
+      return(p)
+    }
+  )
+p <- wrap_plots(venn_plots, ncol = 3)
+# Save
+save_name <- file.path(path_to_save_location, "Venn_baseline.pdf")
+save_ggplot(p, save_name, width = 5, height = 3.5)
+
 
 
 # Cross-ancestry
 # Construct match pattern
 analysis_suffix <- "cross_ancestry"
-match_pattern   <- paste0(tag, "_[^_]+_", comparison, "_[^_]+_to_[^_]+.*", analysis_suffix, "$")
+match_pattern   <- paste0("_[^_]+_", comparison, "_[^_]+_to_[^_]+.*", analysis_suffix, "$")
 
 # Extract files
 all_vscratch_dir_in <- list.dirs(vscratch_dir_in, full.names = TRUE, recursive = FALSE)
 match_vscratch_dir  <- grep(match_pattern, all_vscratch_dir_in, value = TRUE)
 
-# Load data
 # DGE
 contrast_metric_dge <- fload_data(match_vscratch_dir, file = "Contrast_metric_dge.csv")
 
@@ -203,7 +508,6 @@ statistic_df <- bind_rows(p_pearson, p_spearman) |>
   )
 
 # Visualize
-
 # ---- Correlation of relationship ----
 # Pivot longer
 contrast_metric_dge_long <- contrast_metric_dge |>
@@ -264,20 +568,20 @@ p <- contrast_metric_dge_merged |>
       ), 
     stat = "identity", 
     position = position_dodge(),
-    alpha = 0.05
+    # alpha = 0.1
   ) +  
-  geom_point(
-    aes(
-      fill = Prediction
-    ),
-    position = position_jitterdodge(
-      dodge.width = 0.9,
-      jitter.width = 0.5
-    ),
-    shape = 21,
-    stroke = 0.1,
-    size = 1,
-  ) +  
+  # geom_point(
+  #   aes(
+  #     fill = Prediction
+  #   ),
+  #   position = position_jitterdodge(
+  #     dodge.width = 0.9,
+  #     jitter.width = 0.5
+  #   ),
+  #   shape = 21,
+  #   stroke = 0.1,
+  #   size = 1,
+  # ) +  
   geom_errorbar(
     aes(
       ymin = mean - sd, 
@@ -295,7 +599,11 @@ p <- contrast_metric_dge_merged |>
         )
   ) +
   scale_y_continuous(
+    limits = c(0, 1.15 + 0.15),
     breaks = c(0.0, 0.25, 0.5, 0.75, 1.0)
+  ) +
+  scale_fill_manual(
+    values = c("#86dafb","#FF8C00")
   ) +
   geom_segment(
     aes(
@@ -325,7 +633,7 @@ p <- contrast_metric_dge_merged |>
     size = 1.8, 
     vjust = 0
   ) +
-  theme_nature_fonts() +
+  theme_nature_fonts(base_size = ppx) +
   theme_white_background() +
   theme_white_strip() +
   theme_small_legend() +
@@ -336,6 +644,435 @@ p <- contrast_metric_dge_merged |>
 # Save
 save_name <- file.path(path_to_save_location, "Correlation_relationship.pdf")
 save_ggplot(p, save_name, width = 6, height = 3)
+
+
+# ML
+contrast_metric_ml <- fload_data(match_vscratch_dir, file = "Contrast_metric_ml.csv")
+raw_metric_ml <- fload_data(match_vscratch_dir, file = "Probabilities.csv")
+
+# Statistics
+p_roc_auc <- contrast_metric_ml |>
+  group_split(
+    Algorithm,
+    data_type
+  ) |>
+  map(
+    function(x) {
+      p_value <- permutation_test(
+        x, 
+        value = "ROC_AUC", 
+        group = "Status", 
+        paired = "Seed", 
+        tail = "left"
+        )
+      
+      tibble(
+        Algorithm = unique(x$Algorithm),
+        Metric = "ROC_AUC",
+        Ancestry = unique(x$Ancestry),
+        data_type = unique(x$data_type),
+        p_value = p_value
+      )
+    }
+  ) |>
+  bind_rows()
+
+p_accuracy <- contrast_metric_ml |>
+  group_split(
+    Algorithm,
+    data_type
+  ) |>
+  map(
+    function(x) {
+      p_value <- permutation_test(
+        x, 
+        value = "Accuracy", 
+        group = "Status", 
+        paired = "Seed", 
+        tail = "left"
+        )
+      
+      tibble(
+        Algorithm = unique(x$Algorithm),
+        Metric = "Accuracy",
+        Ancestry = unique(x$Ancestry),
+        data_type = unique(x$data_type),
+        p_value = p_value
+      )
+    }
+  ) |>
+  bind_rows()
+
+# Adjust p-values (Bonferroni)
+statistic_df <- bind_rows(p_roc_auc, p_accuracy) |>
+  mutate(
+    adj_p_value = p.adjust(p_value, method = "bonferroni", n = n()),
+    adj_method = "Bonferroni"
+  )
+
+# Visualize
+# ---- Prediction of Phenotype ----
+contrast_metric_ml_long <- contrast_metric_ml |>
+  pivot_longer(
+    cols = c(
+      ROC_AUC,
+      Accuracy 
+      ),
+    names_to = "Metric",
+    values_to = "Values"
+  )
+
+# Summarize
+contrast_metric_ml_summary <- contrast_metric_ml_long |>
+  group_by(
+    Algorithm,
+    Prediction,
+    Ancestry, 
+    Status, 
+    data_type, 
+    Metric
+    )  |>
+  summarise(
+    mean = mean(Values, na.rm = TRUE),
+    sd = sd(Values, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Merge (summarized values - statisitc)
+contrast_metric_merged <- contrast_metric_ml_summary |>
+  left_join(
+    statistic_df,
+    by = c("Algorithm", "Ancestry", "data_type", "Metric")
+  )
+
+contrast_metric_ml_merged <- contrast_metric_ml_long |>
+  left_join(
+    contrast_metric_merged, 
+    by = c("Algorithm", "Prediction", "Ancestry", "Status", "data_type", "Metric")
+  ) |>
+  mutate(
+    data_type = fct_relevel(data_type, tech_levels),
+    Prediction = fct_rev(Prediction)
+  ) 
+
+# Labels
+metric_labels <- c(
+  "ROC_AUC" = "ROC AUC",
+  "Accuracy" = "Accuracy"
+)
+
+# Plot
+p_regression <- contrast_metric_ml_merged |>
+  filter(Algorithm == "LogisticRegression") |>
+  ggplot(
+    aes(
+      x = Ancestry,
+      y = Values,
+      fill = Prediction
+    )
+  ) +
+  geom_bar(
+    aes(
+      y = mean
+      ), 
+    stat = "identity", 
+    position = position_dodge(),
+    # alpha = 0.05
+  ) +  
+  # geom_point(
+  #   aes(
+  #     fill = Prediction
+  #   ),
+  #   position = position_jitterdodge(
+  #     dodge.width = 0.9,
+  #     jitter.width = 0.5
+  #   ),
+  #   shape = 21,
+  #   stroke = 0.1,
+  #   size = 1,
+  # ) +  
+  geom_errorbar(
+    aes(
+      ymin = mean - sd, 
+      ymax = mean + sd
+      ), 
+    position = position_dodge(width = 0.9), 
+    width = 0.5,
+    linewidth = (0.5 / 2)
+  ) +
+  facet_grid(
+    rows = vars(Metric),
+    cols = vars(data_type),
+    labeller = labeller(
+        Metric = as_labeller(metric_labels),
+        data_type = as_labeller(tech_labels)
+        )
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1.15 + 0.15),
+    breaks = c(0.0, 0.25, 0.5, 0.75, 1.0)
+  ) +
+  scale_fill_manual(
+    values = c("#86dafb","#FF8C00")
+  ) +
+  geom_segment(
+    aes(
+      x = Ancestry, 
+      xend = Ancestry, 
+      y = 1.15, 
+      yend = 1.15
+    ), 
+    linewidth = (0.3 / 2),
+    position = position_dodge(width = 0.9), 
+  ) +
+  geom_segment(
+    aes(
+      x = Ancestry, 
+      y = 1.15, 
+      yend = mean + sd + 0.1 
+    ), 
+    position = position_dodge(width = 0.9),
+    linewidth = (0.3 / 2)
+  ) +
+  geom_text(
+    aes(
+      x = Ancestry,
+      y = 1.15 + 0.05,
+       label = sprintf("%.1e%s", adj_p_value, ifelse(adj_p_value < 0.05, "*", ""))
+    ),
+    size = 1.8, 
+    vjust = 0
+  ) +
+  labs(
+    title = "Logistic Regression"
+  ) + 
+  theme_nature_fonts(base_size = ppx) +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
+  theme(
+    legend.position = "bottom"
+  )
+
+p_forest <- contrast_metric_ml_merged |>
+  filter(Algorithm == "RandomForestClassifier") |>
+  ggplot(
+    aes(
+      x = Ancestry,
+      y = Values,
+      fill = Prediction
+    )
+  ) +
+  geom_bar(
+    aes(
+      y = mean
+      ), 
+    stat = "identity", 
+    position = position_dodge(),
+    # alpha = 0.05
+  ) +  
+  # geom_point(
+  #   aes(
+  #     fill = Prediction
+  #   ),
+  #   position = position_jitterdodge(
+  #     dodge.width = 0.9,
+  #     jitter.width = 0.5
+  #   ),
+  #   shape = 21,
+  #   stroke = 0.1,
+  #   size = 1,
+  # ) +  
+  geom_errorbar(
+    aes(
+      ymin = mean - sd, 
+      ymax = mean + sd
+      ), 
+    position = position_dodge(width = 0.9), 
+    width = 0.5,
+    linewidth = (0.5 / 2)
+  ) +
+  facet_grid(
+    rows = vars(Metric),
+    cols = vars(data_type),
+    labeller = labeller(
+        Metric = as_labeller(metric_labels),
+        data_type = as_labeller(tech_labels)
+        )
+  ) +
+  scale_y_continuous(
+    limits = c(0, 1.15 + 0.15),
+    breaks = c(0.0, 0.25, 0.5, 0.75, 1.0)
+  ) +
+  scale_fill_manual(
+    values = c("#86dafb","#FF8C00")
+  ) +
+  geom_segment(
+    aes(
+      x = Ancestry, 
+      xend = Ancestry, 
+      y = 1.15, 
+      yend = 1.15
+    ), 
+    linewidth = (0.3 / 2),
+    position = position_dodge(width = 0.9), 
+  ) +
+  geom_segment(
+    aes(
+      x = Ancestry, 
+      y = 1.15, 
+      yend = mean + sd + 0.1 
+    ), 
+    position = position_dodge(width = 0.9),
+    linewidth = (0.3 / 2)
+  ) +
+  geom_text(
+    aes(
+      x = Ancestry,
+      y = 1.15 + 0.05,
+       label = sprintf("%.1e%s", adj_p_value, ifelse(adj_p_value < 0.05, "*", ""))
+    ),
+    size = 1.8, 
+    vjust = 0
+  ) +
+  labs(
+    title = "Random Forest"
+  ) + 
+  theme_nature_fonts(base_size = ppx) +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
+  theme(
+    legend.position = "bottom"
+  )
+
+# Patchwork
+p <- p_regression / p_forest + plot_layout(guides = "collect") & theme(legend.position = "bottom")
+
+# Save
+save_name <- file.path(path_to_save_location, "Predicting_phenotype.pdf")
+save_ggplot(p, save_name, width = 6, height = 5.5)
+
+# ---- Distribution probabilities ----
+threshold <- 0.5
+# Conditions
+class_0 <- colnames(raw_metric_ml)[1]
+class_1 <- colnames(raw_metric_ml)[2] # Target
+
+raw_metric_ml <- raw_metric_ml |>
+  mutate(
+    data_type = fct_relevel(data_type, tech_levels),
+    Prediction = fct_rev(Prediction)
+    ) 
+
+p_regression <- raw_metric_ml |>
+  filter(Algorithm == "LogisticRegression") |>
+  mutate(
+    Classification = ifelse(.data[[class_1]] > threshold, class_1, class_0),
+    True_labels = as.factor(y)
+  ) |>
+  select(-all_of(class_0)) |>
+  pivot_longer(
+    cols = 1,
+    names_to = "Condition",
+    values_to = "Probabilities"
+  ) |>
+  ggplot(
+    aes(
+      x = Prediction,
+      y = Probabilities,
+      fill = True_labels
+    )
+  ) +
+  geom_violin(
+    color = NA
+  ) +
+  geom_hline(
+    yintercept = threshold, 
+    color = "blue", 
+    linetype = "dashed", 
+    linewidth = (0.5 / 2)
+  ) + 
+  facet_grid(
+    cols = vars(data_type),
+    labeller = labeller(
+      data_type = as_labeller(tech_labels)
+      )
+  ) +
+  scale_fill_discrete(
+    name = "True labels",
+    labels = c(class_0, class_1)
+  ) +
+  labs(
+    title = "Logistic Regression",
+    x = "Prediction"
+  ) +
+  theme_nature_fonts(base_size = ppx) +
+  theme_white_background() +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
+  theme(
+    legend.position = "bottom"
+  )
+
+p_forest <- raw_metric_ml |>
+  filter(Algorithm == "RandomForestClassifier") |>
+  mutate(
+    Classification = ifelse(.data[[class_1]] > threshold, class_1, class_0),
+    True_labels = as.factor(y)
+  ) |>
+  select(-all_of(class_0)) |>
+  pivot_longer(
+    cols = 1,
+    names_to = "Condition",
+    values_to = "Probabilities"
+  ) |>
+  ggplot(
+    aes(
+      x = Prediction,
+      y = Probabilities,
+      fill = True_labels
+    )
+  ) +
+  geom_violin(
+    color = NA
+  ) +
+  geom_hline(
+    yintercept = threshold, 
+    color = "blue", 
+    linetype = "dashed", 
+    linewidth = (0.5 / 2)
+  ) + 
+  facet_grid(
+    cols = vars(data_type),
+    labeller = labeller(
+      data_type = as_labeller(tech_labels)
+      )
+  ) +
+  scale_fill_discrete(
+    name = "True labels",
+    labels = c(class_0, class_1)
+  ) +
+  labs(
+    title = "Random Forest",
+    x = "Prediction"
+  ) +
+  theme_nature_fonts(base_size = ppx) +
+  theme_white_background() +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
+  theme(
+    legend.position = "bottom"
+  )
+
+# Patchwork
+p <- p_regression + p_forest + plot_layout(guides = "collect") & theme(legend.position = "bottom")
+
+# Save
+save_name <- file.path(path_to_save_location, "Distribution_probabilities.pdf")
+save_ggplot(p, save_name, width = 8, height = 3)
 
 
 

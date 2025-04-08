@@ -106,7 +106,7 @@ setup.log("Feature selection")
 if setup.filter_features and setup.data_type == "expression":
 
     # Transform to logCPM
-    norm_factors = calculate_tmm_norm_factors(data.X)
+    norm_factors = calculate_tmm_norm_factors(np.array(data.X))
     cpm_data = cpm(data.X, norm_factors = norm_factors, log = True)
     # Filter by signal/count
     min_counts = signal_by_percentile(cpm_data, percentile = 25)
