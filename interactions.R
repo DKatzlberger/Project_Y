@@ -62,9 +62,7 @@ if (length(args) > 0) {
 # Set seed (because why not)
 set.seed(42)
 
-# 'vscratch_dir_out' for summarized analysis
-vscratch_dir_out  <-  "data/combined_runs"
-analysis_name     <-  "interactions"
+# Interactions analysis
 
 # Settings (transform settings into variables)
 # Input
@@ -74,13 +72,16 @@ class_1           <- setup$class_1
 output_column     <- setup$output_column
 ancestry_column   <- setup$ancestry_column
 train_ancestry    <- setup$train_ancestry
-inf_ancestry      <- setup$infer_ancestry
+infer_ancestry    <- setup$infer_ancestry
 data_path         <- setup$data_path
 # Output
 output_directory  <- setup$output_directory
 
-# Create output directory
-dir_name              <- paste0(class_0, "_vs_", class_1, "_", analysis_name)
+# Create output directory 
+analysis_name         <-  "interactions"
+phenotypes            <- paste0(class_0, "_vs_", class_1)
+ancestries            <- paste0(train_ancestry, "_to_", infer_ancestry)
+dir_name              <- paste(c(phenotypes, ancestries, analysis_name), collapse = "_")
 path_to_save_location <- file.path(output_directory, dir_name)
 # Make directory
 if (!dir.exists(path_to_save_location)) {
@@ -88,21 +89,27 @@ if (!dir.exists(path_to_save_location)) {
 }
 
 # Load data
-adata <- read_h5ad(setup$data_path)
-# Define classification task 
-adata <- adata[adata$obs[[output_column]] %in% comparison]
-# Define training and inferred ancestry
-adata <- adata[adata$obs[[ancestry_column]] %in% c(train_ancestry, inf_ancestry)]
+adata      <- read_h5ad(data_path)
+# Define classification 
+comparison <- c(class_0, class_1)
+adata      <- adata[adata$obs[[output_column]] %in% comparison]
+# Define ancestries
+ancestries <- c(train_ancestry, infer_ancestry)
+adata      <- adata[adata$obs[[ancestry_column]] %in% ancestries]
 
 
 # Define groups to compare
 adata$obs["group"] <- factor(
-  paste(adata$obs[[ancestry_column]], adata$obs[[output_column]], sep = "."), 
+  paste(
+    adata$obs[[ancestry_column]], 
+    adata$obs[[output_column]], 
+    sep = "."
+  ), 
   levels = c(
-    paste(train_ancestry, comparison[1], sep = "."),  
-    paste(train_ancestry, comparison[2], sep = "."),  
-    paste(inf_ancestry, comparison[1], sep = "."),    
-    paste(inf_ancestry, comparison[2], sep = ".")     
+    paste(train_ancestry, class_0, sep = "."),  
+    paste(train_ancestry, class_1, sep = "."),  
+    paste(infer_ancestry, class_0, sep = "."),    
+    paste(infer_ancestry, class_1, sep = ".")     
   )
 )
 
@@ -114,23 +121,30 @@ colnames(interaction_design) <- gsub("group", "", colnames(interaction_design))
 colnames(interaction_design) <- gsub("-", "_", colnames(interaction_design))
 
 # Filter features 
+# Settings
+tech            <- setup$tech
+filter_features <- setup$filter_features
+# Name of QC plot
 v_name <- file.path(path_to_save_location, "QC_mean_variance_trend.pdf")
-if (setup$filter_features & setup$data_type == "expression"){
+
+if (filter_features & tech == "transcriptomics"){
 
   # Transform to logCPM
   norm_factors <- calculate_tmm_norm_factors(adata$X)
-  cpm_data <- cpm(adata$X, norm_factors = norm_factors, log = TRUE)
+  cpm_data     <- cpm(adata$X, norm_factors = norm_factors, log = TRUE)
+
   # Filter by signal/count
-  min_counts <- signal_by_percentile(cpm_data, percentile = 25)
+  min_counts        <- signal_by_percentile(cpm_data, percentile = 25)
   filtered_features <- filter_by_signal(cpm_data, min_counts)
   # Subset
-  filtered_data = adata[, filtered_features]
+  filtered_data <- adata[, filtered_features]
 
-  # Variance filtering
+  # Transform to logCPM
   norm_factors <- calculate_tmm_norm_factors(filtered_data$X)
-  cpm_data <- cpm(filtered_data$X, norm_factors = norm_factors, log = TRUE)
+  cpm_data     <- cpm(filtered_data$X, norm_factors = norm_factors, log = TRUE)
+
   # Filter by variance
-  min_variance <- variance_by_percentile(cpm_data, percentile = 25)
+  min_variance      <- variance_by_percentile(cpm_data, percentile = 25)
   filtered_features <- filter_by_variance(cpm_data, var_threshold = min_variance)
   # Subset
   filtered_data <- filtered_data[, filtered_features]
