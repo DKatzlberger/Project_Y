@@ -80,9 +80,8 @@ data_path         <- setup$data_path
 output_directory  <- setup$output_directory
 
 # Create output directory
-
-match_pattern         <- paste0(tag, "_", condition, "_", ancestry, "_", analysis_name)
-path_to_save_location <- file.path(vscratch_dir_out, match_pattern)
+dir_name              <- paste0(class_0, "_vs_", class_1, "_", analysis_name)
+path_to_save_location <- file.path(output_directory, dir_name)
 # Make directory
 if (!dir.exists(path_to_save_location)) {
   dir.create(path_to_save_location, recursive = TRUE)

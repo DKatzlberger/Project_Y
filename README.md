@@ -15,5 +15,11 @@ Output:
 "interactions.R" will create a directory within your specified `output_directory`. 
 The name of this directory is structured as followed
 ```r
-library(tidyverse)
-```r
+analysis_name    <- "interactions" # fixed
+class_0          <- "class_0"      # modified by user
+class_1          <- "class_1"      # modified by user
+output_directory <- "development"  # modified by user
+
+dir_name              <- paste0(class_0, "_vs_", class_1, "_", analysis_name)
+path_to_save_location <- file.path(output_directory, dir_name)
+```
