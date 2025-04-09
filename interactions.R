@@ -119,13 +119,35 @@ check_columns(adata$obs, required_columns)
 comparison <- c(class_0, class_1)
 check_values(adata$obs, output_column, comparison)
 adata      <- adata[adata$obs[[output_column]] %in% comparison]
+# Factorize
+adata$obs[[output_column]] <- factor(adata$obs[[output_column]], levels = comparison)
+
 # Define ancestries
 ancestries <- c(train_ancestry, infer_ancestry)
 check_values(adata$obs, ancestry_column, ancestries)
 adata      <- adata[adata$obs[[ancestry_column]] %in% ancestries]
+# Factorize
+adata$obs[[ancestry_column]] <- factor(adata$obs[[ancestry_column]], levels = ancestries)
 
 # Interactions analysis
 sprintf("New analysis with id: %s; created: %s", setup$id, setup$date)
+
+# Visualize: Sample sizes
+p_name        <- file.path(path_to_save_location, "QC_sample_sizes.pdf")
+# Plot
+p_count       <- plot_output_column_count(adata$obs, ancestry_column, output_column)
+p_proportions <- plot_output_column_proportion(adata$obs, ancestry_column, output_column)
+# Combine
+p <- p_count + p_proportions + plot_layout(guides = "collect") & theme(legend.position = "bottom")
+# Save
+save_ggplot(p, p_name, width = 6, height = 4)
+
+# Add to settings
+counts <- table(adata$obs[[output_column]], adata$obs[[ancestry_column]])
+setup$n_class_0_train_ancestry <- counts[class_0, train_ancestry]
+setup$n_class_1_train_ancestry <- counts[class_1, train_ancestry]
+setup$n_class_0_infer_ancestry <- counts[class_0, infer_ancestry]
+setup$n_class_1_infer_ancestry <- counts[class_1, infer_ancestry]
 
 # Define groups to compare
 adata$obs["group"] <- factor(
@@ -186,8 +208,8 @@ if (filter_features & tech == "transcriptomics"){
   # Axis
   x_axis <- paste0("log2(", data_type, " + 0.5)")
   # Plot
-  p_before <- mean_variance_trend(data_before, x_axis)
-  p_after  <- mean_variance_trend(data_after, x_axis)
+  p_before <- plot_mean_variance_trend(data_before, x_axis)
+  p_after  <- plot_mean_variance_trend(data_after, x_axis)
   # Combine
   p <- p_before / p_after
   # Save
@@ -211,8 +233,8 @@ if (filter_features & tech == "transcriptomics"){
   # Axis
   x_axis <- data_type
   # Plot
-  p_before <- mean_variance_trend(data_before, x_axis) 
-  p_after  <- mean_variance_trend(data_after, x_axis)
+  p_before <- plot_mean_variance_trend(data_before, x_axis) 
+  p_after  <- plot_mean_variance_trend(data_after, x_axis)
   # Combine
   p <- p_before / p_after
   # Save
@@ -229,7 +251,7 @@ if (filter_features & tech == "transcriptomics"){
   # Axis
   x_axis <- data_type
   # Plot
-  p_before <- mean_variance_trend(data_before, x_axis) 
+  p_before <- plot_mean_variance_trend(data_before, x_axis) 
   # Save
   save_ggplot(p_before, p_name, width = 6, height = 4)
 
@@ -244,7 +266,7 @@ if (filter_features & tech == "transcriptomics"){
   # Axis
   x_axis <- data_type
   # Plot
-  p_before <- mean_variance_trend(data_before, x_axis)
+  p_before <- plot_mean_variance_trend(data_before, x_axis)
   # Save
   save_ggplot(p_before, p_name, width = 6, height = 4)
 

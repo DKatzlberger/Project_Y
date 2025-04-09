@@ -97,7 +97,105 @@ save_ggplot <- function(plot, save_path, width = 5, height = 5, with_legend = TR
   invisible()  # Ensures nothing is returned after deletion
 }
 
-# DESCRIPTIVE STATISTICS
+# INTERACTIONS
+plot_output_column_proportion <- function(data, x, fill) {
+  # Plot
+  p <- data |>
+    mutate(
+      custom_x = case_when(
+        !!sym(x) == levels(factor(data[[x]]))[1] ~ paste(!!sym(x), "(train_ancestry)"), 
+        !!sym(x) == levels(factor(data[[x]]))[2] ~ paste(!!sym(x), "(infer_ancestry)"), 
+        TRUE ~ as.character(!!sym(fill))  
+      ),
+      custom_fill = case_when(
+        !!sym(fill) == levels(factor(data[[fill]]))[1] ~ paste(!!sym(fill), "(class_0)"), 
+        !!sym(fill) == levels(factor(data[[fill]]))[2] ~ paste(!!sym(fill), "(class_1)"), 
+        TRUE ~ as.character(!!sym(fill))  
+      )
+    ) |>
+    ggplot(
+      aes(
+          x    = custom_x, 
+          fill = custom_fill
+        )
+    ) +
+    geom_bar(
+      position = "fill"
+    ) +
+    geom_text(
+      aes(
+        label = scales::percent(after_stat(count)/sum(after_stat(count)), accuracy = 0.1)
+      ),
+      stat = "count",
+      position = position_fill(vjust = 0.5),  
+      color = "black",  
+      size = 2
+    ) +
+    labs(
+      x    = paste(x, "(ancestry_column)"),
+      y    = "Proportion",
+      fill = paste(x, "(output_column)")
+    ) +
+    theme_nature_fonts() +
+    theme_white_background() +
+    theme_small_legend() +
+    theme(
+      legend.position = "bottom"
+    )
+  
+  return(p)
+}
+
+plot_output_column_count <- function(data, x, fill) {
+  # Plot
+  p <- data |>
+    mutate(
+      custom_x = case_when(
+        !!sym(x) == levels(factor(data[[x]]))[1] ~ paste(!!sym(x), "(train_ancestry)"), 
+        !!sym(x) == levels(factor(data[[x]]))[2] ~ paste(!!sym(x), "(infer_ancestry)"), 
+        TRUE ~ as.character(!!sym(fill))  
+      ),
+      custom_fill = case_when(
+        !!sym(fill) == levels(factor(data[[fill]]))[1] ~ paste(!!sym(fill), "(class_0)"), 
+        !!sym(fill) == levels(factor(data[[fill]]))[2] ~ paste(!!sym(fill), "(class_1)"), 
+        TRUE ~ as.character(!!sym(fill))  
+      )
+    ) |>
+    ggplot(
+      aes(
+          x    = custom_x, 
+          fill = custom_fill
+        )
+    ) +
+    geom_bar(
+      position = "dodge"
+    ) +
+    geom_text(
+      aes(
+        label = after_stat(count)
+      ),
+      stat = "count", 
+      position = position_dodge(width = 0.8), 
+      vjust = -0.5,  
+      color = "black", 
+      size = 2     
+    ) +
+    labs(
+      x    = paste(x, "(ancestry_column)"),
+      y    = "Count",
+      fill = paste(x, "(output_column)")
+    ) +
+    theme_nature_fonts() +
+    theme_white_background() +
+    theme_small_legend() +
+    theme(
+      legend.position = "bottom"
+    )
+  
+  return(p)
+}
+
+
 plot_density_of_samples <- function(data_matrix, n_samples = 12, x_axis_label) {
 
   # Extract the first n samples (rows) from the matrix
@@ -205,9 +303,8 @@ plot_qq_of_genes <- function(data_matrix, n_features = 10) {
   return(p)
 }
 
-# INTERACTIONS
 # Mean variance trend plot (Voom like plot)
-mean_variance_trend <- function(data, x_axis_label) {
+plot_mean_variance_trend <- function(data, x_axis_label) {
   # Generate a mean-variance trend plot (Voom-like plot).
   
   # This function visualizes the relationship between the mean and variance of gene expression

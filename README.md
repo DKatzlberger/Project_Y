@@ -63,4 +63,5 @@ output_directory/
 ├── QC_mean_variance_trend.pdf 
 ├── QC_desnity_normalized_values.pdf 
 ├── QC_qq_normalized_values.pdf 
+├── QC_sample_sizes.pdf
 ```
