@@ -3,7 +3,7 @@
 The repository (currently) contains:
 1. A running script "interactions.R"
 
-The script analysis which genes have interactions with ancestry in genotype-phenotype relationships. It uses the edgeR pipeline to compare each gene individually. The design of the model first fits a means model for the specified groups and afterwards fits a contrast to compare these groups.  
+The script analysis which genes have interactions with ancestry in genotype-phenotype relationships. It uses the edgeR pipeline to compare each gene individually. The design of the model first fits a means model for the specified groups and afterwards fits a contrast to compare these groups.
 
 ## Input
 
@@ -32,10 +32,12 @@ filter_features: True
 data_type: Input_values
 visual_val: True
 ```
+Currently the script supports these normalization methods:
 
 
 ***2. Data:***
 
+The script handles count matrix with one value per gene.
 The data is structured in an [AnnData](https://anndata.readthedocs.io/en/stable/) object. 
 *X* is required to contain your molecular data in format *observations* x *features*.
 *obs* (meta data) is required to include the `output_column` with specified `class_0`, `class_1` and it requires to contain the `ancestry_column` with specified `train_ancestry`, `infer_ancestry`.
@@ -67,3 +69,5 @@ output_directory/
 └── Visual_val/
     ├──
 ```
+
+## How to run the script
