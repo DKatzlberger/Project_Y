@@ -285,9 +285,9 @@ setup$n_features <- n_features
 print("Start differential gene expression analysis.")
 # Select normalization method
 tech                 <- setup$tech
-dge_normalization    <- setup$dge_normalization
-normalization_method <- normalization_methods[[tech]][[dge_normalization]]$"function"
-values_output_name   <- normalization_methods[[tech]][[dge_normalization]]$"output_name"
+normalization        <- setup$normalization
+normalization_method <- normalization_methods[[tech]][[normalization]]$"function"
+values_output_name   <- normalization_methods[[tech]][[normalization]]$"output_name"
 
 # Transpose (rows = Genes, cols = Samples)
 data_t <- t(filtered_data$X)

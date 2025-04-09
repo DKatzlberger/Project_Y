@@ -13,5 +13,5 @@ data_type: RSEM
 output_directory: development
 # Features
 filter_features: True
-dge_normalization: limma_voom
+normalization: limma_voom
 

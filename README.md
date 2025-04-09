@@ -20,15 +20,15 @@ train_ancestry: your_train_ancestry
 infer_ancestry: your_infer_ancestry    
 ancestry_column: column_with_ancestry  
 data_path: your/data/path.h5ad         # The script only works with .h5ad files
-tech: omics_type                       # For normalization of the values the omics is required 
-dge_normalization: method
+tech: omics_type                       
+normalization: method
 output_directory: your/save/location   # The script will create a directory at this place
 ```
 Currently the script supports these omics and normalization methods:
-| Omics Type      | Supported Preprocessing Methods                                      |
+| Omics (tech)    | Supported normalization methods (normalization)                      |
 |-----------------|----------------------------------------------------------------------|
-| transcriptomics | `"limma_voom"`, `"normalize_log"`, `"normalize_zscore"`, `"raw"`     |
-| methylation     | `"beta_to_mvals"`, `"normalize_log"`, `"normalize_zscore"`, `"raw"`  |
+| transcriptomics | `"limma_voom"` `"normalize_log"` `"normalize_zscore"`, `"raw"`     |
+| methylation     | `"beta_to_mvals"` `"normalize_log"` `"normalize_zscore"`, `"raw"`  |
 | proteomics      | `"raw"`                                                              |
 
 The script will substitute not specified settings with default settings as follows:
