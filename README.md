@@ -7,10 +7,7 @@ The repository (currently) contains:
 The script analysis which genes have interactions with ancestry in genotype-phenotype relationships.
 
 **Input:**
-1. Settings in yaml format
-2. Data in h5ad format
-
-***Settings:***
+***1. Settings:***
 
 The script accepts one commandline argument, which is a path to a settings.yaml file. 
 In the file you need to specify all required settings. In the snipped below some of the settings are displayed (more settings are required).
@@ -29,7 +26,7 @@ data_path: your/data/path.h5ad         # The script only works with .h5ad files
 output_directory: your/save/location   # The script will create a directory at this place
 ```
 
-***Data:***
+***2. Data:***
 
 The data is structured in an [AnnData](https://anndata.readthedocs.io/en/stable/) object. 
 *X* is required to contain your molecular data in format *observations* x *features*.
