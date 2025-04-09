@@ -131,17 +131,9 @@ normalization_methods <- list(
     )
   ),
   "proteomics" = list(
-    "normalize_zscore" = list(
-      "function" = function(X, ...) scale(X),
-      "output_name" = "Z-score normalized values"
-    ),
     "raw" = list(
       "function" = function(X, ...) X,
       "output_name" = "Input values"
-    ),
-    "normalize_log" = list(
-      "function" = function(X, ...) normalize_log(X),
-      "output_name" = "log2-transformed values"
     )
   )
 )

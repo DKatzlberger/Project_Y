@@ -24,6 +24,12 @@ tech: omics_type                       # For normalization of the values the omi
 dge_normalization: method
 output_directory: your/save/location   # The script will create a directory at this place
 ```
+Currently the script supports these omics and normalization methods:
+```
+transcriptomics: "limma_voom", "normalize_log", "normalize_zscore", "raw"
+methylation: "beta_to_mvals", "normalize_log", "normalize_zscore", "raw"
+proteomics: "raw"
+```
 The script will substitute not specified settings with default settings as follows:
 ```yaml
 # Default settings
@@ -31,7 +37,6 @@ filter_features: True
 data_type: Input_values
 visual_val: True
 ```
-Currently the script supports these normalization methods:
 An example settings file for "interactions.R" can be found here [example_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/example_settings_interactions.yaml).
 
 ***2. Data:***
