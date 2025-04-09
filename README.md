@@ -27,7 +27,7 @@ dge_normalization: method
 output_directory: your/save/location   # The script will create a directory at this place
 ```
 An example settings file for "interactions.R" can be found here [example_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/example_settings_interactions.yaml).
-The script will substitute not specified settings with default settings:
+The script will substitute not specified settings with default settings as follows:
 ```yaml
 filter_features: True
 data_type: Input_values
@@ -49,7 +49,7 @@ AnnData object with n_obs × n_vars = 794 × 20338
     obs: column_with_class, column_with_ancestry
 ```
 
-**Output:**
+## Output
 
 "interactions.R" will create a directory at the place you specified in `output_directory`. 
 This directory will contain the following files:
