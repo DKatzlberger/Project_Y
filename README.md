@@ -12,23 +12,22 @@ The script analysis which genes have interactions with ancestry in genotype-phen
 The script accepts one commandline argument, which is a path to a settings.yaml file. 
 In the file you need to specify all required settings. The snipped below shows all required settings:
 ```yaml
-# Classification
+# Required settings
 class_0: your_class_0                  
 class_1: your_class_1                  
 output_column: column_with_class       
 train_ancestry: your_train_ancestry    
 infer_ancestry: your_infer_ancestry    
 ancestry_column: column_with_ancestry  
-# Input
 data_path: your/data/path.h5ad         # The script only works with .h5ad files
 tech: omics_type                       # For normalization of the values the omics is required 
 dge_normalization: method
-# Output
 output_directory: your/save/location   # The script will create a directory at this place
 ```
 An example settings file for "interactions.R" can be found here [example_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/example_settings_interactions.yaml).
 The script will substitute not specified settings with default settings as follows:
 ```yaml
+# Default settings
 filter_features: True
 data_type: Input_values
 visual_val: True
@@ -65,4 +64,6 @@ output_directory/
 ├── QC_desnity_normalized_values.pdf 
 ├── QC_qq_normalized_values.pdf 
 ├── QC_sample_sizes.pdf
+└── Visual_val/
+    ├──
 ```
