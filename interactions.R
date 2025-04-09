@@ -8,8 +8,6 @@ suppressPackageStartupMessages(
     # DGE workflow and functional analysis
     library(edgeR)
     library(fgsea)
-    library(Rtsne)
-    library(org.Hs.eg.db)
     # Parallelization
     library(parallel)
     # Visualization
@@ -20,6 +18,7 @@ suppressPackageStartupMessages(
     library(circlize)
     library(ggVennDiagram)
     # Standard libraries
+    library(uuid)
     library(tidyverse)
     library(data.table)
     library(yaml)
@@ -37,13 +36,15 @@ source("figure_themes.R")
 args <- commandArgs(trailingOnly = TRUE)
 # Check if script is run with a command-line argument
 if (length(args) > 0) {
-  yaml_file <- args[1]
+  
+  YAML_FILE <- args[1]
   # Check if it's a valid YAML file
-  is_yml_file(yaml_file)
-  setup <- yaml.load_file(yaml_file)
+  is_yaml_file(YAML_FILE)
 
 } else {
+
   # Dev settings if no command-line argument provided
+  print("Running interactive mode for development.")
 
   # BRCA
   # data/inputs/settings/PanCanAtlas_BRCA_RSEM_Basal_vs_non-Basal_EUR_to_ADMIX.yml
@@ -52,16 +53,21 @@ if (length(args) > 0) {
 
   # LUSC LUAD
   # data/inputs/settings/PanCanAtlas_LUSC_LUAD_RPPA_LUSC_vs_LUAD_EUR_to_ADMIX.yml
-
-  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RSEM_Basal_vs_non-Basal_EUR_to_ADMIX.yml"
-  print("Running interactive mode for development.")
-  setup <- yaml.load_file(yaml_file)
+  YAML_FILE <- "example_settings_interactions.yaml"
+  is_yaml_file(YAML_FILE)
 }
 
-# Set seed (because why not)
-set.seed(42)
+# Initalize settings class
+setup <- yaml.load_file(YAML_FILE)
+# Add info to settings
+setup$date <- format(as.POSIXlt(Sys.time(), tz = "GMT"), "%Y-%m-%d %H:%M:%S") 
+setup$id   <- toupper(substr(UUIDgenerate(), 1, 10))
 
-# Interactions analysis
+# Create output directory
+path_to_save_location <- setup$output_directory
+if (!dir.exists(path_to_save_location)) {
+  dir.create(path_to_save_location, recursive = TRUE)
+}
 
 # Settings (transform settings into variables)
 # Input
@@ -73,19 +79,7 @@ ancestry_column   <- setup$ancestry_column
 train_ancestry    <- setup$train_ancestry
 infer_ancestry    <- setup$infer_ancestry
 data_path         <- setup$data_path
-# Output
-output_directory  <- setup$output_directory
 
-# Create output directory 
-analysis_name         <-  "interactions"
-phenotypes            <- paste0(class_0, "_vs_", class_1)
-ancestries            <- paste0(train_ancestry, "_to_", infer_ancestry)
-dir_name              <- paste(c(phenotypes, ancestries, analysis_name), collapse = "_")
-path_to_save_location <- file.path(output_directory, dir_name)
-# Make directory
-if (!dir.exists(path_to_save_location)) {
-  dir.create(path_to_save_location, recursive = TRUE)
-}
 
 # Load data
 adata      <- read_h5ad(data_path)
@@ -122,9 +116,10 @@ colnames(interaction_design) <- gsub("-", "_", colnames(interaction_design))
 # Filter features 
 # Settings
 tech            <- setup$tech
+data_type       <- setup$data_type
 filter_features <- setup$filter_features
 # Name of QC plot
-v_name <- file.path(path_to_save_location, "QC_mean_variance_trend.pdf")
+p_name <- file.path(path_to_save_location, "QC_mean_variance_trend.pdf")
 
 if (filter_features & tech == "transcriptomics"){
 
@@ -148,66 +143,74 @@ if (filter_features & tech == "transcriptomics"){
   # Subset
   filtered_data <- filtered_data[, filtered_features]
 
-  # Old filtering (less strict filtering)
-  # filtered_features <- filterByExpr(t(data$X), interaction_design)
-  # data <- data[, filtered_features]
-
-  # Variance trend 
-  trend_data_before <- log2(adata$X + 0.5)
-  trend_data_after <- log2(filtered_data$X + 0.5)
-
   # Visualize: Filtering
-  p_before <- mean_variance_trend(trend_data_before, x_axis_label = "log2(RSEM + 0.5)")
-  p_after <- mean_variance_trend(trend_data_after, x_axis_label = "log2(RSEM + 0.5)")
+  data_before <- log2(adata$X + 0.5)
+  data_after  <- log2(filtered_data$X + 0.5)
+
+  # Axis
+  x_axis <- paste0("log2(", data_type, " + 0.5)")
+  # Plot
+  p_before <- mean_variance_trend(data_before, x_axis)
+  p_after  <- mean_variance_trend(data_after, x_axis)
   # Combine
   p <- p_before / p_after
   # Save
-  save_ggplot(p, v_name, width = 6, height = 4)
+  save_ggplot(p, p_name, width = 6, height = 4)
 
-} else if (setup$filter_features & setup$data_type == "methylation") {
+} else if (filter_features & tech == "methylation") {
 
   # Transform to mvalues
   mvals <- beta_to_mvalue(adata$X)
   
   # Filter by variance
-  min_variance <- variance_by_percentile(mvals, percentile = 25)
+  min_variance       <- variance_by_percentile(mvals, percentile = 25)
   filtered_features  <- filter_by_variance(mvals, var_threshold = min_variance)
   # Subset
   filtered_data = adata[, filtered_features]
   
-  # Variance trend 
-  trend_data_before <- adata$X 
-  trend_data_after <- filtered_data$X
-
   # Visualize: Filtering
-  p_before <- mean_variance_trend(trend_data_before, x_axis_label = "Beta values") 
-  p_after <- mean_variance_trend(trend_data_after, x_axis_label = "Beta values")
+  data_before <- adata$X 
+  data_after  <- filtered_data$X
+
+  # Axis
+  x_axis <- data_type
+  # Plot
+  p_before <- mean_variance_trend(data_before, x_axis) 
+  p_after  <- mean_variance_trend(data_after, x_axis)
   # Combine
   p <- p_before / p_after
   # Save
-  save_ggplot(p, v_name, width = 6, height = 4)
+  save_ggplot(p, p_name, width = 6, height = 4)
 
-} else if (setup$filter_features & setup$data_type == "protein"){
+} else if (filter_features & tech == "proteomics"){
 
   # No filtering
   filtered_data = adata
 
-  # Variance trend 
-  trend_data_before <- adata$X 
-  trend_data_after <- adata$X
-
   # Visualize: Filtering
-  p_before <- mean_variance_trend(trend_data_before, x_axis_label = "Input values") 
-  p_after <- mean_variance_trend(trend_data_after, x_axis_label = "Input values")
-  # Combine
-  p <- p_before / p_after
+  data_before <- adata$X 
+
+  # Axis
+  x_axis <- data_type
+  # Plot
+  p_before <- mean_variance_trend(data_before, x_axis) 
   # Save
-  save_ggplot(p, v_name, width = 6, height = 4)
+  save_ggplot(p_before, p_name, width = 6, height = 4)
 
 } else{
 
   # No filtering
-  filtered_data = adata
+  filtered_data <- adata
+
+  # Visualize: Filtering
+  data_before <- adata$X 
+  
+  # Axis
+  x_axis <- data_type
+  # Plot
+  p_before <- mean_variance_trend(data_before, x_axis)
+  # Save
+  save_ggplot(p_before, p_name, width = 6, height = 4)
 
 }
 # Save feature 

@@ -13,7 +13,7 @@ The script analysis which genes have interactions with ancestry in genotype-phen
 ***Settings:***
 
 The script accepts one commandline argument, which is a path to a settings.yaml file. 
-In the file you need to specify all required settings. In the snipped below some of the settings are displayed.
+In the file you need to specify all required settings. In the snipped below some of the settings are displayed (more settings are required).
 An example settings file for "interactions.R" can be found here [example_settings_interactions.yaml]().
 ```yaml
 # Classification
@@ -31,7 +31,7 @@ output_directory: your/save/location   # The script will create a directory at t
 
 ***Data:***
 
-The data is structured in an [anndata](https://anndata.readthedocs.io/en/stable/) object. 
+The data is structured in an [AnnData](https://anndata.readthedocs.io/en/stable/) object. 
 *X* is required to contain your molecular data in format *observations* x *features*.
 *obs* (meta data) is required to include the `output_column` with specified `class_0`, `class_1` and it requires to contain the `ancestry_column` with specified `train_ancestry`, `infer_ancestry`.
 ```r
@@ -45,24 +45,5 @@ AnnData object with n_obs × n_vars = 794 × 20338
 ```
 
 **Output:**
-1. A directory with results.
 
-"interactions.R" will create a directory within your specified `output_directory`. 
-The name of this directory is structured as followed
-```r
-class_0          <- "class_0"      # modified by user
-class_1          <- "class_1"      # modified by user
-train_ancestry   <- "ancestry_0"   # modified by user
-infer_ancestry   <- "ancestry_1"   # modified by user
-output_directory <- "development"  # modified by user
-
-analysis_name         <- "interactions"
-phenotypes            <- paste0(class_0, "_vs_", class_1)
-ancestries            <- paste0(train_ancestry, "_to_", infer_ancestry)
-dir_name              <- paste(c(phenotypes, ancestries, analysis_name), collapse = "_")
-path_to_save_location <- file.path(output_directory, dir_name)
-path_to_save_location
-```
-```
-[1] "development/class_0_vs_class_1_ancestry_0_to_ancestry_1_interactions"
-```
+"interactions.R" will create a directory with the name you specified in `output_directory`. 

@@ -172,8 +172,7 @@ class Setup(dict):
             else:
                 self.final_config[key] = value  # Update internal dictionary
                 self[key] = value  # Ensure settings are accessible as attribute    
-        
-        
+               
 class ErrorHandler():
     def __init__(self, log_file):
         """

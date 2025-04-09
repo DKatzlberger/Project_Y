@@ -1,28 +1,13 @@
-make.dir <- function(fp, overwrite = FALSE) {
-  # Creates a directory 
-  # can be specified if you want to overwrite.
-  # fb: Path to directory.
-  # overwrite: If the existing directory should be overwritten.
-  if(!file.exists(fp)) {  
-    make.dir(dirname(fp))
-    dir.create(fp)
-  } else {   if(isTRUE(overwrite)){
-    unlink(fp, recursive = TRUE)
-    dir.create(fp)
-    print('Overwritting existing directory')
-  } else {
-    print('File exists!')
-    } 
-  }
-} 
-
-is_yml_file <- function(file_path) {
-  # Check if the file exists and if the file has a .yml extension
+is_yaml_file <- function(file_path) {
+  # Check if the file exists
   if (!file.exists(file_path)) {
-    stop('Error: The file does not exist.')
+    stop("Error: The file does not exist.")
   }
-  if (tolower(tools::file_ext(file_path)) != 'yml') {
-    stop('Error: The file is not a YML file.')
+
+  # Check if the file has a valid YAML extension (.yml or .yaml)
+  ext <- tolower(tools::file_ext(file_path))
+  if (!(ext %in% c("yml", "yaml"))) {
+    stop("Error: The file is not a YAML file. Please ensure the file has a .yml or .yaml extension.")
   }
 }
 
