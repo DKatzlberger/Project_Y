@@ -33,7 +33,8 @@ source("figure_themes.R")
 # Default settings
 default_setup <- list(
   # Filering
-  filter_features = TRUE
+  filter_features = TRUE,
+  data_type       = "Input_values"
   )
 
 # Required settings
@@ -49,7 +50,6 @@ required_settings <- c(
   # Data
   "data_path", 
   "tech", 
-  "data_type", 
   # Output
   "output_directory"
 )
