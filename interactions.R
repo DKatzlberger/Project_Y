@@ -36,6 +36,8 @@ default_setup <- list(
   data_type       = "Input_values",
   # Features
   filter_features = TRUE
+  # Visualization
+  visual_val      = TRUE
   )
 
 # Required settings
@@ -360,6 +362,10 @@ contrast_res       <- extract_results(limma_fit_contrast)
 # Save
 save_name <- file.path(path_to_save_location, "Limma_contrast.csv")
 fwrite(contrast_res, save_name)
+
+# Save the settings
+save_name <- file.path(path_to_save_location, "Settings.yaml")
+write_yaml(setup, save_name)
 
 
 

@@ -31,6 +31,7 @@ The script will substitute not specified settings with default settings as follo
 ```yaml
 filter_features: True
 data_type: Input_values
+visual_val: True
 ```
 
 
@@ -56,11 +57,11 @@ This directory will contain the following files:
 
 ```
 output_directory/
-├── Features.yaml
-├── Settings.yaml
-├── Limma_means.csv
-├── Limma_contrast.csv
-├── QC_mean_variance_trend.pdf 
+├── Features.yaml                      # Analyzed features
+├── Settings.yaml                      # Used settings
+├── Limma_means.csv                    # Result means model
+├── Limma_contrast.csv                 # Results contrast
+├── QC_mean_variance_trend.pdf         
 ├── QC_desnity_normalized_values.pdf 
 ├── QC_qq_normalized_values.pdf 
 ├── QC_sample_sizes.pdf
