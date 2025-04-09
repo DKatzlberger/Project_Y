@@ -32,9 +32,10 @@ source("figure_themes.R")
 
 # Default settings
 default_setup <- list(
-  # Filering
-  filter_features = TRUE,
-  data_type       = "Input_values"
+  # Input
+  data_type       = "Input_values",
+  # Features
+  filter_features = TRUE
   )
 
 # Required settings
@@ -79,10 +80,11 @@ if (length(args) > 0) {
   is_yaml_file(YAML_FILE)
 }
 
-# Load user settings
+# Input
+# Settings
 user_setup <- yaml.load_file(YAML_FILE)
 # Default and user settings (user will overwrite default)
-setup     <- modifyList(default_setup, user_setup)
+setup      <- modifyList(default_setup, user_setup)
 # Check required settings
 check_settings(setup, required_settings, YAML_FILE)
 # Add info to settings
@@ -95,14 +97,10 @@ if (!dir.exists(path_to_save_location)) {
   dir.create(path_to_save_location, recursive = TRUE)
 }
 # Save the settings
-settings_out <- file.path(path_to_save_location, "Settings.yaml")
-write_yaml(setup, settings_out)
+save_name <- file.path(path_to_save_location, "Settings.yaml")
+write_yaml(setup, save_name)
 
-# Settings done
-print("Settings done.")
-
-# Settings (transform settings into variables)
-# Input
+# Data
 output_column     <- setup$output_column
 class_0           <- setup$class_0
 class_1           <- setup$class_1
@@ -126,9 +124,8 @@ ancestries <- c(train_ancestry, infer_ancestry)
 check_values(adata$obs, ancestry_column, ancestries)
 adata      <- adata[adata$obs[[ancestry_column]] %in% ancestries]
 
-# Data done
-print("Validation of data done.")
-
+# Interactions analysis
+sprintf("New analysis with id: %s; created: %s", setup$id, setup$date)
 
 # Define groups to compare
 adata$obs["group"] <- factor(
@@ -253,18 +250,20 @@ if (filter_features & tech == "transcriptomics"){
 
 }
 # Save feature 
-write_yaml(filtered_data$var_names, file.path(path_to_save_location, "Features.yml"))
+save_name <- file.path(path_to_save_location, "Features.yaml")
+write_yaml(filtered_data$var_names, save_name)
 # Number of features
-n_features <- ncol(filtered_data)
+n_features       <- ncol(filtered_data)
+setup$n_features <- n_features
 
 
 # Limma workflow
 print("Start differential gene expression analysis.")
 # Select normalization method
-data_type <- setup$data_type
-dge_normalization <- setup$dge_normalization
-normalization_method <- normalization_methods[[data_type]][[dge_normalization]]$"function"
-values_output_name <- normalization_methods[[data_type]][[dge_normalization]]$"output_name"
+tech                 <- setup$tech
+dge_normalization    <- setup$dge_normalization
+normalization_method <- normalization_methods[[tech]][[dge_normalization]]$"function"
+values_output_name   <- normalization_methods[[tech]][[dge_normalization]]$"output_name"
 
 # Transpose (rows = Genes, cols = Samples)
 data_t <- t(filtered_data$X)
@@ -276,38 +275,42 @@ data_norm_matrix <- if (is.list(data_norm) && !is.null(data_norm$E)) data_norm$E
 
 # Visualize: Normalization
 # Density per sample
-p_before <- plot_density_of_samples(filtered_data$X, x_axis_label = "Input values") 
-p_after <- plot_density_of_samples(t(data_norm_matrix), x_axis_label = values_output_name)
+p_before <- plot_density_of_samples(filtered_data$X, x_axis_label = setup$data_type) 
+p_after  <- plot_density_of_samples(t(data_norm_matrix), x_axis_label = values_output_name)
 # Combine
 p <- p_before + p_after + plot_layout(guides = "collect") & theme(legend.position = "bottom")
 # Save
-save_name <- file.path(path_to_save_location, "QC_density_normalized_values.pdf")
-save_ggplot(p, save_name, width = 3, height = 3)
+p_name <- file.path(path_to_save_location, "QC_density_normalized_values.pdf")
+save_ggplot(p, p_name, width = 3, height = 3)
 
 # Q-Q plots per gene
 p_before <- plot_qq_of_genes(filtered_data$X, n_features = 5)
-p_after <- plot_qq_of_genes(t(data_norm_matrix), n_features = 5)
+p_after  <- plot_qq_of_genes(t(data_norm_matrix), n_features = 5)
 # Combine
 p <- p_before / p_after 
 # Save
 save_name <- file.path(path_to_save_location, "QC_qq_normalized_values.pdf")
 save_ggplot(p, save_name, width = 6, height = 4)
 
-
+# Means model
 # Fit the model (means model)
-limma_fit <- lmFit(data_norm, design = interaction_design)
-limma_fit <- eBayes(limma_fit)
+limma_fit      <- lmFit(data_norm, design = interaction_design)
+limma_fit      <- eBayes(limma_fit)
 mean_model_res <- extract_results(limma_fit)
 
-# Contrast (second baseline)
+# Save
+save_name <- file.path(path_to_save_location, "Limma_means.csv")
+fwrite(mean_model_res, save_name)
+
+# Contrast 
 print("Fit contrast.")
 # Terms
 contrast_terms <- list(
-  baseline_1      = glue("{inf_ancestry}.{comparison[1]}.Baseline"),
-  baseline_2      = glue("{inf_ancestry}.{comparison[2]}.Baseline"),
-  relationship_1  = glue("{train_ancestry}.{comparison[1]}_vs_{comparison[2]}.Relationship"),
-  relationship_2  = glue("{inf_ancestry}.{comparison[1]}_vs_{comparison[2]}.Relationship"),
-  interaction     = glue("{inf_ancestry}.Interaction")
+  baseline_1      = glue("{train_ancestry}_vs_{infer_ancestry}.{comparison[1]}"),
+  baseline_2      = glue("{train_ancestry}_vs_{infer_ancestry}.{comparison[2]}"),
+  relationship_1  = glue("{train_ancestry}.{comparison[1]}_vs_{comparison[2]}"),
+  relationship_2  = glue("{infer_ancestry}.{comparison[1]}_vs_{comparison[2]}"),
+  interaction     = glue("{train_ancestry}_vs_{infer_ancestry}.Interaction")
 )
 # Contrasts
 cols <- colnames(interaction_design)
@@ -330,7 +333,18 @@ colnames(contrast_matrix) <- contrast_terms
 # Fit contrast
 limma_fit_contrast <- contrasts.fit(limma_fit, contrast_matrix)
 limma_fit_contrast <- eBayes(limma_fit_contrast)
-contrast_res <- extract_results(limma_fit_contrast)
+contrast_res       <- extract_results(limma_fit_contrast)
+
+# Save
+save_name <- file.path(path_to_save_location, "Limma_contrast.csv")
+fwrite(contrast_res, save_name)
+
+
+
+
+
+
+
 
 # Results
 # Filter coeficients

@@ -1,17 +1,16 @@
-# Project_Y
-Genotype-phenotype generalizability across ancestries
+# Genotype-phenotype generalizability across ancestries
 
 The repository (currently) contains:
 1. A running script "interactions.R"
 
-The script analysis which genes have interactions with ancestry in genotype-phenotype relationships.
+The script analysis which genes have interactions with ancestry in genotype-phenotype relationships. It uses the edgeR pipeline to compare each gene individually. The design of the model first fits a means model for the specified groups and afterwards fits a contrast to compare these groups.  
 
-**Input:**
+## Input
 
 ***1. Settings:***
 
 The script accepts one commandline argument, which is a path to a settings.yaml file. 
-In the file you need to specify all required settings. The snipped below shows all required settings.
+In the file you need to specify all required settings. The snipped below shows all required settings:
 ```yaml
 # Classification
 class_0: your_class_0                  
@@ -23,6 +22,7 @@ ancestry_column: column_with_ancestry
 # Input
 data_path: your/data/path.h5ad         # The script only works with .h5ad files
 tech: omics_type                       # For normalization of the values the omics is required 
+dge_normalization: method
 # Output
 output_directory: your/save/location   # The script will create a directory at this place
 ```
@@ -56,5 +56,11 @@ This directory will contain the following files:
 
 ```
 output_directory/
-├──  Settings.yaml
+├── Features.yaml
+├── Settings.yaml
+├── Limma_means.csv
+├── Limma_contrast.csv
+├── QC_mean_variance_trend.pdf 
+├── QC_desnity_normalized_values.pdf 
+├── QC_qq_normalized_values.pdf 
 ```

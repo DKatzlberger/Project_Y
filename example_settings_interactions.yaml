@@ -7,9 +7,11 @@ infer_ancestry: admix
 ancestry_column: genetic_ancestry
 # Input
 data_path: data/inputs/PanCanAtlas_BRCA_raw_RSEM_subtypeNAremoved.h5ad
-# Output
-output_directory: development
-# Filtering
-filter_features: True
 tech: transcriptomics
 data_type: RSEM
+# Output
+output_directory: development
+# Features
+filter_features: True
+dge_normalization: limma_voom
+
