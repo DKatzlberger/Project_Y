@@ -30,7 +30,29 @@ suppressPackageStartupMessages(
 source("r_utils.R")
 source("figure_themes.R")
 
-# Here starts the script
+# Default settings
+default_setup <- list(
+  # Filering
+  filter_features = TRUE
+  )
+
+# Required settings
+required_settings <- c(
+  # Classification
+  "output_column", 
+  "class_0", 
+  "class_1",
+  # Ancestry
+  "ancestry_column", 
+  "train_ancestry", 
+  "infer_ancestry", 
+  # Data
+  "data_path", 
+  "tech", 
+  "data_type", 
+  # Output
+  "output_directory"
+)
 
 # Load command line arguments
 args <- commandArgs(trailingOnly = TRUE)
@@ -57,8 +79,12 @@ if (length(args) > 0) {
   is_yaml_file(YAML_FILE)
 }
 
-# Initalize settings class
-setup <- yaml.load_file(YAML_FILE)
+# Load user settings
+user_setup <- yaml.load_file(YAML_FILE)
+# Default and user settings (user will overwrite default)
+setup     <- modifyList(default_setup, user_setup)
+# Check required settings
+check_settings(setup, required_settings, YAML_FILE)
 # Add info to settings
 setup$date <- format(as.POSIXlt(Sys.time(), tz = "GMT"), "%Y-%m-%d %H:%M:%S") 
 setup$id   <- toupper(substr(UUIDgenerate(), 1, 10))
@@ -68,27 +94,40 @@ path_to_save_location <- setup$output_directory
 if (!dir.exists(path_to_save_location)) {
   dir.create(path_to_save_location, recursive = TRUE)
 }
+# Save the settings
+settings_out <- file.path(path_to_save_location, "Settings.yaml")
+write_yaml(setup, settings_out)
+
+# Settings done
+print("Settings done.")
 
 # Settings (transform settings into variables)
 # Input
-tag               <- setup$tag
+output_column     <- setup$output_column
 class_0           <- setup$class_0
 class_1           <- setup$class_1
-output_column     <- setup$output_column
 ancestry_column   <- setup$ancestry_column
 train_ancestry    <- setup$train_ancestry
 infer_ancestry    <- setup$infer_ancestry
-data_path         <- setup$data_path
-
 
 # Load data
+data_path  <- setup$data_path
 adata      <- read_h5ad(data_path)
+# Check if columns exist in data
+required_columns <- c(output_column, ancestry_column)
+check_columns(adata$obs, required_columns)
+
 # Define classification 
 comparison <- c(class_0, class_1)
+check_values(adata$obs, output_column, comparison)
 adata      <- adata[adata$obs[[output_column]] %in% comparison]
 # Define ancestries
 ancestries <- c(train_ancestry, infer_ancestry)
+check_values(adata$obs, ancestry_column, ancestries)
 adata      <- adata[adata$obs[[ancestry_column]] %in% ancestries]
+
+# Data done
+print("Validation of data done.")
 
 
 # Define groups to compare

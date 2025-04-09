@@ -1,15 +1,47 @@
+# Check if the provided settings file is a yaml file
 is_yaml_file <- function(file_path) {
   # Check if the file exists
   if (!file.exists(file_path)) {
-    stop("Error: The file does not exist.")
+    stop("The file does not exist.")
   }
 
   # Check if the file has a valid YAML extension (.yml or .yaml)
   ext <- tolower(tools::file_ext(file_path))
   if (!(ext %in% c("yml", "yaml"))) {
-    stop("Error: The file is not a YAML file. Please ensure the file has a .yml or .yaml extension.")
+    stop("The file is not a YAML file. Please ensure the file has a .yml or .yaml extension.")
   }
 }
+
+# Check if settings file contain the required settings
+check_settings <- function(setup, required_settings, yaml_file) {
+  # Check if they're in the setup
+  for (setting in required_settings) {
+    if (is.null(setup[[setting]])) {
+      stop(sprintf("'%s' is missing in '%s'.", setting, yaml_file))
+    }
+  }
+}
+
+# Check if specified columns and data match
+check_columns <- function(data, required_columns) {
+  # Check if the column exists in the dataframe
+  for (column in required_columns) {
+    if (!(column %in% colnames(data))) {
+      stop(sprintf("'%s' column is missing from data.", column))
+    }
+  }
+}
+
+# Check if specified columns contain specified values
+check_values <- function(data, column, values) {
+  # Check if the values exist in the specified column
+  missing_values <- setdiff(values, data[[column]])
+  if (length(missing_values) > 0) {
+    stop(sprintf("Column '%s' is missing the values: %s", column, paste(missing_values, collapse = ", ")))
+  }
+}
+
+
 
 # Normalization functions:
 normalize_log <- function(X, e = 1, ...){

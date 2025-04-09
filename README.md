@@ -7,6 +7,7 @@ The repository (currently) contains:
 The script analysis which genes have interactions with ancestry in genotype-phenotype relationships.
 
 **Input:**
+
 ***1. Settings:***
 
 The script accepts one commandline argument, which is a path to a settings.yaml file. 
@@ -43,4 +44,10 @@ AnnData object with n_obs × n_vars = 794 × 20338
 
 **Output:**
 
-"interactions.R" will create a directory with the name you specified in `output_directory`. 
+"interactions.R" will create a directory at the place you specified in `output_directory`. 
+This directory will contain the following files:
+
+```
+output_directory
+|_ Settings.yaml
+```
