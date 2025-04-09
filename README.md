@@ -12,7 +12,7 @@ The script analysis which genes have interactions with ancestry in genotype-phen
 
 The script accepts one commandline argument, which is a path to a settings.yaml file. 
 In the file you need to specify all required settings. In the snipped below some of the settings are displayed (more settings are required).
-An example settings file for "interactions.R" can be found here [example_settings_interactions.yaml]().
+An example settings file for "interactions.R" can be found here [example_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/example_settings_interactions.yaml).
 ```yaml
 # Classification
 class_0: your_class_0                  # Healthy, Cancer_1
