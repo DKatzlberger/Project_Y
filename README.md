@@ -25,11 +25,12 @@ dge_normalization: method
 output_directory: your/save/location   # The script will create a directory at this place
 ```
 Currently the script supports these omics and normalization methods:
-```
-transcriptomics: "limma_voom", "normalize_log", "normalize_zscore", "raw"
-methylation: "beta_to_mvals", "normalize_log", "normalize_zscore", "raw"
-proteomics: "raw"
-```
+| Omics Type      | Supported Preprocessing Methods                                      |
+|-----------------|----------------------------------------------------------------------|
+| transcriptomics | `"limma_voom"`, `"normalize_log"`, `"normalize_zscore"`, `"raw"`     |
+| methylation     | `"beta_to_mvals"`, `"normalize_log"`, `"normalize_zscore"`, `"raw"`  |
+| proteomics      | `"raw"`                                                              |
+
 The script will substitute not specified settings with default settings as follows:
 ```yaml
 # Default settings
