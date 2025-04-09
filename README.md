@@ -27,8 +27,8 @@ output_directory: your/save/location   # The script will create a directory at t
 Currently the script supports these omics and normalization methods:
 | Omics (tech)    | Supported normalization methods (normalization)                      |
 |-----------------|----------------------------------------------------------------------|
-| transcriptomics | `"limma_voom"` `"normalize_log"` `"normalize_zscore"`, `"raw"`     |
-| methylation     | `"beta_to_mvals"` `"normalize_log"` `"normalize_zscore"`, `"raw"`  |
+| transcriptomics | `"limma_voom"` `"normalize_log"` `"normalize_zscore"` `"raw"`     |
+| methylation     | `"beta_to_mvals"` `"normalize_log"` `"normalize_zscore"` `"raw"`  |
 | proteomics      | `"raw"`                                                              |
 
 The script will substitute not specified settings with default settings as follows:
@@ -76,3 +76,8 @@ output_directory/
 ```
 
 ## How to run the script
+To run the analysis using a Singularity container, use the following bash script. 
+This script executes the R script with a specified YAML configuration file inside the container:
+```bash
+singularity exec <SIF_PATH> Rscript <SCRIPT_PATH< <YAML_CONFIG>
+```
