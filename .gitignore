@@ -5,6 +5,9 @@
 # Ignore big input files
 *.h5ad
 # Output
-/Dev/
 /DEVELOPMENT/
+/Development/
+/development/
 /DEV/
+/Dev/
+/dev/
