@@ -48,6 +48,6 @@ AnnData object with n_obs × n_vars = 794 × 20338
 This directory will contain the following files:
 
 ```
-output_directory
-|_ Settings.yaml
+output_directory/
+├──  Settings.yaml
 ```
