@@ -1,5 +1,4 @@
 # Ignore yaml files for now
-*.yaml
 *.yml
 # Ingore my R settings
 .Rprofile
