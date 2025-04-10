@@ -10,7 +10,7 @@ The script analysis which genes have interactions with ancestry in genotype-phen
 ***1. Settings:***
 
 The script accepts one commandline argument, which is a path to a settings.yaml file. 
-In the file you need to specify all required settings. The snipped below shows all required settings:
+In the file you need to specify all required settings. An example settings file for "interactions.R" can be found here [example_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/example_settings_interactions.yaml). The snipped below shows all required settings:
 ```yaml
 # Required settings
 class_0: your_class_0                  
@@ -31,16 +31,7 @@ Currently the script supports these omics and normalization methods:
 | methylation          | `"beta_to_mvals"` `"normalize_log"` `"normalize_zscore"` `"raw"`     |
 | proteomics           | `"raw"`                                                              |
 
-The script will substitute not specified settings with default settings. Default settings are specified in [default_settings_interactions.yaml]() and can be modified.
-```yaml
-# Default settings
-data_type: Input_values
-filter_features: TRUE
-precentile: 25
-visual_val: TRUE
-
-```
-An example settings file for "interactions.R" can be found here [example_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/example_settings_interactions.yaml). 
+The script will substitute not specified settings with default settings. Default settings are specified in [default_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/default_settings_interactions.yaml) and can be modified.
 
 ***2. Data:***
 
