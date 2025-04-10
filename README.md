@@ -3,7 +3,12 @@
 The repository (currently) contains:
 1. A running script "interactions.R"
 
-The script analysis which genes have interactions with ancestry in genotype-phenotype relationships. It uses the edgeR pipeline to compare each gene individually. The design of the model first fits a means model for the specified groups and afterwards fits a contrast to compare these groups.
+The script analysis which genes have interactions with ancestry in genotype-phenotype relationships. It uses the edgeR pipeline to compare each gene individually. The design of the model first fits a means model for the specified groups and afterwards fits a contrast to compare these groups. The script does the following comparison:
+1. class_0 train_ancestry vs infer_ancestry (Baseline 1)
+2. class_1 train_ancestry vs infer_ancestry (Baseline 2)
+3. class_0 vs class_1 train_ancestry (Relationship 1)
+4. class_0 vs class_1 infer_ancestry (Relationship 1)
+5. class_0 vs class_1 train_ancestry vs infer_ancestry (Interaction)
 
 ## Input
 

@@ -790,7 +790,6 @@ interaction_heatmap <- function(expression, output_column, ancestry_column, path
   )
   
   grDevices::dev.off()
-  rm(heatmap, envir = .GlobalEnv)
 }
 
 
