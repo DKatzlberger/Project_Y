@@ -14,4 +14,6 @@ output_directory: development
 # Features
 filter_features: True
 normalization: limma_voom
+# Visualization
+visual_val: True
 

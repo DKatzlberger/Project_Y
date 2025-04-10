@@ -1,5 +1,8 @@
 data_type: RSEM
 filter_features: yes
+precentile: 25
+visual_val: yes
+logFC_thr: 1
 class_0: Basal
 class_1: non-Basal
 output_column: subtype_pooled
@@ -10,8 +13,8 @@ data_path: data/inputs/PanCanAtlas_BRCA_raw_RSEM_subtypeNAremoved.h5ad
 tech: transcriptomics
 output_directory: development
 normalization: limma_voom
-date: 2025-04-09 11:06:29
-id: F4AF3A12-6
+date: 2025-04-10 08:31:20
+id: C4D29C3A-E
 n_class_0_train_ancestry: 107
 n_class_1_train_ancestry: 629
 n_class_0_infer_ancestry: 16

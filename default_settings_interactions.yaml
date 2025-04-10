@@ -1,0 +1,8 @@
+# Input
+data_type: Input_values
+# Features
+filter_features: TRUE
+precentile: 25
+# Visualization
+visual_val: TRUE
+logFC_thr: 1

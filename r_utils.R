@@ -12,6 +12,21 @@ is_yaml_file <- function(file_path) {
   }
 }
 
+# Load default settings
+load_default_settings <- function(file_name) {
+  # Should be in the working direcotry
+  expected_location <- file.path(getwd(), file_name)
+  
+  if (!file.exists(expected_location)) {
+    stop(paste0(
+      "Missing default settings file: ", file_name, "\n",
+      "Expected file at loaction: ", expected_location
+    ))
+  }
+  is_yaml_file(file_name)
+  yaml.load_file(expected_location)
+}
+
 # Check if settings file contain the required settings
 check_settings <- function(setup, required_settings, yaml_file) {
   # Check if they're in the setup

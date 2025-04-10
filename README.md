@@ -31,14 +31,16 @@ Currently the script supports these omics and normalization methods:
 | methylation          | `"beta_to_mvals"` `"normalize_log"` `"normalize_zscore"` `"raw"`     |
 | proteomics           | `"raw"`                                                              |
 
-The script will substitute not specified settings with default settings as follows:
+The script will substitute not specified settings with default settings. Default settings are specified in [default_settings_interactions.yaml]() and can be modified.
 ```yaml
 # Default settings
-filter_features: True
 data_type: Input_values
-visual_val: True
+filter_features: TRUE
+precentile: 25
+visual_val: TRUE
+
 ```
-An example settings file for "interactions.R" can be found here [example_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/example_settings_interactions.yaml).
+An example settings file for "interactions.R" can be found here [example_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/example_settings_interactions.yaml). 
 
 ***2. Data:***
 

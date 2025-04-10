@@ -97,7 +97,7 @@ save_ggplot <- function(plot, save_path, width = 5, height = 5, with_legend = TR
   invisible()  # Ensures nothing is returned after deletion
 }
 
-# INTERACTIONS
+# QC
 plot_output_column_proportion <- function(data, x, fill) {
   # Plot
   p <- data |>
@@ -206,8 +206,8 @@ plot_density_of_samples <- function(data_matrix, n_samples = 12, x_axis_label) {
     as.data.frame() |>
     rownames_to_column("Patient") |>
     pivot_longer(
-      cols = -Patient, 
-      names_to = "Gene", 
+      cols      = -Patient, 
+      names_to  = "Gene", 
       values_to = "Value"
     )
   
@@ -215,7 +215,7 @@ plot_density_of_samples <- function(data_matrix, n_samples = 12, x_axis_label) {
   p <- ggplot(
     data_long, 
     aes(
-      x = Value, 
+      x     = Value, 
       color = Patient
     )
   ) +
@@ -244,26 +244,31 @@ plot_qq_of_genes <- function(data_matrix, n_features = 10) {
   # Convert matrix to a long format (samples x genes)
   expression_df <- as.data.frame(data_matrix) |>
     pivot_longer(
-      cols = everything(), 
-      names_to = "Gene", 
+      cols      = everything(), 
+      names_to  = "Gene", 
       values_to = "Expression"
     ) 
 
   # Filter features
   expression_df <- expression_df |>
-      filter(Gene %in% names(as.data.frame(data_matrix))[1:n_features])
+      filter(
+        Gene %in% names(as.data.frame(data_matrix))[1:n_features]
+        )
 
   # Calculate Pearson correlation for each gene (Sample Quantiles vs Theoretical Quantiles)
   correlation_values <- expression_df |>
     group_by(Gene) |>
     summarize(
       correlation = cor(Expression, qqnorm(Expression, plot.it = FALSE)$x),
-      .groups = 'drop'
+      .groups     = 'drop'
     )
   
   # Merge
   expression_df <- expression_df |>
-    left_join(correlation_values, by = "Gene")
+    left_join(
+      correlation_values, 
+      by = "Gene"
+    )
 
   p <- ggplot(
     expression_df, 
@@ -272,7 +277,7 @@ plot_qq_of_genes <- function(data_matrix, n_features = 10) {
     )
   ) +
     stat_qq(
-      size = 0.5,
+      size  = 0.5,
       shape = 1
     ) +
     stat_qq_line(
@@ -280,13 +285,13 @@ plot_qq_of_genes <- function(data_matrix, n_features = 10) {
     ) +
     geom_text(
       aes(
-        x = -Inf, 
-        y = Inf, 
+        x     = -Inf, 
+        y     = Inf, 
         label = paste("Pearson: ", round(correlation, 3)),
         hjust = -0.1, 
         vjust = 1.1
       ), 
-      size = 2,
+      size     = 2,
       fontface = "plain"
     ) +
     facet_grid(
@@ -325,21 +330,27 @@ plot_mean_variance_trend <- function(data, x_axis_label) {
   
   # Step 1: Compute mean and standard deviation across samples (columns)
   mean_raw <- colMeans(data)  # Mean for each gene
-  sd_raw <- apply(data, 2, sd)  # Standard deviation for each gene
+  sd_raw   <- apply(data, 2, sd)  # Standard deviation for each gene
   
   # Step 2: Create data frame for plotting
   df <- data.frame(
-    mean_raw = mean_raw,
+    mean_raw    = mean_raw,
     sqrt_sd_raw = sqrt(sd_raw)  
   )
 
   # Step 3: Create the plot
-  p <- ggplot(df, aes(x = mean_raw, y = sqrt_sd_raw)) +
+  p <- ggplot(
+      df, 
+      aes(
+        x = mean_raw, 
+        y = sqrt_sd_raw
+      )
+    ) +
     geom_point(size = 0.5) +  # Raw data points
     geom_smooth(
-      method = "loess", 
-      color = "red", 
-      se = FALSE, 
+      method    = "loess", 
+      color     = "red", 
+      se        = FALSE, 
       linewidth = 0.5
     ) +  
     labs(
@@ -353,8 +364,9 @@ plot_mean_variance_trend <- function(data, x_axis_label) {
 }
 
 
+# RESULTS
 # Volcano plot
-volcano_plot <- function(data, logFC_thr = 1, point_size = 0.5, alpha_value = 0.5, 
+volcano_plot <- function(data, logFC_thr = 1, point_size = 0.5, alpha_value = 0.5,
                          top_features = NULL, facet_rows = NULL, facet_cols = NULL) {
   # Ensure top_features is handled correctly
   if (is.null(top_features)) {
@@ -367,18 +379,22 @@ volcano_plot <- function(data, logFC_thr = 1, point_size = 0.5, alpha_value = 0.
 
   p <- data |>
     ggplot(aes(
-      x = logFC,
-      y = -log10(adj.P.Val),
+      x     = logFC,
+      y     = -log10(adj.P.Val),
       color = (adj.P.Val < 0.05 & abs(logFC) > logFC_thr)
       )
     ) +
-    geom_point(size = point_size) +
+    geom_point(
+      size = point_size
+    ) +
     geom_text_repel(
       data = data |> filter(Feature %in% top_features),
-      aes(label = Feature),
-      size = 1.5,
-      color = "black",  
-      segment.color = "black",  
+      aes(
+        label = Feature
+        ),
+      size               = 1.5,
+      color              = "black",  
+      segment.color      = "black",  
       min.segment.length = 0
     ) +
     facet_grid(
@@ -387,28 +403,106 @@ volcano_plot <- function(data, logFC_thr = 1, point_size = 0.5, alpha_value = 0.
     ) + 
     geom_vline(
       xintercept = c(-logFC_thr, logFC_thr), 
-      linetype = "dashed", 
-      color = "blue",
-      linewidth = (point_size/2),
-      alpha = alpha_value
+      linetype   = "dashed", 
+      color      = "blue",
+      linewidth  = (point_size/2),
+      alpha      = alpha_value
     ) +
     geom_hline(
       yintercept = -log10(0.05), 
-      linetype = "dashed", 
-      color = "blue",
-      linewidth = (point_size/2),
-      alpha = alpha_value
+      linetype   = "dashed", 
+      color      = "blue",
+      linewidth  = (point_size/2),
+      alpha      = alpha_value
     ) +
     scale_color_manual(
       values = c("TRUE" = "red", "FALSE" = "lightgrey")
     ) +
-    theme_nature_fonts() +
+    theme_nature_fonts(
+      base_size = (point_size * 10)
+    ) +
+    theme_white_background() +
+    theme_white_strip() +
+    theme(
+      legend.position = "none"
+    )
+
+  return(p)
+}
+
+ma_plot <- function(data, logFC_thr = 1, y_axis_label, point_size = 0.5, alpha_value = 0.5,
+                    top_features = NULL, facet_rows = NULL, facet_cols = NULL) {
+
+  if (is.null(top_features)) {
+    top_features <- character(0)
+  }
+
+  # Facet quosures
+  row_facet <- if (!is.null(facet_rows)) rlang::syms(facet_rows) else NULL
+  col_facet <- if (!is.null(facet_cols)) rlang::syms(facet_cols) else NULL
+
+  # Determine significance
+  data <- data |>
+    dplyr::mutate(significant = adj.P.Val < 0.05 & abs(logFC) > logFC_thr)
+
+  p <- ggplot(
+    data, 
+    aes(
+      x = AveExpr, 
+      y = logFC
+      )
+    ) +
+    # Plot non-significant first (background)
+    geom_point(
+      data  = dplyr::filter(data, !significant),
+      color = "lightgrey",
+      size  = point_size,
+    ) +
+    # Then plot significant points on top (foreground)
+    geom_point(
+      data  = dplyr::filter(data, significant),
+      color = "red",
+      size  = point_size,
+    ) +
+    # Annotate top features
+    geom_text_repel(
+      data = dplyr::filter(data, Feature %in% top_features),
+      aes(
+        label = Feature
+        ),
+      size               = 1.5,
+      color              = "black",
+      segment.color      = "black",
+      min.segment.length = 0
+    ) +
+    # Faceting
+    facet_grid(
+      rows = if (!is.null(row_facet)) vars(!!!row_facet) else NULL,
+      cols = if (!is.null(col_facet)) vars(!!!col_facet) else NULL
+    ) +
+    # Threshold lines
+    geom_hline(
+      yintercept = c(-logFC_thr, logFC_thr),
+      linetype   = "dashed",
+      color      = "blue",
+      linewidth  = (point_size / 2),
+      alpha      = alpha_value
+    ) +
+    # Axis labels and styling
+    labs(
+      x = paste("Mean", y_axis_label)
+    ) +
+    theme_nature_fonts(
+      base_size = (point_size * 10)
+    ) +
     theme_white_background() +
     theme_white_strip() +
     theme(legend.position = "none")
 
   return(p)
 }
+
+
 
 # Venn diagram
 venn_diagram <- function(venn_data, title = NULL, base_size) {
@@ -485,48 +579,222 @@ venn_diagram <- function(venn_data, title = NULL, base_size) {
 
 
 # Interaction boxplots
-interactions_boxplot <- function(expression, ancestry_column, output_column, nrow, ncol) {
+interactions_boxplot <- function(expression, x, fill, point_size = 0.5) {
   
   # Generate the plot
-  p <- expression %>%
+  p <- expression |>
     ggplot(
       aes(
-        x = fct_rev(toupper(!!sym(ancestry_column))),
-        y = z_score,
-        fill = !!sym(output_column)
+        x    = fct_rev(toupper(!!sym(x))),
+        y    = zscore,
+        fill = !!sym(fill)
       )
     ) +
     geom_boxplot(
-      width = 0.5,
+      width        = 0.5,
       outlier.size = 0.1,
     ) +
     scale_y_continuous(
       breaks = scales::breaks_extended(n = 3)
     ) +
     facet_wrap(
-      ~ Feature,   # Use `Feature` for faceting
-      nrow = nrow,
-      ncol = ncol,    
-      scales = "free",  
-      strip.position = "top"  
+      ~ Feature,  
+      scales         = "free",  
+      strip.position = "top",
+      ncol           = 5,
+      nrow           = 2
     ) +
     labs(
       x = "Ancestry",
       y = "z-score",
       fill = "Condition"
     ) +
-    theme_nature_fonts() +
+    theme_nature_fonts(
+      base_size = (point_size * 10)
+    ) +
     theme_white_background() +
     theme_white_strip() +
     theme_small_legend() +
     theme(
       legend.position = "bottom",
-      axis.text.x = element_text(angle = 60, hjust = 1)  # Rotate x-axis labels by 60 degrees
+      legend.title    = element_blank()
     )
   
   # Return the plot object
   return(p)
 }
+
+interaction_heatmap <- function(expression, output_column, ancestry_column, path_to_save_location) {
+  
+  # Expression matrix
+  expression_matrix <- expression |>
+    dplyr::select(Feature, patient_id, zscore) |>
+    tidyr::spread(key = patient_id, value = zscore) |>
+    tibble::column_to_rownames("Feature") |>
+    as.matrix()
+
+  # Ancestry
+  train_ancestry <- levels(expression[[ancestry_column]])[1]
+  infer_ancestry <- levels(expression[[ancestry_column]])[2]
+
+  
+  # Condition
+  class_0    <- levels(expression[[output_column]])[1]
+  class_1    <- levels(expression[[output_column]])[2]
+  comparison <- c(class_0, class_1)
+  # Colors
+  class_0_color <- "#027c58"
+  class_1_color <- "purple"
+  colors        <- c(class_0_color, class_1_color)
+  # Vector
+  condition_colors <- setNames(colors, comparison)
+
+  
+  # Ancestry colors
+  genetic_ancestry_colors <- c(
+    "admix" = "#ff4d4d", 
+    "afr"   = "#ff9900", 
+    "amr"   = "#33cc33",
+    "eur"   = "#3399ff", 
+    "eas"   = "#6a27a1", 
+    "sas"   = "#ffcc00"
+  )
+  
+  # Annotation
+  annotations <- expression |>
+    dplyr::select(patient_id, dplyr::all_of(c(output_column, ancestry_column))) |>
+    dplyr::distinct() |>
+    dplyr::arrange(match(patient_id, colnames(expression))) |>
+    dplyr::mutate(
+      group = paste(.data[[ancestry_column]], .data[[output_column]], sep = "."),
+      group = factor(
+        group, 
+        levels = c(
+          paste(train_ancestry, class_0, sep = "."),  
+          paste(train_ancestry, class_1, sep = "."),  
+          paste(infer_ancestry, class_0, sep = "."),    
+          paste(infer_ancestry, class_1, sep = ".")     
+        )
+      )
+    )
+  
+  # Heatmap annotation
+  heatmap_annotation <- ComplexHeatmap::HeatmapAnnotation(
+    Ancestry = ComplexHeatmap::anno_empty(
+      border = FALSE, 
+      height = grid::unit(0.2, "cm"), 
+      show_name = TRUE
+    ),
+    Condition = annotations[[output_column]],
+    col = list(
+      Condition = condition_colors
+    ),
+    annotation_name_gp = grid::gpar(fontsize = 5),
+    border = FALSE,
+    show_annotation_name = TRUE,
+    annotation_name_side = "left",
+    simple_anno_size = grid::unit(0.2, "cm"),
+    show_legend = FALSE
+  )
+  
+  # Legends
+  ancetsry_lgd <- ComplexHeatmap::Legend(
+    title = "Ancestry", 
+    at = c(toupper(train_ancestry), toupper(infer_ancestry)), 
+    legend_gp = grid::gpar(
+      fill = c(genetic_ancestry_colors[train_ancestry], genetic_ancestry_colors[infer_ancestry])
+    ),
+    labels_gp = grid::gpar(fontsize = 5),
+    title_gp = grid::gpar(fontsize = 5, fontface = "plain"),
+    grid_height = grid::unit(0.3, "cm"), 
+    grid_width = grid::unit(0.3, "cm"),
+    direction = "horizontal"
+  )
+  
+  condition_lgd <- ComplexHeatmap::Legend(
+    title = "Condition", 
+    at = comparison, 
+    legend_gp = grid::gpar(
+      fill = c(condition_colors[comparison[1]], condition_colors[comparison[2]])
+    ),
+    labels_gp = grid::gpar(fontsize = 5),
+    title_gp = grid::gpar(fontsize = 5, fontface = "plain"),
+    grid_height = grid::unit(0.3, "cm"), 
+    grid_width = grid::unit(0.3, "cm"),
+    direction = "horizontal"
+  )
+  
+  lgd_list <- list(ancetsry_lgd, condition_lgd)
+  
+  # Heatmap
+  heatmap <- ComplexHeatmap::Heatmap(
+    expression_matrix,
+    name = "z-score", 
+    show_column_names = FALSE,
+    cluster_rows = FALSE,
+    cluster_columns = FALSE,
+    column_split = annotations$group,
+    cluster_column_slices = FALSE,
+    column_title = NULL,
+    top_annotation = heatmap_annotation,
+    row_names_gp = grid::gpar(fontsize = 5),
+    row_title_gp = grid::gpar(fontsize = 5),
+    row_names_side = "left",
+    heatmap_legend_param = list(
+      title_gp = grid::gpar(fontsize = 5, fontface = "plain"), 
+      labels_gp = grid::gpar(fontsize = 5, fontface = "plain"),
+      grid_height = grid::unit(0.3, "cm"), 
+      grid_width = grid::unit(0.3, "cm"),
+      direction = "horizontal"
+    )
+  )
+  
+  # Save heatmap
+  save_name <- file.path(path_to_save_location, "Interaction_heatmap.pdf")
+  grDevices::pdf(save_name, width = 6 , height = 3)
+  
+  ComplexHeatmap::draw(
+    heatmap, 
+    annotation_legend_list = lgd_list,
+    heatmap_legend_side = "bottom",
+    annotation_legend_side = "bottom",
+    merge_legend = TRUE
+  )
+  
+  # Internal helper to draw colored block around ancestry groups
+  group_block_anno <- function(group, empty_anno, gp = grid::gpar(), 
+                               label = NULL, label_gp = grid::gpar()) {
+    seekViewport(glue::glue("annotation_{empty_anno}_{min(group)}"))
+    loc1 <- grid::deviceLoc(x = grid::unit(0, "npc"), y = grid::unit(0, "npc"))
+    
+    seekViewport(glue::glue("annotation_{empty_anno}_{max(group)}"))
+    loc2 <- grid::deviceLoc(x = grid::unit(1, "npc"), y = grid::unit(1, "npc"))
+    
+    seekViewport("global")
+    grid::grid.rect(loc1$x, loc1$y, width = loc2$x - loc1$x, height = loc2$y - loc1$y, 
+                    just = c("left", "bottom"), gp = gp)
+    
+    if (!is.null(label)) {
+      grid::grid.text(label, x = (loc1$x + loc2$x) * 0.5, y = (loc1$y + loc2$y) * 0.5, gp = label_gp)
+    }
+  }
+  
+  # Draw ancestry group background blocks
+  group_block_anno(
+    1:2, "Ancestry", 
+    gp = grid::gpar(fill = genetic_ancestry_colors[train_ancestry], col = NA)
+  )
+  group_block_anno(
+    3:4, "Ancestry", 
+    gp = grid::gpar(fill = genetic_ancestry_colors[infer_ancestry], col = NA)
+  )
+  
+  grDevices::dev.off()
+  rm(heatmap, envir = .GlobalEnv)
+}
+
+
+
 
 # Enrichment plot
 fgsea_plot <- function(enrichment, x, top_n = NULL, facet_rows = NULL, facet_cols = NULL) {
