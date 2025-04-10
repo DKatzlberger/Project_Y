@@ -65,7 +65,14 @@ output_directory/
 ├── QC_qq_normalized_values.pdf 
 ├── QC_sample_sizes.pdf
 └── Visual_val/
-    ├──
+    ├── Baseline_ma.pdf
+    ├── Baseline_volcano.pdf
+    ├── Relationship_ma.pdf
+    ├── Relationship_volcano.pdf
+    ├── Interaction_ma.pdf
+    ├── Interaction_volcano.pdf
+    ├── Interaction_heatmap.pdf
+    └── Interaction_boxplot.pdf
 ```
 
 ## How to run the script
