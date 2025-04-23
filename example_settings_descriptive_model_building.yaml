@@ -12,3 +12,5 @@ explained_variables:
   - stage
 # Output
 output_directory: development_descriptive_model_building
+# Clustering 
+perplexity: 10

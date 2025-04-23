@@ -40,7 +40,7 @@ if (length(args) > 0) {
   is_yaml_file(YAML_FILE)
 } else {
   # Dev settings if no command-line argument provided
-  print("Running interactive mode for development.")
+  cat("Running interactive mode for development. \n")
   YAML_FILE <- "example_settings_interactions.yaml"
   is_yaml_file(YAML_FILE)
 }
@@ -107,8 +107,9 @@ adata$obs[[ancestry_column]] <- factor(adata$obs[[ancestry_column]], levels = an
 
 # Interactions analysis
 # Message
-sprintf("New analysis with id: %s; created: %s", setup$id, setup$date)
-sprintf("Save location: %s", path_to_save_location)
+cat(sprintf("New analysis with id: %s; created: %s \n", setup$id, setup$date))
+cat(sprintf("Save location: %s \n", path_to_save_location))
+cat("-------------------------------------------------------------------- \n")
 
 # Visualize: Sample sizes
 save_name     <- file.path(path_to_save_location, "QC_sample_sizes.pdf")
@@ -143,7 +144,10 @@ adata$obs["group"] <- factor(
     paste(infer_ancestry, class_1, sep = ".")     
   )
 )
-
+# Design formula and groups
+formula <- as.formula(paste("~", "0 + group"))
+groups  <- levels(adata$obs$group)
+# Matrix
 interaction_design <- model.matrix(~ 0 + group, data = adata$obs)
 # Human and machine readable terms
 colnames(interaction_design) <- gsub("group", "", colnames(interaction_design))
@@ -154,12 +158,17 @@ colnames(interaction_design) <- gsub("-", "_", colnames(interaction_design))
 tech            <- setup$tech
 data_type       <- setup$data_type
 filter_features <- setup$filter_features
+
 # Strength of filter
 percentile <- setup$percentile
 
 # Name of QC plot
 save_name <- file.path(path_to_save_location, "QC_mean_variance_trend.pdf")
 if (filter_features & tech == "transcriptomics"){
+
+  # Print statement
+  cat(sprintf("📊 Filter features for technology: %s. \n", tech))
+  cat(sprintf("By count: counts -> norm factors -> logCPM -> count threshold (%s percentile) -> filter \n", percentile))
 
   # Transform to logCPM
   norm_factors <- calculate_tmm_norm_factors(adata$X)
@@ -170,6 +179,9 @@ if (filter_features & tech == "transcriptomics"){
   filtered_features <- filter_by_signal(cpm_data, min_counts)
   # Subset
   filtered_data <- adata[, filtered_features]
+
+  # Print statement
+  cat(sprintf("By variance: counts -> norm factors -> logCPM -> variance threshold (%s percentile) -> filter \n", percentile))
 
   # Transform to logCPM
   norm_factors <- calculate_tmm_norm_factors(filtered_data$X)
@@ -257,13 +269,20 @@ write_yaml(filtered_data$var_names, save_name)
 # Number of features
 setup$n_features  <- ncol(filtered_data)
 # Message
-sprintf("Feature number after filtering: %s (%s).", ncol(filtered_data), ncol(adata))
+if (filter_features){
+  cat(sprintf("Number of features after filtering: %s (%s). \n", ncol(filtered_data), ncol(adata)))
+  cat("Check plot: 'QC_mean_variance_trend.pdf' for visualization. \n")
+  cat("-------------------------------------------------------------------- \n")
+}
 
 # ---- Normalization/Transformation
+# Settings
 tech                 <- setup$tech
 normalization        <- setup$normalization
 normalization_method <- normalization_methods[[tech]][[normalization]]$"function"
 values_output_name   <- normalization_methods[[tech]][[normalization]]$"output_name"
+# Print statement
+cat(sprintf("📊 Normalization of features for technology: %s. \n", tech))
 
 # Transpose (rows = Genes, cols = Samples)
 data_t <- t(filtered_data$X)
@@ -292,8 +311,17 @@ p <- p_before / p_after
 save_name <- file.path(path_to_save_location, "QC_qq_normalized_values.pdf")
 save_ggplot(p, save_name, width = 6, height = 4)
 
+# Print statement 
+cat("Check plot: 'QC_density_normalized_values.pdf' and 'QC_qq_normalized_values.pdf' for visualization. \n")
+cat("-------------------------------------------------------------------- \n")
+
 # --- Means model
-print("Fit means.")
+# Print statement 
+cat("📊 Means model summary: \n")
+cat(sprintf("Formula: %s\n", deparse(formula)))
+cat("Groups:\n")
+cat(sprintf("  %s\n", paste(groups, collapse = paste0("\n  "))  ))
+
 # Fit the model (means model)
 limma_fit      <- lmFit(data_norm, design = interaction_design)
 limma_fit      <- eBayes(limma_fit)
@@ -302,10 +330,10 @@ mean_model_res <- extract_results(limma_fit)
 # Save
 save_name <- file.path(path_to_save_location, "Limma_means.csv")
 fwrite(mean_model_res, save_name)
-
+cat("Check results: 'Limma_means.csv'. \n")
+cat("-------------------------------------------------------------------- \n")
 
 # --- Contrast 
-print("Fit contrast.")
 # Terms
 contrast_terms <- list(
   baseline_1      = glue("{train_ancestry}_vs_{infer_ancestry}.{comparison[1]}.Baseline"),
@@ -325,6 +353,13 @@ contrast_calculations <- list(
   interaction     = glue("({cols[1]} - {cols[2]}) - ({cols[3]} - {cols[4]})")
 )
 
+# Print statement
+cat("📊 Contrast summary: \n")
+cat("Calculations: \n")
+for (i in seq_along(contrast_calculations)) {
+  cat(sprintf("  %-15s %s \n", names(contrast_calculations)[i], contrast_calculations[[i]]))
+}
+
 # Create contrast matrix
 contrast_matrix <- makeContrasts(
   contrasts = contrast_calculations,
@@ -340,6 +375,9 @@ contrast_res       <- extract_results(limma_fit_contrast)
 # Save
 save_name <- file.path(path_to_save_location, "Limma_contrast.csv")
 fwrite(contrast_res, save_name)
+cat("Check results: 'Limma_contrast.csv'. \n")
+cat("-------------------------------------------------------------------- \n")
+
 
 # Save the settings
 save_name <- file.path(path_to_save_location, "Settings.yaml")
@@ -350,7 +388,8 @@ write_yaml(setup, save_name)
 if (setup$visual_val){
 
   # Message
-  print("Visualizing results.")
+  cat("Visualizing results. \n")
+  cat("-------------------------------------------------------------------- \n")
   # Create output directory
   path_to_save_location <- file.path(setup$output_directory, "Visual_val")
   if (!dir.exists(path_to_save_location)) {
@@ -493,10 +532,10 @@ if (setup$visual_val){
       path_to_save_location
     )
   }
-  sprintf("Analysis %s finished.", setup$id)
+  cat(sprintf("Analysis %s finished.", setup$id))
 
 } else{
-  sprintf("Analysis %s finished.", setup$id)
+  cat(sprintf("Analysis %s finished.", setup$id))
 }
 
 

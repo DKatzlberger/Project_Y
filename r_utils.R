@@ -104,9 +104,13 @@ beta_to_mvalue <- function(betas, epsilon = 0.00001, ...) {
 }
 
 voom_normalization <- function(count_matrix, design_matrix) {
+
+  # Print statement
+  cat("[Voom] Normalization using limma-voom. \n")
+
   # Ensure input is a matrix
   if (!is.matrix(count_matrix)) {
-    stop("Error: Input count_matrix must be a matrix.")
+    stop("[Voom] Input count_matrix must be a matrix.")
   }
   
   # Create a DGEList object
@@ -175,6 +179,8 @@ normalization_methods <- list(
 calculate_tmm_norm_factors <- function(counts, logratio_trim = 0.3, abs_expr_trim = 0.05) {
   # counts: matrix (samples x genes)
 
+  cat("[Norm factors] Using custom tmm method (immitating edgeR). \n")
+
   counts <- t(counts)  # genes x samples for easier indexing
   lib_sizes <- colSums(counts)
   ref_index <- which.min(abs(lib_sizes - median(lib_sizes)))
@@ -227,42 +233,6 @@ calculate_tmm_norm_factors <- function(counts, logratio_trim = 0.3, abs_expr_tri
   return(norm_factors)
 }
 
-
-# calculate_tmm_norm_factors <- function(data) {
-#   # 'data' is a matrix with samples as rows and genes as columns (samples x genes)
-  
-#   # Transpose the data to get genes as rows and samples as columns (for easier calculation)
-#   data_transposed <- t(data)
-  
-#   # Step 1: Compute the geometric mean of the counts for each gene (row)
-#   geometric_mean <- apply(data_transposed, 1, function(x) exp(mean(log(x + 1))))  # log-transformed for stability
-  
-#   # Step 2: Compute M-values (log-ratio) between each sample and the geometric mean
-#   # M-value = log2(count_in_sample / geometric_mean)
-#   M_values <- sweep(data_transposed, 1, geometric_mean, FUN = "/")  # Element-wise division
-#   M_values <- log2(M_values + 1)  # Add pseudocount for stability
-  
-#   # Step 3: Trim the extreme M-values to reduce the influence of highly differentially expressed genes
-#   # Here we trim the top and bottom 5% of M-values
-#   trim_percent <- 0.05
-#   M_values_trimmed <- apply(M_values, 2, function(x) {
-#     lower <- quantile(x, trim_percent)
-#     upper <- quantile(x, 1 - trim_percent)
-#     x[x < lower] <- lower
-#     x[x > upper] <- upper
-#     return(x)
-#   })
-  
-#   # Step 4: Calculate the normalization factors
-#   # For each sample, calculate the median of the trimmed M-values for all genes
-#   norm_factors <- apply(M_values_trimmed, 2, median)
-  
-#   # Normalize by the median normalization factor
-#   norm_factors <- norm_factors / median(norm_factors)
-  
-#   return(norm_factors)
-# }
-
 # CPM
 cpm <- function(data, norm_factors = NULL, log = FALSE) {
   # Converts raw counts to CPM (Counts Per Million), optionally using normalization factors.
@@ -276,38 +246,38 @@ cpm <- function(data, norm_factors = NULL, log = FALSE) {
   
   # Print statement
   if (log){
-    print("CPM function: Transforming input data into logCPM.")
+    cat("[CPM] Transforming input data into logCPM. \n")
   } else{
-    print("CPM function: Transforming input data into CPM. Specify log = True for log2 transformation.")
+    cat("[CPM] Transforming input data into CPM. Specify log = True for log2 transformation. \n")
   }
 
   if (!is.null(norm_factors)) {
-    print("CPM function: Utilizing specified normalization factors.")
+    cat("[CPM] Utilizing specified normalization factors. \n")
     if (nrow(data) != length(norm_factors)) {
-      stop("CPM function: The number of samples must match the length of the normalization factors.")
+      stop("[CPM] The number of samples must match the length of the normalization factors.")
     }
     if (any(norm_factors == 0)) {
-      stop("CPM function: Normalization factors contain zero.")
+      stop("[CPM] Normalization factors contain zero.")
     }
     data <- sweep(data, 1, norm_factors, FUN = "/")
   } else {
-    print("CPM function: No normalization factors. Specify 'norm_factors' to normalize using normalization factors.")    
+    cat("[CPM] No normalization factors. Specify 'norm_factors' to normalize using normalization factors. \n")    
   }
 
   if (any(!is.finite(data))) {
-    stop("CPM function: Data contains NA, NaN, or Inf values.")
+    stop("[CPM] Data contains NA, NaN, or Inf values.")
   }
 
   total_reads_per_sample <- rowSums(data, na.rm = TRUE)
 
   if (any(is.na(total_reads_per_sample))) {
-    stop("CPM function: Row sums contain NA values. Check input data.")
+    stop("[CPM] Row sums contain NA values. Check input data.")
   }
 
   # Handle samples with 0 total reads
   zero_reads <- total_reads_per_sample == 0
   if (any(zero_reads)) {
-    warning("CPM function: Samples with total read count of 0 detected. CPM will be set to 0 for those samples.")
+    warning("[CPM] Samples with total read count of 0 detected. CPM will be set to 0 for those samples.")
     total_reads_per_sample[zero_reads] <- 1
     data[zero_reads, ] <- 0  # Set entire row to 0
   }

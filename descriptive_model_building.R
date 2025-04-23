@@ -1,13 +1,12 @@
 # Remove start up messages
 suppressPackageStartupMessages(
-  {
+  { 
     # Python
     library(reticulate)
     # Specify reticulate env
     use_condaenv("/opt/conda/envs/ancestry/bin/python")
     # Clustering
     library(Rtsne)
-    library(umap)
     # Parallelization
     library(parallel)
     # Visualization
@@ -138,11 +137,12 @@ p_list <- lapply(setup$explained_variables, function(var) plot_clusters(coordina
 # Patchwork
 p <- wrap_plots(p_list)
 # Save
-save_name <- file.path(path_to_save_location, "Tsne.pdf")
+save_name <- file.path(path_to_save_location, "Tsne_cluster.pdf")
 save_ggplot(p, save_name, width = 5, height = 5)
 
 
 # UMAP
+library(umap) # Placed here because of error
 umap_results <- umap(trans_data, n_components = 2, n_neighbors = setup$perplexity, seed = setup$seed)
 coordinates  <- data.frame(UMAP1 = umap_results$layout[, 1],  UMAP2 = umap_results$layout[, 2])
 coordinates  <- bind_cols(coordinates, adata$obs)
@@ -156,7 +156,7 @@ p_list <- lapply(setup$explained_variables, function(var) plot_clusters(coordina
 # Patchwork
 p <- wrap_plots(p_list)
 # Save
-save_name <- file.path(path_to_save_location, "Umap.pdf")
+save_name <- file.path(path_to_save_location, "Umap_cluster.pdf")
 save_ggplot(p, save_name, width = 5, height = 5)
 
 # PCA
@@ -173,14 +173,16 @@ p_list <- lapply(setup$explained_variables, function(var) plot_clusters(coordina
 # Patchwork
 p <- wrap_plots(p_list)
 # Save the combined PCA plot
-save_name <- file.path(path_to_save_location, "Pca.pdf")
+save_name <- file.path(path_to_save_location, "Pca_cluster.pdf")
 save_ggplot(p, save_name, width = 5, height = 5)
+
+
 
 # --- Variance across PCs
 exp_var <- setup$explained_variables
 # Remove variable with less than 2 unique values
-count        <- check_unique_values(adata$obs, exp_var)
-filtered_var <- count[count$Count > 2, ]$Variable
+var_count        <- check_unique_values(adata$obs, exp_var)
+filtered_var <- count[var_count$Count > 2, ]$Variable
 # Lm
 pcs_explained <- pc_lm(pca_results$x[, 1:20], adata$obs, filtered_var)
 # Save 
