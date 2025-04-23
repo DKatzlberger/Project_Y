@@ -4,10 +4,10 @@ The repository (currently) contains:
 1. A running script "interactions.R"
 
 The script analysis which genes have interactions with ancestry in genotype-phenotype relationships. It uses the edgeR pipeline to compare each gene individually. The design of the model first fits a means model for the specified groups and afterwards fits a contrast to compare these groups. The script does the following comparison:
-1. class_0 train_ancestry vs infer_ancestry (Baseline 1)
-2. class_1 train_ancestry vs infer_ancestry (Baseline 2)
-3. class_0 vs class_1 train_ancestry (Relationship 1)
-4. class_0 vs class_1 infer_ancestry (Relationship 1)
+1. class_0: train_ancestry vs infer_ancestry (Baseline 1)
+2. class_1: train_ancestry vs infer_ancestry (Baseline 2)
+3. train_ancestry: class_0 vs class_1 (Relationship 1)
+4. infer_ancestry: class_0 vs class_1 infer_ancestry (Relationship 1)
 5. class_0 vs class_1 train_ancestry vs infer_ancestry (Interaction)
 
 ## Input
@@ -30,11 +30,11 @@ normalization: method
 output_directory: your/save/location   # The script will create a directory at this place
 ```
 Currently the script supports these omics and normalization methods:
-| Omics type (tech)    | Supported normalization methods (normalization)                      |
-|----------------------|----------------------------------------------------------------------|
-| transcriptomics      | `"limma_voom"` `"normalize_log"` `"normalize_zscore"` `"raw"`        |
-| methylation          | `"beta_to_mvals"` `"normalize_log"` `"normalize_zscore"` `"raw"`     |
-| proteomics           | `"raw"`                                                              |
+| Omics type (tech)    | Supported normalization/transformation methods (normalization)                      |
+|----------------------|-------------------------------------------------------------------------------------|
+| transcriptomics      | `"limma_voom"` `"normalize_log"` `"normalize_zscore"` `"raw"`                       |
+| methylation          | `"beta_to_mvals"` `"normalize_log"` `"normalize_zscore"` `"raw"`                    |
+| proteomics           | `"raw"`                                                                             |
 
 The script will substitute not specified settings with default settings. Default settings are specified in [default_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/default_settings_interactions.yaml) and can be modified.
 
@@ -86,3 +86,4 @@ This script executes the R script with a specified YAML configuration file insid
 ```bash
 singularity exec <SIF_PATH> Rscript <SCRIPT_PATH< <YAML_CONFIG>
 ```
+Be sure all your files are within the working direcotory or bind them to the container otherwise the container will not find them.

@@ -1,0 +1,7 @@
+# Input
+seed: 42
+data_type: Input_values
+# Output
+save_coordinates: False
+# Clustering
+perplexity: 50

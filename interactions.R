@@ -35,23 +35,12 @@ source("figure_themes.R")
 args <- commandArgs(trailingOnly = TRUE)
 # Check if script is run with a command-line argument
 if (length(args) > 0) {
-  
   YAML_FILE <- args[1]
   # Check if it's a valid YAML file
   is_yaml_file(YAML_FILE)
-
 } else {
-
   # Dev settings if no command-line argument provided
   print("Running interactive mode for development.")
-
-  # BRCA
-  # data/inputs/settings/PanCanAtlas_BRCA_RSEM_Basal_vs_non-Basal_EUR_to_ADMIX.yml
-  # data/inputs/settings/Firehose_BRCA_BETA_Basal_vs_non-Basal_EUR_to_ADMIX.yml
-  # data/inputs/settings/PanCanAtlas_BRCA_RPPA_Basal_vs_non-Basal_EUR_to_ADMIX.yml
-
-  # LUSC LUAD
-  # data/inputs/settings/PanCanAtlas_LUSC_LUAD_RPPA_LUSC_vs_LUAD_EUR_to_ADMIX.yml
   YAML_FILE <- "example_settings_interactions.yaml"
   is_yaml_file(YAML_FILE)
 }
@@ -72,7 +61,7 @@ required_settings <- c(
   "train_ancestry", "infer_ancestry", "data_path", "tech", 
   "output_directory"
 )
-check_settings(setup, required_settings, YAML_FILE)
+check_settings(setup, required_settings)
 # Add info to settings
 setup$date <- format(as.POSIXlt(Sys.time(), tz = "GMT"), "%Y-%m-%d %H:%M:%S") 
 setup$id   <- toupper(substr(UUIDgenerate(), 1, 10))
@@ -96,6 +85,7 @@ infer_ancestry    <- setup$infer_ancestry
 
 # Load data
 data_path  <- setup$data_path
+is_h5ad_file(data_path)
 adata      <- read_h5ad(data_path)
 # Check if columns exist in data
 required_columns <- c(output_column, ancestry_column)
@@ -116,18 +106,19 @@ adata      <- adata[adata$obs[[ancestry_column]] %in% ancestries]
 adata$obs[[ancestry_column]] <- factor(adata$obs[[ancestry_column]], levels = ancestries)
 
 # Interactions analysis
+# Message
 sprintf("New analysis with id: %s; created: %s", setup$id, setup$date)
 sprintf("Save location: %s", path_to_save_location)
 
 # Visualize: Sample sizes
-p_name        <- file.path(path_to_save_location, "QC_sample_sizes.pdf")
+save_name     <- file.path(path_to_save_location, "QC_sample_sizes.pdf")
 # Plot
 p_count       <- plot_output_column_count(adata$obs, ancestry_column, output_column)
 p_proportions <- plot_output_column_proportion(adata$obs, ancestry_column, output_column)
 # Combine
 p <- p_count + p_proportions + plot_layout(guides = "collect") & theme(legend.position = "bottom")
 # Save
-save_ggplot(p, p_name, width = 6, height = 4)
+save_ggplot(p, save_name, width = 6, height = 4)
 
 # Add to settings
 counts <- table(adata$obs[[output_column]], adata$obs[[ancestry_column]])
@@ -164,10 +155,10 @@ tech            <- setup$tech
 data_type       <- setup$data_type
 filter_features <- setup$filter_features
 # Strength of filter
-percentile <- setup$precentile
+percentile <- setup$percentile
 
 # Name of QC plot
-p_name <- file.path(path_to_save_location, "QC_mean_variance_trend.pdf")
+save_name <- file.path(path_to_save_location, "QC_mean_variance_trend.pdf")
 if (filter_features & tech == "transcriptomics"){
 
   # Transform to logCPM
@@ -202,7 +193,7 @@ if (filter_features & tech == "transcriptomics"){
   # Combine
   p <- p_before / p_after
   # Save
-  save_ggplot(p, p_name, width = 6, height = 4)
+  save_ggplot(p, save_name, width = 6, height = 4)
 
 } else if (filter_features & tech == "methylation") {
 
@@ -227,7 +218,7 @@ if (filter_features & tech == "transcriptomics"){
   # Combine
   p <- p_before / p_after
   # Save
-  save_ggplot(p, p_name, width = 6, height = 4)
+  save_ggplot(p, save_name, width = 6, height = 4)
 
 } else if (filter_features & tech == "proteomics"){
 
@@ -242,7 +233,7 @@ if (filter_features & tech == "transcriptomics"){
   # Plot
   p_before <- plot_mean_variance_trend(data_before, x_axis) 
   # Save
-  save_ggplot(p_before, p_name, width = 6, height = 4)
+  save_ggplot(p_before, save_name, width = 6, height = 4)
 
 } else{
 
@@ -257,17 +248,18 @@ if (filter_features & tech == "transcriptomics"){
   # Plot
   p_before <- plot_mean_variance_trend(data_before, x_axis)
   # Save
-  save_ggplot(p_before, p_name, width = 6, height = 4)
+  save_ggplot(p_before, save_name, width = 6, height = 4)
 
 }
 # Save feature 
 save_name <- file.path(path_to_save_location, "Features.yaml")
 write_yaml(filtered_data$var_names, save_name)
 # Number of features
-n_features       <- ncol(filtered_data)
-setup$n_features <- n_features
+setup$n_features  <- ncol(filtered_data)
+# Message
+sprintf("Feature number after filtering: %s (%s).", ncol(filtered_data), ncol(adata))
 
-# ---- Normalization
+# ---- Normalization/Transformation
 tech                 <- setup$tech
 normalization        <- setup$normalization
 normalization_method <- normalization_methods[[tech]][[normalization]]$"function"
@@ -277,6 +269,7 @@ values_output_name   <- normalization_methods[[tech]][[normalization]]$"output_n
 data_t <- t(filtered_data$X)
 
 data_norm <- normalization_method(data_t, interaction_design)
+
 # Extract normalized matrix (used for plotting)
 data_norm_matrix <- if (is.list(data_norm) && !is.null(data_norm$E)) data_norm$E else data_norm
 
@@ -300,6 +293,7 @@ save_name <- file.path(path_to_save_location, "QC_qq_normalized_values.pdf")
 save_ggplot(p, save_name, width = 6, height = 4)
 
 # --- Means model
+print("Fit means.")
 # Fit the model (means model)
 limma_fit      <- lmFit(data_norm, design = interaction_design)
 limma_fit      <- eBayes(limma_fit)
@@ -355,6 +349,8 @@ write_yaml(setup, save_name)
 # --- Visualize: Results
 if (setup$visual_val){
 
+  # Message
+  print("Visualizing results.")
   # Create output directory
   path_to_save_location <- file.path(setup$output_directory, "Visual_val")
   if (!dir.exists(path_to_save_location)) {
@@ -497,6 +493,10 @@ if (setup$visual_val){
       path_to_save_location
     )
   }
+  sprintf("Analysis %s finished.", setup$id)
+
+} else{
+  sprintf("Analysis %s finished.", setup$id)
 }
 
 

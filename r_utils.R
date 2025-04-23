@@ -2,13 +2,27 @@
 is_yaml_file <- function(file_path) {
   # Check if the file exists
   if (!file.exists(file_path)) {
-    stop("The file does not exist.")
+    stop(sprintf("The file: '%s' does not exist.", file_path))
   }
 
   # Check if the file has a valid YAML extension (.yml or .yaml)
   ext <- tolower(tools::file_ext(file_path))
   if (!(ext %in% c("yml", "yaml"))) {
     stop("The file is not a YAML file. Please ensure the file has a .yml or .yaml extension.")
+  }
+}
+
+# Check if the provided file is an H5AD file
+is_h5ad_file <- function(file_path) {
+  # Check if the file exists
+  if (!file.exists(file_path)) {
+    stop(sprintf("The file: '%s' does not exist.", file_path))
+  }
+
+  # Check if the file has a valid H5AD extension (.h5ad)
+  ext <- tolower(tools::file_ext(file_path))
+  if (ext != "h5ad") {
+    stop("The file is not an H5AD file. Please ensure the file has a .h5ad extension.")
   }
 }
 
@@ -28,11 +42,11 @@ load_default_settings <- function(file_name) {
 }
 
 # Check if settings file contain the required settings
-check_settings <- function(setup, required_settings, yaml_file) {
+check_settings <- function(setup, required_settings) {
   # Check if they're in the setup
   for (setting in required_settings) {
     if (is.null(setup[[setting]])) {
-      stop(sprintf("'%s' is missing in '%s'.", setting, yaml_file))
+      stop(sprintf("'%s' is missing in settings.", setting))
     }
   }
 }
@@ -158,40 +172,96 @@ normalization_methods <- list(
 
 # Filter features
 # TMM Norm factors
-calculate_tmm_norm_factors <- function(data) {
-  # 'data' is a matrix with samples as rows and genes as columns (samples x genes)
-  
-  # Transpose the data to get genes as rows and samples as columns (for easier calculation)
-  data_transposed <- t(data)
-  
-  # Step 1: Compute the geometric mean of the counts for each gene (row)
-  geometric_mean <- apply(data_transposed, 1, function(x) exp(mean(log(x + 1))))  # log-transformed for stability
-  
-  # Step 2: Compute M-values (log-ratio) between each sample and the geometric mean
-  # M-value = log2(count_in_sample / geometric_mean)
-  M_values <- sweep(data_transposed, 1, geometric_mean, FUN = "/")  # Element-wise division
-  M_values <- log2(M_values + 1)  # Add pseudocount for stability
-  
-  # Step 3: Trim the extreme M-values to reduce the influence of highly differentially expressed genes
-  # Here we trim the top and bottom 5% of M-values
-  trim_percent <- 0.05
-  M_values_trimmed <- apply(M_values, 2, function(x) {
-    lower <- quantile(x, trim_percent)
-    upper <- quantile(x, 1 - trim_percent)
-    x[x < lower] <- lower
-    x[x > upper] <- upper
-    return(x)
-  })
-  
-  # Step 4: Calculate the normalization factors
-  # For each sample, calculate the median of the trimmed M-values for all genes
-  norm_factors <- apply(M_values_trimmed, 2, median)
-  
-  # Normalize by the median normalization factor
-  norm_factors <- norm_factors / median(norm_factors)
-  
+calculate_tmm_norm_factors <- function(counts, logratio_trim = 0.3, abs_expr_trim = 0.05) {
+  # counts: matrix (samples x genes)
+
+  counts <- t(counts)  # genes x samples for easier indexing
+  lib_sizes <- colSums(counts)
+  ref_index <- which.min(abs(lib_sizes - median(lib_sizes)))
+  ref <- counts[, ref_index]
+
+  norm_factors <- numeric(ncol(counts))
+
+  for (i in 1:ncol(counts)) {
+    samp <- counts[, i]
+
+    # Only keep genes with non-zero counts in both sample and reference
+    keep <- samp > 0 & ref > 0
+    x <- samp[keep]
+    y <- ref[keep]
+
+    if (length(x) < 10) {
+      norm_factors[i] <- 1  # fallback if too few genes
+      next
+    }
+
+    # M and A values
+    M <- log2(x / y)
+    A <- 0.5 * log2(x * y)
+
+    # Trim extreme M and A values
+    m_lower <- quantile(M, logratio_trim / 2)
+    m_upper <- quantile(M, 1 - logratio_trim / 2)
+    a_lower <- quantile(A, abs_expr_trim / 2)
+    a_upper <- quantile(A, 1 - abs_expr_trim / 2)
+
+    keep_trimmed <- (M > m_lower & M < m_upper) & (A > a_lower & A < a_upper)
+
+    if (sum(keep_trimmed) < 10) {
+      norm_factors[i] <- 1  # fallback
+    } else {
+      # Compute weighted mean of M (unweighted for now; variance weights optional)
+      norm_factors[i] <- exp(mean(M[keep_trimmed]))
+    }
+  }
+
+  # Normalize factors to geometric mean = 1
+  gm <- exp(mean(log(norm_factors[norm_factors > 0])))
+  norm_factors <- norm_factors / gm
+
+  # Check for contiunous norm factors
+  if (any(norm_factors == 0 | is.na(norm_factors) | is.infinite(norm_factors))) {
+    warning("Some normalization factors are zero, NaN, or Inf. Check input data.")
+  }
+
   return(norm_factors)
 }
+
+
+# calculate_tmm_norm_factors <- function(data) {
+#   # 'data' is a matrix with samples as rows and genes as columns (samples x genes)
+  
+#   # Transpose the data to get genes as rows and samples as columns (for easier calculation)
+#   data_transposed <- t(data)
+  
+#   # Step 1: Compute the geometric mean of the counts for each gene (row)
+#   geometric_mean <- apply(data_transposed, 1, function(x) exp(mean(log(x + 1))))  # log-transformed for stability
+  
+#   # Step 2: Compute M-values (log-ratio) between each sample and the geometric mean
+#   # M-value = log2(count_in_sample / geometric_mean)
+#   M_values <- sweep(data_transposed, 1, geometric_mean, FUN = "/")  # Element-wise division
+#   M_values <- log2(M_values + 1)  # Add pseudocount for stability
+  
+#   # Step 3: Trim the extreme M-values to reduce the influence of highly differentially expressed genes
+#   # Here we trim the top and bottom 5% of M-values
+#   trim_percent <- 0.05
+#   M_values_trimmed <- apply(M_values, 2, function(x) {
+#     lower <- quantile(x, trim_percent)
+#     upper <- quantile(x, 1 - trim_percent)
+#     x[x < lower] <- lower
+#     x[x > upper] <- upper
+#     return(x)
+#   })
+  
+#   # Step 4: Calculate the normalization factors
+#   # For each sample, calculate the median of the trimmed M-values for all genes
+#   norm_factors <- apply(M_values_trimmed, 2, median)
+  
+#   # Normalize by the median normalization factor
+#   norm_factors <- norm_factors / median(norm_factors)
+  
+#   return(norm_factors)
+# }
 
 # CPM
 cpm <- function(data, norm_factors = NULL, log = FALSE) {
@@ -204,28 +274,50 @@ cpm <- function(data, norm_factors = NULL, log = FALSE) {
   # Returns:
   #   matrix: CPM or logCPM values (samples x genes).
   
-  # Check if the number of samples in the data matches the length of norm_factors
-  if (!is.null(norm_factors) && nrow(data) != length(norm_factors)) {
-    stop("The number of samples must match the length of the normalization factors.")
+  # Print statement
+  if (log){
+    print("CPM function: Transforming input data into logCPM.")
+  } else{
+    print("CPM function: Transforming input data into CPM. Specify log = True for log2 transformation.")
   }
-  
-  # If norm_factors are provided, apply them to the raw counts
+
   if (!is.null(norm_factors)) {
-    # Apply normalization factors to adjust raw counts (divide by norm factors)
+    print("CPM function: Utilizing specified normalization factors.")
+    if (nrow(data) != length(norm_factors)) {
+      stop("CPM function: The number of samples must match the length of the normalization factors.")
+    }
+    if (any(norm_factors == 0)) {
+      stop("CPM function: Normalization factors contain zero.")
+    }
     data <- sweep(data, 1, norm_factors, FUN = "/")
+  } else {
+    print("CPM function: No normalization factors. Specify 'norm_factors' to normalize using normalization factors.")    
   }
-  
-  # Calculate total reads for each sample (sum of all gene counts in each sample)
-  total_reads_per_sample <- rowSums(data)
-  
-  # Convert raw counts to CPM
+
+  if (any(!is.finite(data))) {
+    stop("CPM function: Data contains NA, NaN, or Inf values.")
+  }
+
+  total_reads_per_sample <- rowSums(data, na.rm = TRUE)
+
+  if (any(is.na(total_reads_per_sample))) {
+    stop("CPM function: Row sums contain NA values. Check input data.")
+  }
+
+  # Handle samples with 0 total reads
+  zero_reads <- total_reads_per_sample == 0
+  if (any(zero_reads)) {
+    warning("CPM function: Samples with total read count of 0 detected. CPM will be set to 0 for those samples.")
+    total_reads_per_sample[zero_reads] <- 1
+    data[zero_reads, ] <- 0  # Set entire row to 0
+  }
+
   cpm_data <- sweep(data, 1, total_reads_per_sample, FUN = "/") * 1e6
-  
-  # Optionally, log-transform the CPM data
+
   if (log) {
-    cpm_data <- log2(cpm_data + 1)  # Add pseudocount to avoid log(0)
+    cpm_data <- log2(cpm_data + 1)
   }
-  
+
   return(cpm_data)
 }
 
@@ -325,6 +417,63 @@ filter_by_variance <- function(data, var_threshold = 0.01, min_samples_ratio = 0
   
   return(filtered_genes)
 }
+
+# DESCRIPTIVE STATISITCS
+check_unique_values <- function(data, variables) {
+  # Create a data frame to store the unique value counts for each variable
+  counts <- sapply(variables, function(var) {
+    length(unique(data[[var]]))  
+  })
+  
+  # Convert to a data frame 
+  result <- data.frame(Variable = variables, Count = counts)
+  rownames(result) <- NULL
+  return(result)
+}
+
+pc_lm <- function(pc_data, meta_data, variables) {
+  # Initialize an empty list to store results
+  results <- list()
+
+  # Loop over each PCA component (e.g., PC1, PC2, ..., PCn)
+  for (pc_col in colnames(pc_data)) {
+    # For each metadata variable, fit a linear model and extract R-squared and p-value
+    for (meta_var in variables) {
+      # Combine PCA data with the metadata (in case it's in separate dataframes)
+      combined_data <- cbind(pc_data, meta_data)
+      
+      # Fit linear model: PC ~ Metadata
+      lm_model <- lm(paste(pc_col, "~", meta_var), data = combined_data)
+      
+      # Extract R-squared and p-value from the model summary
+      lm_summary <- summary(lm_model)
+      r_squared <- lm_summary$r.squared
+      p_value <- lm_summary$coefficients[2, 4]  # p-value for the metadata variable
+      
+      # Store results for this PC and metadata variable
+      results[[length(results) + 1]] <- c(variable = meta_var, pc = pc_col, p_value = p_value, R_squared = r_squared)
+    }
+  }
+
+  # Convert the list to a data frame
+  results_df <- do.call(rbind, results)
+  results_df <- as.data.frame(results_df, stringsAsFactors = FALSE)
+  colnames(results_df) <- c("variable", "pc", "p_value", "R_squared")
+
+  # Convert p-value and R-squared to numeric
+  results_df$p_value <- as.numeric(results_df$p_value)
+  results_df$R_squared <- as.numeric(results_df$R_squared)
+
+  # Pivot longer
+  results_df <- results_df |>
+    pivot_longer(cols = c("p_value", "R_squared"), names_to = "metric", values_to = "values") |>
+    mutate(pc_numeric = as.numeric(gsub("PC", "", pc))) |>
+    mutate(pc_numeric = as.factor(pc_numeric)) 
+  
+  return(results_df)
+}
+
+
 
 
 

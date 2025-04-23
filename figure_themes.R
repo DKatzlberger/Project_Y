@@ -348,6 +348,7 @@ plot_mean_variance_trend <- function(data, x_axis_label) {
     ) +
     geom_point(size = 0.5) +  # Raw data points
     geom_smooth(
+      formula   = y ~ x,
       method    = "loess", 
       color     = "red", 
       se        = FALSE, 
@@ -363,8 +364,36 @@ plot_mean_variance_trend <- function(data, x_axis_label) {
   return(p)
 }
 
+# DESCRIPTIVE MODEL BUILDING
+plot_clusters <- function(data, x, y, color, title, point_size = 0.5){
 
-# RESULTS
+  # Plot
+  p <- ggplot(
+    data,
+    aes(
+      x     = !!sym(x),
+      y     = !!sym(y),
+      color = !!sym(color)
+    )
+  ) +
+  geom_point(
+    size = point_size
+  ) +
+  labs(
+    title = title
+  ) +
+  theme_nature_fonts(
+    base_size = (point_size * 10)
+  ) +
+  theme_white_background() +
+  theme(
+    legend.position = "none"
+  )
+
+  return(p)
+}
+
+# INTERACTIONS
 # Volcano plot
 volcano_plot <- function(data, logFC_thr = 1, point_size = 0.5, alpha_value = 0.5,
                          top_features = NULL, facet_rows = NULL, facet_cols = NULL) {
@@ -789,7 +818,7 @@ interaction_heatmap <- function(expression, output_column, ancestry_column, path
     gp = grid::gpar(fill = genetic_ancestry_colors[infer_ancestry], col = NA)
   )
   
-  grDevices::dev.off()
+  invisible(grDevices::dev.off())
 }
 
 

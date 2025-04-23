@@ -5,9 +5,9 @@ suppressPackageStartupMessages(
     library(reticulate)
     # Specify reticulate env
     use_condaenv("/opt/conda/envs/ancestry/bin/python")
-    # DGE workflow and functional analysis
-    library(edgeR)
+    # Clustering
     library(Rtsne)
+    library(umap)
     # Parallelization
     library(parallel)
     # Visualization
@@ -18,6 +18,7 @@ suppressPackageStartupMessages(
     library(circlize)
     library(ggVennDiagram)
     # Standard libraries
+    library(uuid)
     library(tidyverse)
     library(data.table)
     library(yaml)
@@ -27,132 +28,219 @@ suppressPackageStartupMessages(
 # Custom functions
 source("r_utils.R")
 source("figure_themes.R")
-font_size = 8
-
-# Here starts the script
 
 # Load command line arguments
 args <- commandArgs(trailingOnly = TRUE)
 # Check if script is run with a command-line argument
 if (length(args) > 0) {
-  yaml_file <- args[1]
+  YAML_FILE <- args[1]
   # Check if it's a valid YAML file
-  is_yml_file(yaml_file)
-  setup <- yaml.load_file(yaml_file)
-
+  is_yaml_file(YAML_FILE)
 } else {
   # Dev settings if no command-line argument provided
-
-  # BRCA
-  # data/inputs/settings/PanCanAtlas_BRCA_RSEM_Basal_vs_non-Basal_EUR_to_ADMIX.yml
-  # data/inputs/settings/PanCanAtlas_BRCA_RPPA_Basal_vs_non-Basal_EUR_to_ADMIX.yml
-  # data/inputs/settings/Firehose_BRCA_BETA_Basal_vs_non-Basal_EUR_to_ADMIX.yml
-
-  # LUSC LUAD
-  # data/inputs/settings/PanCanAtlas_LUSC_LUAD_RSEM_LUSC_vs_LUAD_EUR_to_ADMIX.yml
-  # data/inputs/settings/PanCanAtlas_LUSC_LUAD_RPPA_LUSC_vs_LUAD_EUR_to_ADMIX.yml
-  # data/inputs/settings/Firehose_LUSC_LUAD_BETA_LUSC_vs_LUAD_EUR_to_ADMIX.yml
-
-  # UCEC
-  # data/inputs/settings/PanCanAtlas_UCEC_RSEM_CN-high_vs_non-CN-high_EUR_to_ADMIX.yml
-
-
-  yaml_file <- "data/inputs/settings/PanCanAtlas_BRCA_RPPA_Basal_vs_non-Basal_EUR_to_ADMIX.yml"
   print("Running interactive mode for development.")
-  setup <- yaml.load_file(yaml_file)
+  YAML_FILE <- "example_settings_descriptive_model_building.yaml"
+  is_yaml_file(YAML_FILE)
 }
-# Set seed 
-set.seed(42)
 
-# Construction:
-# 'vscratch_dir_out' where summarized analysis are stored
-vscratch_dir_out = "data/combined_runs"
-analysis_name = "descriptive_statisitics"
+# Input
+# --- Settings
+# Default
+DEFAULT_FILE  <- "default_settings_descriptive_model_building.yaml"
+default_setup <- load_default_settings(DEFAULT_FILE)
+# User
+user_setup <- yaml.load_file(YAML_FILE)
+# Default and user settings (user will overwrite default)
+setup      <- modifyList(default_setup, user_setup)
+# Add info to settings
+setup$date <- format(as.POSIXlt(Sys.time(), tz = "GMT"), "%Y-%m-%d %H:%M:%S") 
+setup$id   <- toupper(substr(UUIDgenerate(), 1, 10))
 
-
-# Transform settings into R useable form
-tag             <- setup$tag
-comparison      <- setup$classification$comparison
-output_column   <- setup$classification$output_column
-ancestry_column <- setup$classification$ancestry_column
-train_ancestry  <- setup$classification$train_ancestry
-inf_ancestry    <- setup$classification$infer_ancestry
-
-# Construct output directory name
-condition <- paste(comparison, collapse = "_vs_")
-
-# Create directory if it does not exists
-match_pattern <- paste0(tag, "_", condition, "_", analysis_name)
-path_to_save_location <- file.path(vscratch_dir_out, match_pattern)
-# Make directory
+# Create output directory
+path_to_save_location <- setup$output_directory
 if (!dir.exists(path_to_save_location)) {
   dir.create(path_to_save_location, recursive = TRUE)
 }
+# Save the settings
+save_name <- file.path(path_to_save_location, "Settings.yaml")
+write_yaml(setup, save_name)
 
+# --- Data
 # Load data
-adata <- read_h5ad(setup$data_path)
+data_path  <- setup$data_path
+is_h5ad_file(data_path)
+adata      <- read_h5ad(setup$data_path)
 
-# Clustering 
-# Transform data
-if (setup$data_type == "protein") {
+# --- Descriptive statistics
+# Message
+sprintf("New analysis with id: %s; created: %s", setup$id, setup$date)
+sprintf("Save location: %s", path_to_save_location)
 
-  cluster_data <- adata$X
+# --- Transformation
+tech      <- setup$tech
+data_type <- setup$data_type
 
-  # Visualize
-  p_before <- plot_density_of_samples(adata$X, x_axis_label = "Input values") 
-  p_after <- plot_density_of_samples(cluster_data, x_axis_label = "Input values")
-  # Combine
-  p <- p_before + p_after + plot_layout(guides = "collect") & theme(legend.position = "bottom")
-  # Save
-  save_name <- file.path(path_to_save_location, "QC_density_values.pdf")
-  save_ggplot(p, save_name, width = 3, height = 3)
+save_name <- file.path(path_to_save_location, "QC_density_values.pdf")
+if (tech == "transcriptomics"){
 
-} else if (setup$data_type == "expression") {
-  # Expression (raw RSEM): LogCPM
+  # LogCPM transformation
   norm_factors <- calculate_tmm_norm_factors(adata$X)
-  cluster_data <- cpm(adata$X, norm_factors = norm_factors, log = TRUE)
-
-  # Visualize
-  p_before <- plot_density_of_samples(adata$X, x_axis_label = "RSEM values") 
-  p_after <- plot_density_of_samples(cluster_data, x_axis_label = "logCPM")
+  trans_data   <- cpm(adata$X, norm_factors = norm_factors, log = TRUE)
+  # Plot
+  p_before <- plot_density_of_samples(adata$X, x_axis_label = data_type)
+  p_after  <- plot_density_of_samples(trans_data, x_axis_label = "logCPM")
   # Combine
   p <- p_before + p_after + plot_layout(guides = "collect") & theme(legend.position = "bottom")
   # Save
-  save_name <- file.path(path_to_save_location, "QC_density_values.pdf")
-  save_ggplot(p, save_name, width = 3, height = 3)
+  save_ggplot(p, save_name, width = 6, height = 4)
 
-} else if (setup$data_type == "methylation") {
-  # Methylation (beta-values): M-values
-  cluster_data <- beta_to_mvalue(adata$X)
+} else if (tech == "methylation"){
 
-  # Visualize
-  p_before <- plot_density_of_samples(adata$X, x_axis_label = "Beta values") 
-  p_after <- plot_density_of_samples(cluster_data, x_axis_label = "M-values")
+  # Beta to mvals
+  trans_data <- beta_to_mvalue(adata$X)
+
+  # Plot
+  p_before <- plot_density_of_samples(adata$X, x_axis_label = data_type)
+  p_after  <- plot_density_of_samples(trans_data, x_axis_label = "M-values")
   # Combine
   p <- p_before + p_after + plot_layout(guides = "collect") & theme(legend.position = "bottom")
   # Save
-  save_name <- file.path(path_to_save_location, "QC_density_values.pdf")
-  save_ggplot(p, save_name, width = 3, height = 3)
+  save_ggplot(p, save_name, width = 6, height = 4)
 
-} else{
-  cluster_data <- adata$X
+} else if (tech == "proteomics"){
+
+  # No transformation
+  trans_data <- adata$X
+
+  # Plot
+  p_before <- plot_density_of_samples(adata$X, x_axis_label = data_type)
+  p_after  <- plot_density_of_samples(trans_data, x_axis_label = data_type)
+  # Combine
+  p <- p_before + p_after + plot_layout(guides = "collect") & theme(legend.position = "bottom")
+  # Save
+  save_ggplot(p, save_name, width = 6, height = 4)
+
 }
 
+# --- Unsupervised clustering 
 # TSNE
-# Reduce perpelexity
-if (ncol(cluster_data) < 300){
-  perplexity = 10
-} else{
-  perplexity = 50
+set.seed(setup$seed)
+tsne_results <- Rtsne(trans_data, dims = 2, setup$perplexity)
+coordinates  <- data.frame(TSNE1 = tsne_results$Y[, 1], TSNE2 = tsne_results$Y[, 2])
+coordinates  <- bind_cols(coordinates, adata$obs)
+# Save
+if (setup$save_coordinates){
+  save_name <- file.path(path_to_save_location, "Tsne_coordinates.csv")
+  fwrite(coordinates, save_name)
 }
-set.seed(42)
-tsne <- Rtsne(cluster_data, dims = 2, perplexity)
-# Coordinates
-tsne_coordinates <- data.frame(TSNE1 = tsne$Y[, 1], TSNE2 = tsne$Y[, 2])
-# Add meta data
-tsne_coordinates  <- bind_cols(tsne_coordinates, adata$obs)
+# Visualize: TSNE
+p_list <- lapply(setup$explained_variables, function(var) plot_clusters(coordinates, "TSNE1", "TSNE2", var, var))
+# Patchwork
+p <- wrap_plots(p_list)
+# Save
+save_name <- file.path(path_to_save_location, "Tsne.pdf")
+save_ggplot(p, save_name, width = 5, height = 5)
 
-# Visualize 
+
+# UMAP
+umap_results <- umap(trans_data, n_components = 2, n_neighbors = setup$perplexity, seed = setup$seed)
+coordinates  <- data.frame(UMAP1 = umap_results$layout[, 1],  UMAP2 = umap_results$layout[, 2])
+coordinates  <- bind_cols(coordinates, adata$obs)
+# Save 
+if (setup$save_coordinates){
+  save_name <- file.path(path_to_save_location, "Umap_coordinates.csv")
+  fwrite(coordinates, save_name)
+}
+# Visualize: UMAP
+p_list <- lapply(setup$explained_variables, function(var) plot_clusters(coordinates, "UMAP1", "UMAP2", var, var))
+# Patchwork
+p <- wrap_plots(p_list)
+# Save
+save_name <- file.path(path_to_save_location, "Umap.pdf")
+save_ggplot(p, save_name, width = 5, height = 5)
+
+# PCA
+pca_results <- prcomp(trans_data, center = TRUE)
+coordinates <- data.frame(PCA1 = pca_results$x[, 1],  PCA2 = pca_results$x[, 2])
+coordinates <- bind_cols(coordinates, adata$obs)
+# Save 
+if (setup$save_coordinates){
+  save_name <- file.path(path_to_save_location, "Pca_coordinates.csv")
+  fwrite(coordinates, save_name)
+}
+# Visualize: PCA
+p_list <- lapply(setup$explained_variables, function(var) plot_clusters(coordinates, "PCA1", "PCA2", var, var))
+# Patchwork
+p <- wrap_plots(p_list)
+# Save the combined PCA plot
+save_name <- file.path(path_to_save_location, "Pca.pdf")
+save_ggplot(p, save_name, width = 5, height = 5)
+
+# --- Variance across PCs
+exp_var <- setup$explained_variables
+# Remove variable with less than 2 unique values
+count        <- check_unique_values(adata$obs, exp_var)
+filtered_var <- count[count$Count > 2, ]$Variable
+# Lm
+pcs_explained <- pc_lm(pca_results$x[, 1:20], adata$obs, filtered_var)
+# Save 
+save_name <- file.path(path_to_save_location, "Pcs_explained.csv")
+fwrite(pcs_explained, save_name)
+
+# Visualize: Variance across PCs
+p_list <- lapply(filtered_var, function(var) {
+  data_ <- filter(pcs_explained, variable == var)
+  plot_variance_line(data_, x = "pc_numeric", y = "values", title = var, facet_rows = "metric")
+})
+# Patchwork
+p <- wrap_plots(p_list)
+# Save the combined PCA plot
+save_name <- file.path(path_to_save_location, "Pcs_explained.pdf")
+save_ggplot(p, save_name, width = 6, height = 3)
+
+
+plot_variance_line <- function(data, x, y, title, facet_rows = NULL, 
+                              facet_cols = NULL, point_size = 0.5){
+  
+  row_facet <- if (!is.null(facet_rows)) rlang::syms(facet_rows) else NULL
+  col_facet <- if (!is.null(facet_cols)) rlang::syms(facet_cols) else NULL
+
+  p <- ggplot(
+    data,
+    aes(
+      x     = !!sym(x),
+      y     = !!sym(y)
+    )
+  ) +
+  geom_col() +
+  facet_grid(
+    rows   = if (!is.null(row_facet)) vars(!!!row_facet) else NULL, 
+    cols   = if (!is.null(col_facet)) vars(!!!col_facet) else NULL,
+    scales = "free"
+    ) + 
+  labs(
+    title = title,
+    x     = "PC",
+    y     = "Value"
+  ) +
+  theme_nature_fonts(
+    base_size = (point_size * 10)
+  ) +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
+  theme(
+    legend.title         = element_blank(),
+    legend.position      = c(1, 1), 
+    legend.justification = c(1, 1)
+  )
+  
+  return(p)
+}
+
+
+
+
 print("Unsupervised clustering.")
 point_size <-  0.5
 

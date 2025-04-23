@@ -1,67 +1,72 @@
 import pandas as pd
 import anndata as ad
 import numpy as np
-
+import os
 # This script should generate anndata files for a study
 # Inputs
 # 1. Molecular data -> adata.X
-# 2. Meta data -> adata.obs
+# 2. Meta data      -> adata.obs
+molecular_data_path = "data/downloads/GEO/Population-specific Mutation Patterns in Breast Tumors from African American, European American, and Kenyan Patients/Molecular_data.csv"
+meta_data_path      = "data/downloads/GEO/Population-specific Mutation Patterns in Breast Tumors from African American, European American, and Kenyan Patients/Meta_data.csv"
 # 3. Output path
-molecular_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/protein/ucec_tcga_pan_can_atlas_2018.csv"
+path_to_save_location = "data/downloads/GEO/Population-specific Mutation Patterns in Breast Tumors from African American, European American, and Kenyan Patients"
 
-meta_data_path = "data/downloads/cbioportal/tcga_pan_can_atlas/meta_tcga_pan_can_atlas_protein.csv"
-
-path_to_save_location = "data/inputs/PanCanAtlas_UCEC_raw_RPPA_subtypeNAremoved.h5ad"
 # Load the data
-molecular_data = pd.read_csv(molecular_data_path)
-meta_data = pd.read_csv(meta_data_path)
-# meta_data[meta_data["studyId"] == "brca_tcga_pan_can_atlas_2018"]["CANCER_TYPE_DETAILED"].unique()
+molec = pd.read_csv(molecular_data_path)
+meta  = pd.read_csv(meta_data_path)
 
-# Subset meta data 
-matched_meta_data = meta_data[meta_data["sampleId"].isin(molecular_data["sampleId"])]
-
-# Subset molecular data
-matched_molecular_data = molecular_data[molecular_data["sampleId"].isin(matched_meta_data["sampleId"])]
-
+# Match data
+sample_name   = "sample_title"
+matched_meta  = meta[meta[sample_name].isin(molec[sample_name])]
+matched_molec = molec[molec[sample_name].isin(matched_meta[sample_name])]
 # Check the number of unique patients
-assert matched_molecular_data["patientId"].nunique() == matched_meta_data["patientId"].nunique()
-assert matched_molecular_data["sampleId"].nunique() == matched_meta_data["sampleId"].nunique()
+assert matched_molec[sample_name].nunique() == matched_meta[sample_name].nunique()
 
 # Counts
-counts = matched_molecular_data.select_dtypes(include=np.number)
-# Observations (in form of patient_id)
-# Check if they are unique
-assert matched_meta_data["patientId"].is_unique
-observations = matched_meta_data["patientId"].values
-# Drop so its not doubled
-matched_meta_data = matched_meta_data.drop(columns="patientId")
-# Features 
-features = matched_molecular_data.select_dtypes(include=np.number).columns
+counts = matched_molec.select_dtypes(include=np.number)
+# Change negative values to 0
+counts = counts.clip(lower=0)
+# Remove all NA columns
+NA_columns = counts.columns[counts.isna().any(axis=0)].tolist()
+counts     = counts.drop(columns=NA_columns)
+print(f"Dropping {len(NA_columns)} columns because they contain NA values.")
+# Remove all 0 columns
+zero_columms = counts.columns[(counts == 0).all(axis=0)]
+counts       = counts.drop(columns=zero_columms)
+print(f"Dropping {len(zero_columms)} columns because they have no variance.")
 
-# Creating Anndata:
+# Observations 
+obs = matched_meta[sample_name].values
+# Check uniquness
+assert len(obs) == len(set(obs)), "Error: Duplicated observations!"
+
+# Features 
+features = counts.columns.values
+# Check uniquness
+assert len(features) == len(set(features)), "Error: Duplicated features!"
+
+# AnnData
 adata = ad.AnnData(counts)
-adata.obs_names = observations
+adata.obs_names = obs
 adata.var_names = features
 
-# Remove Na values
-columns_with_na = adata.var_names[np.isnan(adata.X).any(axis=0)]
-adata = adata[:, ~adata.var_names.isin(columns_with_na)]
-# Remove negative values (Set them to zero)
-# adata.X[adata.X < 0] = 0
-
-# Add meta data to anndata object
-columns_to_add = matched_meta_data.columns
+# Add meta columns
+columns_to_add = matched_meta.drop(columns=sample_name).columns
 for column in columns_to_add:
-    adata.obs[column] = pd.Categorical(matched_meta_data[column])
-
-# Convert age to numeric
-adata.obs["AGE"] = adata.obs["AGE"].cat.codes.astype(int)
+    adata.obs[column] = pd.Categorical(matched_meta[column])
 
 # Make all variable names lower case
 adata.obs.columns = map(str.lower, adata.obs.columns)
 # Replace spaces with '_'
 adata.obs = adata.obs.map(lambda x: x.replace(' ', '_') if isinstance(x, str) else x)
-adata.obs["cancer_type_detailed"].unique()
+
+# Save
+save_name = os.path.join(path_to_save_location, "GSE225846_raw_RSEM.h5ad")
+adata.write(save_name, compression="gzip")
+
+
+# Convert age to numeric
+adata.obs["AGE"] = adata.obs["AGE"].cat.codes.astype(int)
 
 # Rename some columns
 column_mapping = {
