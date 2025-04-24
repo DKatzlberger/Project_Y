@@ -28,7 +28,7 @@ Currently the script these omic types (tech)
 - methylation
 - proteomics
 
-The script will substitute not specified settings with default settings. Default settings are specified in [default_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/default_settings_interactions.yaml) and can be modified.
+The script will substitute not specified settings with default settings. Default settings are specified in [default_settings_descriptive_model_building.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/default_settings_descriptive_model_building.yaml) and can be modified.
 
 
 ## interactions.R
