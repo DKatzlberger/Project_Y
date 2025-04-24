@@ -52,6 +52,13 @@ default_setup <- load_default_settings(DEFAULT_FILE)
 user_setup <- yaml.load_file(YAML_FILE)
 # Default and user settings (user will overwrite default)
 setup      <- modifyList(default_setup, user_setup)
+# Check required settings
+# Required settings
+required_settings <- c(
+  "data_path", "tech", "output_directory",
+  "meta_variables"
+)
+check_settings(setup, required_settings)
 # Add info to settings
 setup$date <- format(as.POSIXlt(Sys.time(), tz = "GMT"), "%Y-%m-%d %H:%M:%S") 
 setup$id   <- toupper(substr(UUIDgenerate(), 1, 10))
@@ -70,6 +77,9 @@ write_yaml(setup, save_name)
 data_path  <- setup$data_path
 is_h5ad_file(data_path)
 adata      <- read_h5ad(setup$data_path)
+# Check if columns exist
+required_columns <- setup$meta_variables
+check_columns(adata$obs, required_columns)
 
 # --- Descriptive statistics
 # Message
