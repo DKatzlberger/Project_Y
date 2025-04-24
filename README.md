@@ -10,6 +10,11 @@ The script does unsupervides clustering methods and analysis meta_variables expl
 
 ### Input
 ***1. Settings:***
+The script accepts one commandline argument, which is a path to a settings.yaml file. 
+In the file you need to specify all required settings. An example settings file for "descriptive_model_building.R" can be found here [example_settings_descriptive_model_building.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/example_settings_descriptive_model_building.yaml). The snipped below shows all required settings:
+
+
+
 
 
 ## interactions.R
