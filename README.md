@@ -1,7 +1,16 @@
 # Genotype-phenotype generalizability across ancestries
 
 The repository (currently) contains:
-1. A running script "interactions.R"
+1. descriptive_model_building.R
+2. interactions.R
+
+
+## descriptive_model_building.R
+The script does unsupervides clustering methods and analysis meta_variables explained by expression. It should give a descriptive representation of your data.
+
+### Input
+***1. Settings:***
+
 
 ## interactions.R
 The script analysis which genes have interactions with ancestry in genotype-phenotype relationships. It uses the edgeR pipeline to compare each gene individually. The design of the model first fits a means model for the specified groups and afterwards fits a contrast to compare these groups. The script does the following comparison:
