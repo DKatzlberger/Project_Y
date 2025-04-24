@@ -227,12 +227,11 @@ cat("-------------------------------------------------------------------- \n")
 cat("Variance explained by PCs. \n")
 # Settings
 meta_variables <- setup$meta_variables
-
+n_pcs          <- setup$n_pcs
 # Remove variable with less than 2 unique values
 var_count    <- check_unique_values(adata$obs, meta_variables)
 filtered_var <- var_count[var_count$Count >= 2, ]$Variable
 # Combine PCs with meta 
-n_pcs <- 50
 meta_ <- as_tibble(adata$obs, rownames = "Idx")
 meta_ <- select(meta_, Idx, all_of(filtered_var))
 data_ <- as_tibble(pca_results$x[, 1:n_pcs], rownames = "Idx")

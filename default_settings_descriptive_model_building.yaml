@@ -4,3 +4,5 @@ data_type: Input_values
 # Clustering
 perplexity: 50
 save_coordinates: True
+# Variance across PCs
+n_pcs: 20

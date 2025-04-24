@@ -48,6 +48,9 @@ AnnData object with n_obs × n_vars = 794 × 20338
     obs: your_var1, your_var2, your_var3, ...
 ```
 
+### Output
+"descriptive_model_building.R" will create a directory at the place you specified in `output_directory`. 
+This directory will contain the following files:
 
 
 ## interactions.R
