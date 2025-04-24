@@ -24,7 +24,7 @@ meta_variables:
   - ...                   
 output_directory: your/save/location   # The script will create a directory at this place
 ```
-Currently the script these omic types (tech)
+Currently the script these omic types (tech):
 - transcriptomics
 - methylation
 - proteomics
@@ -51,7 +51,26 @@ AnnData object with n_obs × n_vars = 794 × 20338
 ### Output
 "descriptive_model_building.R" will create a directory at the place you specified in `output_directory`. 
 This directory will contain the following files:
-
+```
+output_directory/
+├── Features.yaml                      # Analyzed features
+├── Settings.yaml                      # Used settings
+├── Limma_means.csv                    # Result means model
+├── Limma_contrast.csv                 # Results contrast
+├── QC_mean_variance_trend.pdf         
+├── QC_desnity_normalized_values.pdf 
+├── QC_qq_normalized_values.pdf 
+├── QC_sample_sizes.pdf
+└── Visual_val/
+    ├── Baseline_ma.pdf
+    ├── Baseline_volcano.pdf
+    ├── Relationship_ma.pdf
+    ├── Relationship_volcano.pdf
+    ├── Interaction_ma.pdf
+    ├── Interaction_volcano.pdf
+    ├── Interaction_heatmap.pdf
+    └── Interaction_boxplot.pdf
+```
 
 ## interactions.R
 The script analysis which genes have interactions with ancestry in genotype-phenotype relationships. It uses the edgeR pipeline to compare each gene individually. The design of the model first fits a means model for the specified groups and afterwards fits a contrast to compare these groups. The script does the following comparison:
@@ -114,9 +133,9 @@ output_directory/
 ├── Features.yaml                      # Analyzed features
 ├── Settings.yaml                      # Used settings
 ├── Limma_means.csv                    # Result means model
-├── Limma_contrast.csv                 # Results contrast
+├── Limma_contrast.csv                 # Result contrast
 ├── QC_mean_variance_trend.pdf         
-├── QC_desnity_normalized_values.pdf 
+├── QC_density_normalized_values.pdf 
 ├── QC_qq_normalized_values.pdf 
 ├── QC_sample_sizes.pdf
 └── Visual_val/

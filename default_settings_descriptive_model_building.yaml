@@ -6,3 +6,5 @@ perplexity: 50
 save_coordinates: True
 # Variance across PCs
 n_pcs: 20
+# Visualization
+visual_val: True

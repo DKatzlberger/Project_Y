@@ -415,8 +415,6 @@ LM_explain <- function(data, variables, response, feature, n_cores, batch_size) 
 
   # Start timing
   start_time <- Sys.time()
-  cat("[LM_explain] Starting LM_explain...\n")
-  flush.console()
 
   cat("[LM_explain] Requested workers:", n_cores, "\n")
   flush.console()

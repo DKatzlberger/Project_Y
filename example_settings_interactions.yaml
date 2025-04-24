@@ -7,8 +7,6 @@ infer_ancestry: admix
 ancestry_column: genetic_ancestry
 # Input
 data_path: data/inputs/PanCanAtlas_BRCA_raw_RSEM_subtypeNAremoved.h5ad
-# data/downloads/GEO/Population-specific Mutation Patterns in Breast Tumors from African American, European American, and Kenyan Patients/GSE225846_raw_RSEM.h5ad
-# data/inputs/PanCanAtlas_BRCA_raw_RSEM_subtypeNAremoved.h5ad
 tech: transcriptomics
 data_type: RSEM
 # Output
