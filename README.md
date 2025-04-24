@@ -22,6 +22,10 @@ meta_variables:
   - your_var3                      
 output_directory: your/save/location   # The script will create a directory at this place
 ```
+Currently the script these omic types (tech)
+. transcriptomics
+. methylation
+. proteomics
 
 
 
@@ -52,7 +56,7 @@ tech: omics_type
 normalization: method
 output_directory: your/save/location   # The script will create a directory at this place
 ```
-Currently the script supports these omics and normalization methods:
+Currently the script supports these omic types and normalization methods:
 | Omics type (tech)    | Supported normalization/transformation methods (normalization)                      |
 |----------------------|-------------------------------------------------------------------------------------|
 | transcriptomics      | `"limma_voom"` `"normalize_log"` `"normalize_zscore"` `"raw"`                       |
