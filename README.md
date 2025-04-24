@@ -19,7 +19,8 @@ tech: omics_type
 meta_variables:
   - your_var1
   - your_var2
-  - your_var3                      
+  - your_var3   
+  - ...                   
 output_directory: your/save/location   # The script will create a directory at this place
 ```
 Currently the script these omic types (tech)
@@ -27,7 +28,7 @@ Currently the script these omic types (tech)
 - methylation
 - proteomics
 
-
+The script will substitute not specified settings with default settings. Default settings are specified in [default_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/default_settings_interactions.yaml) and can be modified.
 
 
 ## interactions.R
