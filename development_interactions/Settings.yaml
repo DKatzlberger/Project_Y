@@ -15,3 +15,8 @@ output_directory: development_interactions
 normalization: limma_voom
 date: 2025-04-23 08:38:22
 id: 95C336B3-A
+n_class_0_train_ancestry: 107
+n_class_1_train_ancestry: 629
+n_class_0_infer_ancestry: 16
+n_class_1_infer_ancestry: 42
+n_features: 11436

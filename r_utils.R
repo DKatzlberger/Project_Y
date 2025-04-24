@@ -401,47 +401,224 @@ check_unique_values <- function(data, variables) {
   return(result)
 }
 
-pc_lm <- function(pc_data, meta_data, variables) {
-  # Initialize an empty list to store results
-  results <- list()
-
-  # Loop over each PCA component (e.g., PC1, PC2, ..., PCn)
-  for (pc_col in colnames(pc_data)) {
-    # For each metadata variable, fit a linear model and extract R-squared and p-value
-    for (meta_var in variables) {
-      # Combine PCA data with the metadata (in case it's in separate dataframes)
-      combined_data <- cbind(pc_data, meta_data)
-      
-      # Fit linear model: PC ~ Metadata
-      lm_model <- lm(paste(pc_col, "~", meta_var), data = combined_data)
-      
-      # Extract R-squared and p-value from the model summary
-      lm_summary <- summary(lm_model)
-      r_squared <- lm_summary$r.squared
-      p_value <- lm_summary$coefficients[2, 4]  # p-value for the metadata variable
-      
-      # Store results for this PC and metadata variable
-      results[[length(results) + 1]] <- c(variable = meta_var, pc = pc_col, p_value = p_value, R_squared = r_squared)
-    }
+# Explain variance
+LM_explain <- function(data, variables, response, feature, n_cores, batch_size) {
+  
+  options(future.globals.maxSize = 2 * 1024^3)
+  # Set the parallel plan
+  plan(multicore, workers = n_cores)
+  
+  # Function to split the features into batches
+  split_into_batches <- function(features, batch_size) {
+    split(features, ceiling(seq_along(features) / batch_size))
   }
 
-  # Convert the list to a data frame
-  results_df <- do.call(rbind, results)
-  results_df <- as.data.frame(results_df, stringsAsFactors = FALSE)
-  colnames(results_df) <- c("variable", "pc", "p_value", "R_squared")
+  # Start timing
+  start_time <- Sys.time()
+  cat("[LM_explain] Starting LM_explain...\n")
+  flush.console()
 
-  # Convert p-value and R-squared to numeric
-  results_df$p_value <- as.numeric(results_df$p_value)
-  results_df$R_squared <- as.numeric(results_df$R_squared)
-
-  # Pivot longer
-  results_df <- results_df |>
-    pivot_longer(cols = c("p_value", "R_squared"), names_to = "metric", values_to = "values") |>
-    mutate(pc_numeric = as.numeric(gsub("PC", "", pc))) |>
-    mutate(pc_numeric = as.factor(pc_numeric)) 
+  cat("[LM_explain] Requested workers:", n_cores, "\n")
+  flush.console()
   
-  return(results_df)
+  # Split the list of features into smaller batches
+  feature_batches <- split_into_batches(unique(data[[feature]]), batch_size)
+  
+  # Parallelize over variables
+  results <- future_map_dfr(variables, function(var) {
+    cat("[LM_explain] Processing variable:", var, "\n")
+    flush.console()
+
+    # Process each batch of features for the current variable
+    batch_results <- future_map_dfr(feature_batches, function(batch) {
+      # Process the batch of features
+      feature_results <- future_map_dfr(batch, function(feat) {
+        
+        # Subset data for the specific feature
+        feature_data <- subset(data, data[[feature]] == feat)
+        
+        # Construct the formula safely
+        formula <- as.formula(paste0("`", response, "` ~ `", var, "`"))
+        
+        # Fit the linear model safely
+        lm_model <- tryCatch(lm(formula, data = feature_data), error = function(e) NULL)
+        
+        if (!is.null(lm_model)) {
+          model_summary <- summary(lm_model)
+          r_squared <- model_summary$r.squared
+          p_value   <- coef(model_summary)[2, 4]
+        } else {
+          r_squared <- NA_real_
+          p_value   <- NA_real_
+          cat("[LM_explain] ⚠️ Model failed for variable:", var, "and feature:", feat, "\n")
+          flush.console()
+        }
+        
+        data.frame(
+          feature = feat,
+          variable = var,
+          R_squared = r_squared,
+          p_value = p_value,
+          stringsAsFactors = FALSE
+        )
+      })
+      
+      feature_results
+    })
+    
+    batch_results
+  })
+  
+  # End timing
+  end_time <- Sys.time()
+  cat("[LM_explain] Completed in", round(difftime(end_time, start_time, units = "secs"), 2), "seconds.\n")
+  flush.console()
+
+  return(results)
 }
+
+
+
+
+# Parallelized but not batched
+# LM_explain <- function(data, variables, response, feature, n_cores) {
+
+#   options(future.globals.maxSize = 2 * 1024^3)
+#   # Start timing
+#   start_time <- Sys.time()
+#   cat("[LM_explain] Requested workers:", n_cores, "\n")
+#   flush.console()
+
+#   # Set the parallel plan
+#   plan(multicore, workers = n_cores)
+#   flush.console()
+
+#   # Parallel over variables
+#   results <- future_map_dfr(variables, function(var) {
+#     cat("[LM_explain] Processing variable:", var, "\n")
+#     flush.console()
+#     result_list <- list()
+    
+#     for (feat in unique(data[[feature]])) {
+#       feature_data <- subset(data, data[[feature]] == feat)
+#       formula <- as.formula(paste0("`", response, "` ~ `", var, "`"))
+      
+#       lm_model <- tryCatch(lm(formula, data = feature_data), error = function(e) NULL)
+      
+#       if (!is.null(lm_model)) {
+#         model_summary <- summary(lm_model)
+#         r_squared     <- model_summary$r.squared
+#         p_value       <- coef(model_summary)[2, 4]
+#       } else {
+#         r_squared <- NA_real_
+#         p_value   <- NA_real_
+#         cat("[LM_explain] ⚠️ Model failed for variable:", var, "and feature:", feat, "\n")
+#         flush.console()
+#       }
+      
+#       result_list[[length(result_list) + 1]] <- data.frame(
+#         feature          = feat,
+#         variable         = var,
+#         R_squared        = r_squared,
+#         p_value          = p_value,
+#         stringsAsFactors = FALSE
+#       )
+#     }
+    
+#     do.call(rbind, result_list)
+#   })
+
+#   # End timing
+#   end_time <- Sys.time()
+#   cat("[LM_explain] Completed in", round(difftime(end_time, start_time, units = "secs"), 2), "seconds.\n")
+#   flush.console()
+
+#   return(results)
+# }
+
+
+# Not parallelized
+# LM_explain <- function(data, variables, response, feature) {
+#   # Set the parallel plan
+#   plan(multicore, workers = length(variables))
+
+#   # Use future_map_dfr to parallelize over variables
+#   results <- future_map_dfr(variables, function(var) {
+#     result_list <- list()
+    
+#     for (feat in unique(data[[feature]])) {
+#       # Subset data for the specific feature
+#       feature_data <- subset(data, data[[feature]] == feat)
+      
+#       # Construct formula safely
+#       formula <- as.formula(paste0("`", response, "` ~ `", var, "`"))
+      
+#       # Fit the linear model safely
+#       lm_model <- tryCatch(lm(formula, data = feature_data), error = function(e) NULL)
+      
+#       if (!is.null(lm_model)) {
+#         model_summary <- summary(lm_model)
+#         r_squared     <- model_summary$r.squared
+#         p_value <- coef(model_summary)[2, 4]
+#       } else {
+#         r_squared <- NA_real_
+#         p_value <- NA_real_
+#       }
+      
+#       result_list[[length(result_list) + 1]] <- data.frame(
+#         feature = feat,
+#         variable = var,
+#         R_squared = r_squared,
+#         p_value = p_value,
+#         stringsAsFactors = FALSE
+#       )
+#     }
+    
+#     do.call(rbind, result_list)
+#   })
+
+#   return(results)
+# }
+
+
+
+# LM_explain <- function(data, variables, response, feature) {
+#   # Create an empty data frame to store the results
+#   results <- data.frame(feature = character(), variable = character(), 
+#                         R_squared = numeric(), p_value = numeric(), stringsAsFactors = FALSE)
+  
+#   # Loop through each variable in the variables list
+#   for (var in variables) {
+#     # Loop through each unique value in the feature column (e.g., each unique PC)
+#     for (feat in unique(data[[feature]])) {
+#       # Subset data for the specific feature
+#       feature_data <- subset(data, data[[feature]] == feat)
+      
+#       # Construct the formula with backticks for the variable and response
+#       formula <- as.formula(paste("`", response, "` ~ `", var, "`", sep = ""))
+      
+#       # Fit the linear model for the current variable and feature
+#       lm_model <- lm(formula, data = feature_data)
+      
+#       # Get the summary of the linear model
+#       model_summary <- summary(lm_model)
+      
+#       # Extract R-squared and p-value
+#       r_squared <- model_summary$r.squared
+#       p_value <- coef(model_summary)[2, 4]  # p-value for the variable
+      
+#       # Store the results in the results data frame
+#       results <- rbind(results, data.frame(feature = feat, variable = var, 
+#                                            R_squared = r_squared, p_value = p_value))
+#     }
+#   }
+  
+#   return(results)
+# }
+
+
+
+
 
 
 

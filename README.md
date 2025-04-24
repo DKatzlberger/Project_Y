@@ -3,6 +3,7 @@
 The repository (currently) contains:
 1. A running script "interactions.R"
 
+## interactions.R
 The script analysis which genes have interactions with ancestry in genotype-phenotype relationships. It uses the edgeR pipeline to compare each gene individually. The design of the model first fits a means model for the specified groups and afterwards fits a contrast to compare these groups. The script does the following comparison:
 1. class_0: train_ancestry vs infer_ancestry (Baseline 1)
 2. class_1: train_ancestry vs infer_ancestry (Baseline 2)
@@ -10,7 +11,7 @@ The script analysis which genes have interactions with ancestry in genotype-phen
 4. infer_ancestry: class_0 vs class_1 infer_ancestry (Relationship 1)
 5. class_0 vs class_1 train_ancestry vs infer_ancestry (Interaction)
 
-## Input
+### Input
 
 ***1. Settings:***
 
@@ -54,7 +55,7 @@ AnnData object with n_obs × n_vars = 794 × 20338
     obs: column_with_class, column_with_ancestry
 ```
 
-## Output
+### Output
 
 "interactions.R" will create a directory at the place you specified in `output_directory`. 
 This directory will contain the following files:

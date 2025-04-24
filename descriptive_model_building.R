@@ -9,6 +9,7 @@ suppressPackageStartupMessages(
     library(Rtsne)
     # Parallelization
     library(parallel)
+    library(furrr)
     # Visualization
     library(patchwork)
     library(ggrepel)
@@ -37,7 +38,7 @@ if (length(args) > 0) {
   is_yaml_file(YAML_FILE)
 } else {
   # Dev settings if no command-line argument provided
-  print("Running interactive mode for development.")
+  cat("Running interactive mode for development. \n")
   YAML_FILE <- "example_settings_descriptive_model_building.yaml"
   is_yaml_file(YAML_FILE)
 }
@@ -72,15 +73,19 @@ adata      <- read_h5ad(setup$data_path)
 
 # --- Descriptive statistics
 # Message
-sprintf("New analysis with id: %s; created: %s", setup$id, setup$date)
-sprintf("Save location: %s", path_to_save_location)
+cat(sprintf("New analysis with id: %s; created: %s \n", setup$id, setup$date))
+cat(sprintf("Save location: %s \n", path_to_save_location))
+cat("-------------------------------------------------------------------- \n")
 
-# --- Transformation
+# --- Normalization/Transformation
 tech      <- setup$tech
 data_type <- setup$data_type
 
 save_name <- file.path(path_to_save_location, "QC_density_values.pdf")
 if (tech == "transcriptomics"){
+
+  # Print statement
+  cat(sprintf("Transforamtion for technology: %s. \n", tech))
 
   # LogCPM transformation
   norm_factors <- calculate_tmm_norm_factors(adata$X)
@@ -91,6 +96,17 @@ if (tech == "transcriptomics"){
   # Combine
   p <- p_before + p_after + plot_layout(guides = "collect") & theme(legend.position = "bottom")
   # Save
+  save_ggplot(p, save_name, width = 6, height = 4)
+
+  # Mean variance trend
+  # Axis
+  x_axis <- paste0("log2(", data_type, " + 0.5)")
+  # Data
+  data_ <- log2(adata$X + 0.5)
+  # Plot
+  p <- plot_mean_variance_trend(data_, x_axis)
+  # Save
+  save_name <- file.path(path_to_save_location, "QC_mean_variance_trend.pdf")
   save_ggplot(p, save_name, width = 6, height = 4)
 
 } else if (tech == "methylation"){
@@ -106,6 +122,17 @@ if (tech == "transcriptomics"){
   # Save
   save_ggplot(p, save_name, width = 6, height = 4)
 
+  # Mean variance trend
+  # Axis
+  x_axis <- paste0("log2(", data_type, " + 0.5)")
+  # Data
+  data_ <- log2(adata$X + 0.5)
+  # Plot
+  p <- plot_mean_variance_trend(data_, x_axis)
+  # Save
+  save_name <- file.path(path_to_save_location, "QC_mean_variance_trend.pdf")
+  save_ggplot(p, save_name, width = 6, height = 4)
+
 } else if (tech == "proteomics"){
 
   # No transformation
@@ -119,17 +146,34 @@ if (tech == "transcriptomics"){
   # Save
   save_ggplot(p, save_name, width = 6, height = 4)
 
+  # Mean variance trend
+  # Axis
+  x_axis <- paste0("log2(", data_type, " + 0.5)")
+  # Data
+  data_ <- log2(adata$X + 0.5)
+  # Plot
+  p <- plot_mean_variance_trend(data_, x_axis)
+  # Save
+  save_name <- file.path(path_to_save_location, "QC_mean_variance_trend.pdf")
+  save_ggplot(p, save_name, width = 6, height = 4)
+
 }
+# Number of features
+setup$n_features  <- ncol(trans_data)
+cat("-------------------------------------------------------------------- \n")
 
 # --- Unsupervised clustering 
+cat("Clustering analysis. \n")
+
 # TSNE
+cat("Unsuperived clustering: TSNE. \n")
 set.seed(setup$seed)
 tsne_results <- Rtsne(trans_data, dims = 2, setup$perplexity)
 coordinates  <- data.frame(TSNE1 = tsne_results$Y[, 1], TSNE2 = tsne_results$Y[, 2])
 coordinates  <- bind_cols(coordinates, adata$obs)
 # Save
 if (setup$save_coordinates){
-  save_name <- file.path(path_to_save_location, "Tsne_coordinates.csv")
+  save_name <- file.path(path_to_save_location, "TSNE_coordinates.csv")
   fwrite(coordinates, save_name)
 }
 # Visualize: TSNE
@@ -137,18 +181,18 @@ p_list <- lapply(setup$explained_variables, function(var) plot_clusters(coordina
 # Patchwork
 p <- wrap_plots(p_list)
 # Save
-save_name <- file.path(path_to_save_location, "Tsne_cluster.pdf")
+save_name <- file.path(path_to_save_location, "TSNE_cluster.pdf")
 save_ggplot(p, save_name, width = 5, height = 5)
 
-
 # UMAP
+cat("Unsuperived clustering: UMAP. \n")
 library(umap) # Placed here because of error
 umap_results <- umap(trans_data, n_components = 2, n_neighbors = setup$perplexity, seed = setup$seed)
 coordinates  <- data.frame(UMAP1 = umap_results$layout[, 1],  UMAP2 = umap_results$layout[, 2])
 coordinates  <- bind_cols(coordinates, adata$obs)
 # Save 
 if (setup$save_coordinates){
-  save_name <- file.path(path_to_save_location, "Umap_coordinates.csv")
+  save_name <- file.path(path_to_save_location, "UMAP_coordinates.csv")
   fwrite(coordinates, save_name)
 }
 # Visualize: UMAP
@@ -156,16 +200,17 @@ p_list <- lapply(setup$explained_variables, function(var) plot_clusters(coordina
 # Patchwork
 p <- wrap_plots(p_list)
 # Save
-save_name <- file.path(path_to_save_location, "Umap_cluster.pdf")
+save_name <- file.path(path_to_save_location, "UMAP_cluster.pdf")
 save_ggplot(p, save_name, width = 5, height = 5)
 
 # PCA
+cat("Unsuperived clustering: PCA. \n")
 pca_results <- prcomp(trans_data, center = TRUE)
 coordinates <- data.frame(PCA1 = pca_results$x[, 1],  PCA2 = pca_results$x[, 2])
 coordinates <- bind_cols(coordinates, adata$obs)
 # Save 
 if (setup$save_coordinates){
-  save_name <- file.path(path_to_save_location, "Pca_coordinates.csv")
+  save_name <- file.path(path_to_save_location, "PCA_coordinates.csv")
   fwrite(coordinates, save_name)
 }
 # Visualize: PCA
@@ -173,73 +218,128 @@ p_list <- lapply(setup$explained_variables, function(var) plot_clusters(coordina
 # Patchwork
 p <- wrap_plots(p_list)
 # Save the combined PCA plot
-save_name <- file.path(path_to_save_location, "Pca_cluster.pdf")
+save_name <- file.path(path_to_save_location, "PCA_cluster.pdf")
 save_ggplot(p, save_name, width = 5, height = 5)
-
-
+cat("-------------------------------------------------------------------- \n")
 
 # --- Variance across PCs
+cat("Variance explained by PCs. \n")
 exp_var <- setup$explained_variables
 # Remove variable with less than 2 unique values
-var_count        <- check_unique_values(adata$obs, exp_var)
-filtered_var <- count[var_count$Count > 2, ]$Variable
-# Lm
-pcs_explained <- pc_lm(pca_results$x[, 1:20], adata$obs, filtered_var)
+var_count    <- check_unique_values(adata$obs, exp_var)
+filtered_var <- var_count[var_count$Count >= 2, ]$Variable
+# Combine PCs with meta 
+n_pcs <- 50
+meta_ <- as_tibble(adata$obs, rownames = "Idx")
+meta_ <- select(meta_, Idx, all_of(filtered_var))
+data_ <- as_tibble(pca_results$x[, 1:n_pcs], rownames = "Idx")
+# Join and pivot 
+pc_data <- inner_join(meta_, data_, by = "Idx")
+pc_data <- pivot_longer(
+  data      = pc_data,
+  cols      = -c(Idx, all_of(filtered_var)),
+  names_to  = "PC",
+  values_to = "Expression"
+)
+
+# Lm (explain variance)
+n_variables <- length(filtered_var)
+n_features  <- n_pcs
+batch_size  <- 10000
+# Calculate number of cores
+request_cores <- n_variables * ceiling(n_features / batch_size)
+# Validate availabe cores
+total_cores <- parallel::detectCores()
+if (total_cores <= request_cores){
+  # Save one core
+  available_cores <- parallel::detectCores() - 1
+} else {
+  available_cores <- request_cores
+}
+# Function call
+pcs_explained <- LM_explain(
+  data       = pc_data, 
+  variables  = filtered_var, 
+  feature    = "PC",
+  response   = "Expression",
+  batch_size = batch_size,
+  n_cores    = available_cores
+)
+# Add numeric column
+pcs_explained <- mutate(
+  pcs_explained, 
+  feature_numeric = as.numeric(gsub("PC", "", feature)),
+  feature_numeric = as.factor(feature_numeric)
+)
 # Save 
-save_name <- file.path(path_to_save_location, "Pcs_explained.csv")
+save_name <- file.path(path_to_save_location, "PCA_explained.csv")
 fwrite(pcs_explained, save_name)
 
 # Visualize: Variance across PCs
+# Pivot
+pcs_explained <- pivot_longer(
+  data      = pcs_explained,
+  cols      = c(R_squared, p_value),
+  names_to  = "metric",
+  values_to = "values"
+)
+# Loop for plots
 p_list <- lapply(filtered_var, function(var) {
-  data_ <- filter(pcs_explained, variable == var)
-  plot_variance_line(data_, x = "pc_numeric", y = "values", title = var, facet_rows = "metric")
+  # Filter the data
+  data_r2 <- filter(pcs_explained, variable == var, metric == "R_squared")
+  data_p  <- filter(pcs_explained, variable == var, metric == "p_value")
+  # Plot
+  plot_r2_pval(data_r2, data_p, x = "feature_numeric", title = var)
 })
 # Patchwork
 p <- wrap_plots(p_list)
 # Save the combined PCA plot
-save_name <- file.path(path_to_save_location, "Pcs_explained.pdf")
-save_ggplot(p, save_name, width = 6, height = 3)
+save_name <- file.path(path_to_save_location, "PCA_explained.pdf")
+save_ggplot(p, save_name, width = 15, height = 10)
 
 
-plot_variance_line <- function(data, x, y, title, facet_rows = NULL, 
-                              facet_cols = NULL, point_size = 0.5){
-  
-  row_facet <- if (!is.null(facet_rows)) rlang::syms(facet_rows) else NULL
-  col_facet <- if (!is.null(facet_cols)) rlang::syms(facet_cols) else NULL
-
-  p <- ggplot(
-    data,
-    aes(
-      x     = !!sym(x),
-      y     = !!sym(y)
-    )
-  ) +
-  geom_col() +
-  facet_grid(
-    rows   = if (!is.null(row_facet)) vars(!!!row_facet) else NULL, 
-    cols   = if (!is.null(col_facet)) vars(!!!col_facet) else NULL,
-    scales = "free"
-    ) + 
-  labs(
-    title = title,
-    x     = "PC",
-    y     = "Value"
-  ) +
-  theme_nature_fonts(
-    base_size = (point_size * 10)
-  ) +
-  theme_white_background() +
-  theme_white_strip() +
-  theme_small_legend() +
-  theme(
-    legend.title         = element_blank(),
-    legend.position      = c(1, 1), 
-    legend.justification = c(1, 1)
-  )
-  
-  return(p)
+# --- Variance across features
+# Merge meta with expression
+meta_ <- as_tibble(adata$obs, rownames = "Idx")
+meta_ <- select(meta_, Idx, all_of(filtered_var))
+data_ <- as_tibble(trans_data, rownames = "Idx")
+# Join and pivot
+exp_data <- inner_join(meta_, data_, by = "Idx")
+exp_data <- pivot_longer(
+  data      = exp_data,
+  cols      = -c(Idx, all_of(filtered_var)),
+  names_to  = "Feature",
+  values_to = "Expression"
+)
+# Lm (explain variance)
+n_variables <- length(filtered_var)
+n_features  <- length(unique(exp_data$Feature))
+batch_size  <- 10000
+# Calculate number of cores
+request_cores <- n_variables * ceiling(n_features / batch_size)
+# Validate availabe cores
+total_cores <- parallel::detectCores()
+if (total_cores <= request_cores){
+  # Save one core
+  available_cores <- parallel::detectCores() - 1
+} else {
+  available_cores <- request_cores
 }
+# Function call
+features_explained <- LM_explain(
+  data       = exp_data, 
+  variables  = filtered_var, 
+  feature    = "Feature",
+  response   = "Expression",
+  batch_size = batch_size,
+  n_cores    = available_cores
+)
 
+
+
+# Save the settings
+save_name <- file.path(path_to_save_location, "Settings.yaml")
+write_yaml(setup, save_name)
 
 
 

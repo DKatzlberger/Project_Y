@@ -393,6 +393,56 @@ plot_clusters <- function(data, x, y, color, title, point_size = 0.5){
   return(p)
 }
 
+plot_r2_pval <- function(r2, pval, x, title, point_size = 0.5){
+
+  # Prepare sig p-values
+  sig_p <- pval |>
+    filter(values < 0.05) |>
+    left_join(r2, by = c(x, "variable"), suffix = c("_p", "_r2")) |>
+    mutate(
+      label = "*",
+      y_pos = values_r2 + 0.02
+    )
+  
+  p <- ggplot(
+    r2,
+    aes(
+      x = !!sym(x),
+      y = values
+    ) 
+  ) +
+  geom_col() +
+  geom_text(
+    data = sig_p,
+    aes(
+      y     = y_pos, 
+      label = label
+    ),
+    size = point_size * 4
+  ) +
+  geom_text(
+    data = pval,
+    aes(
+      label = signif(values, 2), 
+      y     = r2$values + 0.01
+      ),
+    size = point_size * 2
+  ) +
+  labs(
+    title = title,
+    x = "Principal Component",
+    y = "R2"
+  ) + 
+  theme_nature_fonts(
+    base_size = (point_size * 10)
+  ) +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() 
+  
+  return(p)
+}
+
 # INTERACTIONS
 # Volcano plot
 volcano_plot <- function(data, logFC_thr = 1, point_size = 0.5, alpha_value = 0.5,
