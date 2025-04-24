@@ -6,7 +6,7 @@ The repository (currently) contains:
 
 
 ## descriptive_model_building.R
-The script does unsupervides clustering methods and analysis meta_variables explained by expression. It should give a descriptive representation of your data.
+The script does unsupervides clustering methods and analysis `meta_variables` explained a response. It should give a descriptive representation of your data.
 
 ### Input
 ***1. Settings:***
