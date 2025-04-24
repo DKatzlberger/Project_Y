@@ -23,9 +23,9 @@ meta_variables:
 output_directory: your/save/location   # The script will create a directory at this place
 ```
 Currently the script these omic types (tech)
-. transcriptomics
-. methylation
-. proteomics
+- transcriptomics
+- methylation
+- proteomics
 
 
 
