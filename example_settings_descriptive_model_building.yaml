@@ -2,7 +2,7 @@
 data_path: data/downloads/GEO/Population-specific Mutation Patterns in Breast Tumors from African American, European American, and Kenyan Patients/GSE225846_raw_RSEM.h5ad
 tech: transcriptomics
 data_type: RSEM
-explained_variables:
+meta_variables:
   - type
   - age_(at_surgery)
   - race

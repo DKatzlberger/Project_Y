@@ -12,7 +12,16 @@ The script does unsupervides clustering methods and analysis `meta_variables` ex
 ***1. Settings:***
 The script accepts one commandline argument, which is a path to a settings.yaml file. 
 In the file you need to specify all required settings. An example settings file for "descriptive_model_building.R" can be found here [example_settings_descriptive_model_building.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/example_settings_descriptive_model_building.yaml). The snipped below shows all required settings:
-
+```yaml
+# Required settings
+data_path: your/data/path.h5ad         # The script only works with .h5ad files
+tech: omics_type 
+meta_variables:
+  - your_var1
+  - your_var2
+  - your_var3                      
+output_directory: your/save/location   # The script will create a directory at this place
+```
 
 
 
@@ -26,7 +35,6 @@ The script analysis which genes have interactions with ancestry in genotype-phen
 5. class_0 vs class_1 train_ancestry vs infer_ancestry (Interaction)
 
 ### Input
-
 ***1. Settings:***
 
 The script accepts one commandline argument, which is a path to a settings.yaml file. 

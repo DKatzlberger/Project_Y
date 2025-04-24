@@ -164,7 +164,8 @@ cat("-------------------------------------------------------------------- \n")
 
 # --- Unsupervised clustering 
 cat("Clustering analysis. \n")
-
+# Meta variables to analyse
+meta_variables <- setup$meta_variables
 # TSNE
 cat("Unsuperived clustering: TSNE. \n")
 set.seed(setup$seed)
@@ -177,7 +178,7 @@ if (setup$save_coordinates){
   fwrite(coordinates, save_name)
 }
 # Visualize: TSNE
-p_list <- lapply(setup$explained_variables, function(var) plot_clusters(coordinates, "TSNE1", "TSNE2", var, var))
+p_list <- lapply(meta_variables, function(var) plot_clusters(coordinates, "TSNE1", "TSNE2", var, var))
 # Patchwork
 p <- wrap_plots(p_list)
 # Save
@@ -196,7 +197,7 @@ if (setup$save_coordinates){
   fwrite(coordinates, save_name)
 }
 # Visualize: UMAP
-p_list <- lapply(setup$explained_variables, function(var) plot_clusters(coordinates, "UMAP1", "UMAP2", var, var))
+p_list <- lapply(meta_variables, function(var) plot_clusters(coordinates, "UMAP1", "UMAP2", var, var))
 # Patchwork
 p <- wrap_plots(p_list)
 # Save
@@ -214,7 +215,7 @@ if (setup$save_coordinates){
   fwrite(coordinates, save_name)
 }
 # Visualize: PCA
-p_list <- lapply(setup$explained_variables, function(var) plot_clusters(coordinates, "PCA1", "PCA2", var, var))
+p_list <- lapply(meta_variables, function(var) plot_clusters(coordinates, "PCA1", "PCA2", var, var))
 # Patchwork
 p <- wrap_plots(p_list)
 # Save the combined PCA plot
@@ -224,9 +225,11 @@ cat("-------------------------------------------------------------------- \n")
 
 # --- Variance across PCs
 cat("Variance explained by PCs. \n")
-exp_var <- setup$explained_variables
+# Settings
+meta_variables <- setup$meta_variables
+
 # Remove variable with less than 2 unique values
-var_count    <- check_unique_values(adata$obs, exp_var)
+var_count    <- check_unique_values(adata$obs, meta_variables)
 filtered_var <- var_count[var_count$Count >= 2, ]$Variable
 # Combine PCs with meta 
 n_pcs <- 50
