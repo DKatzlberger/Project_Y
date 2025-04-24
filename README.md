@@ -10,6 +10,7 @@ The script does unsupervides clustering methods and analysis `meta_variables` ex
 
 ### Input
 ***1. Settings:***
+
 The script accepts one commandline argument, which is a path to a settings.yaml file. 
 In the file you need to specify all required settings. An example settings file for "descriptive_model_building.R" can be found here [example_settings_descriptive_model_building.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/example_settings_descriptive_model_building.yaml). The snipped below shows all required settings:
 ```yaml
@@ -29,6 +30,24 @@ Currently the script these omic types (tech)
 - proteomics
 
 The script will substitute not specified settings with default settings. Default settings are specified in [default_settings_descriptive_model_building.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/default_settings_descriptive_model_building.yaml) and can be modified.
+
+
+***2. Data:***
+
+The script handles count matrix with one value per gene.
+The data is structured in an [AnnData](https://anndata.readthedocs.io/en/stable/) object. 
+*X* is required to contain your molecular data in format *observations* x *features*.
+*obs* (meta data) is required to include the `meta_variables` specified in the settings file.
+```r
+data_path <- "your/data/path.h5ad"
+adata     <- read_h5ad(data_path)
+adata
+```
+```
+AnnData object with n_obs × n_vars = 794 × 20338
+    obs: your_var1, your_var2, your_var3, ...
+```
+
 
 
 ## interactions.R
