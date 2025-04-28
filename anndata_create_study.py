@@ -6,7 +6,7 @@ import os
 # Inputs
 # 1. Molecular data -> adata.X
 # 2. Meta data      -> adata.obs
-molecular_data_path = "data/downloads/GEO/Population-specific Mutation Patterns in Breast Tumors from African American, European American, and Kenyan Patients/Molecular_data.csv"
+molecular_data_path = "data/downloads/GEO/Population-specific Mutation Patterns in Breast Tumors from African American, European American, and Kenyan Patients/Molecular_data_original.csv"
 meta_data_path      = "data/downloads/GEO/Population-specific Mutation Patterns in Breast Tumors from African American, European American, and Kenyan Patients/Meta_data.csv"
 # 3. Output path
 path_to_save_location = "data/downloads/GEO/Population-specific Mutation Patterns in Breast Tumors from African American, European American, and Kenyan Patients"
@@ -59,6 +59,10 @@ for column in columns_to_add:
 adata.obs.columns = map(str.lower, adata.obs.columns)
 # Replace spaces with '_'
 adata.obs = adata.obs.map(lambda x: x.replace(' ', '_') if isinstance(x, str) else x)
+
+# Convert age to numeric
+adata.obs["age_(at_surgery)"] = adata.obs["age_(at_surgery)"].cat.codes.astype(int)
+adata.obs = adata.obs.rename(columns={"age_(at_surgery)": "age"})
 
 # Save
 save_name = os.path.join(path_to_save_location, "GSE225846_raw_RSEM.h5ad")

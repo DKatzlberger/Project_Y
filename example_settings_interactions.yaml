@@ -9,6 +9,7 @@ ancestry_column: genetic_ancestry
 data_path: data/inputs/PanCanAtlas_BRCA_raw_RSEM_subtypeNAremoved.h5ad
 tech: transcriptomics
 data_type: RSEM
+covariate: age  
 # Output
 output_directory: development_interactions
 # Features

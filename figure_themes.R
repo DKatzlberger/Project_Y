@@ -195,7 +195,6 @@ plot_output_column_count <- function(data, x, fill) {
   return(p)
 }
 
-
 plot_density_of_samples <- function(data_matrix, n_samples = 12, x_axis_label) {
 
   # Extract the first n samples (rows) from the matrix
@@ -365,6 +364,125 @@ plot_mean_variance_trend <- function(data, x_axis_label) {
 }
 
 # DESCRIPTIVE MODEL BUILDING
+
+plot_variable_count <- function(data, var, point_size = 0.5) {
+
+  # Add facet column
+  data <- mutate(
+    data,
+    facet = "Count"
+  )
+
+  p <- ggplot(
+    data, 
+    aes(
+      x    = !!sym(var), 
+      fill = !!sym(var)
+      )
+    ) +
+    geom_bar(
+      position = "dodge"
+    ) +
+    facet_grid(
+      cols = vars(facet)
+    ) +
+    labs(
+      title = var,
+      x     = NULL,
+      y     = NULL,
+      fill  = var
+    ) +
+    theme_nature_fonts(
+      base_size = (point_size * 10)
+    ) +
+    theme_white_background() +
+    theme_white_strip() +
+    theme_small_legend() +
+    theme(
+      axis.text.x = element_text(angle = 60, hjust = 1)
+    )
+
+  return(p)
+}
+
+plot_variable_proportion <- function(data, var, point_size = 0.5) {
+
+  # Add facet column
+  data <- mutate(
+    data,
+    facet   = "Proportion",
+    dummy_X = var
+  )
+
+  p <- ggplot(
+    data, 
+    aes(
+      x    = dummy_X, 
+      fill = !!sym(var)
+      )
+    ) +
+    geom_bar(
+      position = "fill"
+    ) +
+    facet_grid(
+      cols = vars(facet)
+    ) +
+    labs(
+      title = var,
+      x     = NULL,
+      y     = NULL, 
+      fill  = var
+    ) +
+    theme_nature_fonts(
+      base_size = (point_size * 10)
+    ) +
+    theme_white_background() +
+    theme_white_strip() +
+    theme_small_legend() +
+    theme(
+      axis.text.x = element_text(angle = 60, hjust = 1)
+    )
+
+  return(p)
+}
+
+plot_variable_hist <- function(data, var, point_size = 0.5){
+
+  # Convert the column to numeric and overwrite it
+  data <- data |>
+    mutate(
+      !!sym(var) := as.numeric(.data[[var]]),
+      facet       = "Count"
+    ) |>
+    filter(!is.na(.data[[var]]))
+
+  # Plot
+  p <- ggplot(
+    data = data,
+    aes(
+      x = !!sym(var)
+      )
+    ) +
+    geom_histogram(
+      bins = 30
+    ) +
+    facet_grid(
+      cols = vars(facet)
+    ) +
+    labs(
+      title = var,
+      x     = NULL,
+      y     = NULL
+    ) + 
+    theme_nature_fonts(
+      base_size = (point_size * 10)
+    ) +
+    theme_white_background() +
+    theme_white_strip()
+
+  return(p)
+}
+
 plot_clusters <- function(data, x, y, color, title, point_size = 0.5){
 
   # Plot

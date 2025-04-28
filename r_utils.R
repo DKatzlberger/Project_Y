@@ -41,6 +41,103 @@ load_default_settings <- function(file_name) {
   yaml.load_file(expected_location)
 }
 
+# Merge default settings with user settings
+deep_merge <- function(default, user, path = "", log = list(overrides = list(), additions = list())) {
+  for (name in names(user)) {
+    current_path <- if (path == "") name else paste0(path, "$", name)
+    
+    user_val <- user[[name]]
+    default_has_key <- name %in% names(default)
+    default_val <- if (default_has_key) default[[name]] else NULL
+
+    if (default_has_key && is.list(user_val) && is.list(default_val)) {
+      merge_result <- deep_merge(default_val, user_val, path = current_path, log)
+      default[[name]] <- merge_result$result
+      log <- merge_result$log
+    } else {
+      if (default_has_key) {
+        if (!identical(user_val, default_val)) {
+          log$overrides[[length(log$overrides) + 1]] <- list(
+            name = current_path,
+            from = default_val,
+            to = user_val
+          )
+        }
+      } else {
+        log$additions[[length(log$additions) + 1]] <- list(
+          name = current_path,
+          value = user_val
+        )
+      }
+
+      default[[name]] <- user_val
+    }
+  }
+
+  return(list(result = default, log = log))
+}
+
+# Helper to print log summary 
+print_merge_log <- function(log) {
+  # Combine all names to determine where values should start
+  all_names <- c(
+    sapply(log$overrides, function(x) x$name),
+    sapply(log$additions, function(x) x$name)
+  )
+  max_name_length <- max(nchar(all_names), 0)
+  value_indent <- max_name_length + 2  # +1 for colon, +1 space
+
+  if (length(log$overrides) > 0) {
+    cat("[Settings] Overriding default:\n")
+    for (entry in log$overrides) {
+      padding <- value_indent - nchar(entry$name) - 1  # space after colon
+      cat(sprintf("    %s:%s%-15s -> %-15s\n",
+                  entry$name,
+                  strrep(" ", padding),
+                  deparse(entry$from),
+                  deparse(entry$to)))
+    }
+    cat("\n")
+  }
+
+  if (length(log$additions) > 0) {
+    cat("[Settings] User specific:\n")
+    for (entry in log$additions) {
+      padding <- value_indent - nchar(entry$name) - 1
+      cat(sprintf("    %s:%s%s\n",
+                  entry$name,
+                  strrep(" ", padding),
+                  deparse(entry$value)))
+    }
+    cat("\n")
+  }
+}
+
+
+# print_merge_log <- function(log) {
+#   if (length(log$overrides) > 0) {
+#     cat("[Settings] Overriding default:\n")
+#     for (entry in log$overrides) {
+#       cat(sprintf("    %-*s: %-15s -> %-15s \n",
+#                   entry$name,
+#                   deparse(entry$from),
+#                   deparse(entry$to)))
+#     }
+#     cat("\n")
+#   }
+  
+#   if (length(log$additions) > 0) {
+#     cat("[Settings] User specific:\n")
+#     for (entry in log$additions) {
+#       cat(sprintf("    %s: %-15s \n",
+#                   entry$name,
+#                   deparse(entry$value)))
+#     }
+#     cat("\n")
+#   }
+# }
+
+
 # Check if settings file contain the required settings
 check_settings <- function(setup, required_settings) {
   # Check if they're in the setup
@@ -388,7 +485,70 @@ filter_by_variance <- function(data, var_threshold = 0.01, min_samples_ratio = 0
   return(filtered_genes)
 }
 
-# DESCRIPTIVE STATISITCS
+# Classify variables
+classify_variables <- function(data, vars) {
+  classify_variable <- function(x) {
+    x_num <- suppressWarnings(as.numeric(as.character(x)))
+    na_prop <- mean(is.na(x_num))
+    
+    if (is.numeric(x)) {
+      return("numeric")
+    } else if (!is.na(na_prop) && na_prop < 0.1) {
+      unique_vals <- length(unique(na.omit(x_num)))
+      if (unique_vals > 10) {
+        return("numeric")
+      } else {
+        return("categorical")
+      }
+    } else {
+      return("categorical")
+    }
+  }
+
+  # Apply classification
+  var_types <- sapply(data[vars], classify_variable)
+
+  # Determine alignment for clean printing
+  max_name_len <- max(nchar(vars))
+
+  # Gather names by type
+  numeric_vars <- names(var_types[var_types == "numeric"])
+  categorical_vars <- names(var_types[var_types == "categorical"])
+
+  # Summary with names in brackets
+  cat("[Classify variables] Assumes", 
+      length(numeric_vars), "numeric", 
+      if (length(numeric_vars)) paste0("'", paste(numeric_vars, collapse = ", "), "'") else "",
+      "and",
+      length(categorical_vars), "categorical",
+      if (length(categorical_vars)) paste0("'", paste(categorical_vars, collapse = ", "), "'") else "",
+      "variables. \n")
+  
+  return(var_types)
+}
+
+# Validate actual type
+validate_variables <- function(data, classified_types) {
+  for (var in names(classified_types)) {
+    value <- data[[var]]
+    detected_type <- classified_types[[var]]
+
+    # Determine simplified actual type for comparison
+    actual_type <- if (is.numeric(value)) "numeric" else "categorical"
+    r_class <- class(value)[1]  # Show actual R class (e.g. "factor", "character")
+
+    if (detected_type != actual_type) {
+      cat(sprintf(
+        "[Validate variables] Variable '%s' was classified as '%s' but is '%s' (R class: %s).",
+        var, detected_type, actual_type, r_class
+      ))
+      warning("This can lead to unwanted behaviour.")
+    }
+  }
+}
+
+
+# Count variable values
 check_unique_values <- function(data, variables) {
   # Create a data frame to store the unique value counts for each variable
   counts <- sapply(variables, function(var) {
@@ -399,6 +559,17 @@ check_unique_values <- function(data, variables) {
   result <- data.frame(Variable = variables, Count = counts)
   rownames(result) <- NULL
   return(result)
+}
+# Loop through covariate_levels and check for low-count variables
+check_covariate_levels <- function(covariate_levels) {
+  for (i in seq_len(nrow(covariate_levels))) {
+    var_name <- covariate_levels$Variable[i]
+    level_count <- covariate_levels$Count[i]
+    
+    if (level_count < 2) {
+      stop(sprintf("[Covariate] '%s' has less than 2 levels, can't perform contrast.", var_name))
+    }
+  }
 }
 
 # Explain variance
@@ -617,25 +788,6 @@ LM_explain <- function(data, variables, response, feature, n_cores, batch_size) 
 
 
 
-
-
-
-
-
-
-
-# Function to check if covariate is present in settings
-get_covariate <- function(setup) {
-  # Function to extract the covariate if present and valid
-  if ("covariate" %in% names(setup) && 
-      !is.null(setup$covariate) &&
-      any(nzchar(setup$covariate))) {
-    return(setup$covariate)
-  } else {
-    return(NULL)
-  }
-}
-
 classify_covariates <- function(df, covariates) {
   # Initialize lists to store continuous and discrete covariates
   classified_covariates <- list(
@@ -748,7 +900,7 @@ create_stratification_plot <- function(datasets, to_visualize_columns) {
 
 
 # Function to create design matrix
-create_design <- function(output_column, meta, covariates = NULL) {
+create_design <- function(output_column, meta, covariate = NULL) {
   # Creates design matrix
   # Supports means model with optional covariates.
   # output_column: Condition to be calculated.
@@ -757,15 +909,15 @@ create_design <- function(output_column, meta, covariates = NULL) {
   # Ensure all factor levels in `meta` are relevant (drop unused levels)
   meta <- meta |> mutate(across(where(is.factor), droplevels))
   
-  if (!is.null(covariates)) {
+  if (!is.null(covariate)) {
     # Check that all covariates exist in the metadata
-    missing_covariates <- setdiff(covariates, colnames(meta))
+    missing_covariates <- setdiff(covariate, colnames(meta))
     if (length(missing_covariates) > 0) {
-      stop(paste("Covariates", paste(missing_covariates, collapse = ", "), "are not present in the metadata."))
+      stop(paste("[Create design] Covariate", paste(missing_covariates, collapse = ", "), "are not present in the metadata."))
     }
     
     # Create the formula for the model matrix with multiple covariates
-    formula <- as.formula(paste("~0 +", output_column, "+", paste(covariates, collapse = " + ")))
+    formula <- as.formula(paste("~0 +", output_column, "+", paste(covariate, collapse = " + ")))
     design <- model.matrix(formula, data = meta)
   } else {
     # Design matrix without covariates
@@ -777,8 +929,8 @@ create_design <- function(output_column, meta, covariates = NULL) {
   # Remove only prefixes for `output_column` and `covariates`, while leaving the rest intact
   colnames(design) <- gsub(paste0("^", output_column, ""), "", colnames(design)) # Remove `output_column` prefix
   
-  if (!is.null(covariates)) {
-    for (cov in covariates) {
+  if (!is.null(covariate)) {
+    for (cov in covariate) {
       if (is.factor(meta[[cov]])) {
         # Remove factor variable name from column names (e.g., "covLevel1" -> "Level1")
         colnames(design) <- gsub(paste0("^", cov, ""), "", colnames(design))

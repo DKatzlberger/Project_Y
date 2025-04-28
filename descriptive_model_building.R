@@ -95,9 +95,46 @@ cat(sprintf("Save location: %s \n", path_to_save_location))
 cat("-------------------------------------------------------------------- \n")
 
 # --- Descriptive statistics
-meta_ <- 
+cat("Generating descriptive figures. \n")
+# Settings
+meta_variables <- setup$meta_variables
+meta_          <- select(adata$obs, all_of(meta_variables))
+# Classification meta variable
+var_types   <- classify_variables(meta_, meta_variables)
+numeric     <- names(var_types[var_types == "numeric"])
+categorical <- names(var_types[var_types == "categorical"])
 
+# Visualize: Meta variables
 
+# Categorical
+meta_categorical <- select(meta_, all_of(categorical))
+# Plot loop
+p_categorical_list <- lapply(categorical, function(var){
+  # Plots
+  p_count <- plot_variable_count(meta_categorical, var)
+  p_prop  <- plot_variable_proportion(meta_categorical, var)
+  # Patchwork
+  p_categorical <- p_count + p_prop + plot_layout(widths = c(2, 1), guides = "collect") 
+  }
+)
+
+# Numeric
+meta_numeric <- select(meta_, all_of(numeric))
+# Plot loop
+p_numeric_list <- lapply(numeric, function(var){
+  # Plots
+  p_hist <- plot_variable_hist(meta_numeric, var)
+  }
+)
+# Combine categrorical and numeric
+p_list <- c(p_categorical_list, p_numeric_list)
+
+# Patchwork
+p <- wrap_plots(p_list)
+# Save
+save_name <- file.path(path_to_save_location, "QC_meta_variables.pdf")
+save_ggplot(p, save_name, width = 10, height = 4)
+cat("-------------------------------------------------------------------- \n")
 
 # --- Normalization/Transformation
 # Settings
@@ -192,7 +229,6 @@ cat("-------------------------------------------------------------------- \n")
 cat("Clustering analysis. \n")
 # Settings
 meta_variables <- setup$meta_variables
-
 
 # TSNE
 cat("Unsuperived clustering: TSNE. \n")
@@ -377,11 +413,9 @@ if (setup$visual_val){
 #   n_cores    = available_cores
 # )
 
-
-
-# # Save the settings
-# save_name <- file.path(path_to_save_location, "Settings.yaml")
-# write_yaml(setup, save_name)
+# Save the settings
+save_name <- file.path(path_to_save_location, "Settings.yaml")
+write_yaml(setup, save_name)
 
 
 
@@ -1115,41 +1149,41 @@ if (setup$visual_val){
 #        height = 1.5, width = 3)
 
 # # ---- Variance across ancestry (variance_across_ancestry_plot) ----
-variance_across_ancestry_plot <- variance_across_ancestry |>
-  filter(Variance > 0) |>
-  ggplot(
-    aes(
-      x = toupper(!!sym(ancestry_column)),
-      y = Variance
-    )
-  ) +
-  geom_violin(
-    aes(fill = !!sym(ancestry_column)), 
-    alpha = alpha_value
-  ) +
-  geom_boxplot(
-    width = 0.2, 
-    outlier.shape = NA
-  ) +
-  scale_fill_manual(
-    values = genetic_ancestry_colors
-  ) +
-  scale_y_log10() +
-  facet_grid(
-    rows = vars(Condition),
-    scales = "free"
-  ) +
-  labs(
-    x = "Ancestry",
-    y = "Variance"
-  ) +
-  theme_nature_fonts(font_size) +
-  theme_white_background() +
-  theme_white_strip() +
-  theme(legend.position = "none") 
+# variance_across_ancestry_plot <- variance_across_ancestry |>
+#   filter(Variance > 0) |>
+#   ggplot(
+#     aes(
+#       x = toupper(!!sym(ancestry_column)),
+#       y = Variance
+#     )
+#   ) +
+#   geom_violin(
+#     aes(fill = !!sym(ancestry_column)), 
+#     alpha = alpha_value
+#   ) +
+#   geom_boxplot(
+#     width = 0.2, 
+#     outlier.shape = NA
+#   ) +
+#   scale_fill_manual(
+#     values = genetic_ancestry_colors
+#   ) +
+#   scale_y_log10() +
+#   facet_grid(
+#     rows = vars(Condition),
+#     scales = "free"
+#   ) +
+#   labs(
+#     x = "Ancestry",
+#     y = "Variance"
+#   ) +
+#   theme_nature_fonts(font_size) +
+#   theme_white_background() +
+#   theme_white_strip() +
+#   theme(legend.position = "none") 
 
-# Save
-ggsave(filename = "Variance_across_ancestry.pdf",
-       plot = variance_across_ancestry_plot,
-       path = path_to_save_location,
-       height = 3, width = 3)
+# # Save
+# ggsave(filename = "Variance_across_ancestry.pdf",
+#        plot = variance_across_ancestry_plot,
+#        path = path_to_save_location,
+#        height = 3, width = 3)

@@ -29,7 +29,7 @@ Currently the script these omic types (tech):
 - methylation
 - proteomics
 
-The script will substitute not specified settings with default settings. Default settings are specified in [default_settings_descriptive_model_building.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/default_settings_descriptive_model_building.yaml) and can be modified.
+The script will substitute not specified settings with default settings. Default settings are specified in [default_settings_descriptive_model_building.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/default_settings_descriptive_model_building.yaml) and can be modified within the user settings (no need to change default settings file).
 
 
 ***2. Data:***
@@ -105,7 +105,7 @@ Currently the script supports these omic types and normalization methods:
 | methylation          | `"beta_to_mvals"` `"normalize_log"` `"normalize_zscore"` `"raw"`                    |
 | proteomics           | `"raw"`                                                                             |
 
-The script will substitute not specified settings with default settings. Default settings are specified in [default_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/default_settings_interactions.yaml) and can be modified.
+The script will substitute not specified settings with default settings. Default settings are specified in [default_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/default_settings_interactions.yaml) and can be modified within the user settings (no need to change default settings file).
 
 ***2. Data:***
 

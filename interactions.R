@@ -41,7 +41,8 @@ if (length(args) > 0) {
 } else {
   # Dev settings if no command-line argument provided
   cat("Running interactive mode for development. \n")
-  YAML_FILE <- "example_settings_interactions.yaml"
+  # "example_settings_interactions.yaml"
+  YAML_FILE <- "data/downloads/GEO/Population-specific Mutation Patterns in Breast Tumors from African American, European American, and Kenyan Patients/interaction_settings.yaml"
   is_yaml_file(YAML_FILE)
 }
 
@@ -51,9 +52,13 @@ if (length(args) > 0) {
 DEFAULT_FILE  <- "default_settings_interactions.yaml"
 default_setup <- load_default_settings(DEFAULT_FILE)
 # User
-user_setup <- yaml.load_file(YAML_FILE)
+user_setup   <- yaml.load_file(YAML_FILE)
 # Default and user settings (user will overwrite default)
-setup      <- modifyList(default_setup, user_setup)
+merged_setup <- deep_merge(default_setup, user_setup)
+setup        <- merged_setup$result
+log          <- merged_setup$log
+print_merge_log(log)
+
 # Check required settings
 # Required settings
 required_settings <- c(
@@ -82,13 +87,14 @@ class_1           <- setup$class_1
 ancestry_column   <- setup$ancestry_column
 train_ancestry    <- setup$train_ancestry
 infer_ancestry    <- setup$infer_ancestry
+covariate         <- setup$covariate
 
 # Load data
 data_path  <- setup$data_path
 is_h5ad_file(data_path)
 adata      <- read_h5ad(data_path)
 # Check if columns exist in data
-required_columns <- c(output_column, ancestry_column)
+required_columns <- c(output_column, ancestry_column, covariate)
 check_columns(adata$obs, required_columns)
 
 # Define classification 
@@ -130,6 +136,24 @@ setup$n_class_1_infer_ancestry <- counts[class_1, infer_ancestry]
 
 
 # --- Design matrix 
+# Validate the covariate
+if (!is.null(covariate)){
+  cat("Checking specified covariate. \n")
+  # Classify the type
+  covariate_types  <- classify_variables(adata$obs, covariate)
+  categorical      <- names(covariate_types[covariate_types == "categorical"])
+  numeric          <- names(covariate_types[covariate_types == "numeric"])
+  # Validate covariate type
+  validate_variables(adata$obs, covariate_types)
+  # Check for enough levels within the data
+  covariate_levels <- check_unique_values(adata$obs, categorical)
+  check_covariate_levels(covariate_levels)
+  cat("-------------------------------------------------------------------- \n")
+} else{
+  cat("No covariate specified. \n")
+  cat("-------------------------------------------------------------------- \n")
+}
+
 # Define groups to compare
 adata$obs["group"] <- factor(
   paste(
@@ -144,14 +168,26 @@ adata$obs["group"] <- factor(
     paste(infer_ancestry, class_1, sep = ".")     
   )
 )
-# Design formula and groups
-formula <- as.formula(paste("~", "0 + group"))
-groups  <- levels(adata$obs$group)
+# Create formula 
+cat("Creating means model design. \n")
+if (!is.null(covariate)){
+  # Matrix with covariate
+  safe_covariate <- paste0("`", covariate, "`")
+  formula        <- as.formula(paste("~0 + group", "+", paste(safe_covariate, collapse = " + ")))
+} else{
+  # Marix without covariate
+  formula <- as.formula("~0 + group")
+}
+
 # Matrix
-interaction_design <- model.matrix(~ 0 + group, data = adata$obs)
+interaction_design <- model.matrix(formula, data = adata$obs)
 # Human and machine readable terms
 colnames(interaction_design) <- gsub("group", "", colnames(interaction_design))
 colnames(interaction_design) <- gsub("-", "_", colnames(interaction_design))
+# Print statement
+cat(sprintf("Formula:       %s\n", deparse(formula)))
+cat(sprintf("Coefficients:  %s\n", paste(colnames(interaction_design), collapse = paste0(" "))))
+cat("-------------------------------------------------------------------- \n")
 
 # --- Filter features 
 # Settings
@@ -167,8 +203,8 @@ save_name <- file.path(path_to_save_location, "QC_mean_variance_trend.pdf")
 if (filter_features & tech == "transcriptomics"){
 
   # Print statement
-  cat(sprintf("📊 Filter features for technology: %s. \n", tech))
-  cat(sprintf("By count: counts -> norm factors -> logCPM -> count threshold (%s percentile) -> filter \n", percentile))
+  cat(sprintf("Filtering features (Technology: %s). \n", tech))
+  cat(sprintf("By count: Threshold %s percentile. \n", percentile))
 
   # Transform to logCPM
   norm_factors <- calculate_tmm_norm_factors(adata$X)
@@ -181,7 +217,7 @@ if (filter_features & tech == "transcriptomics"){
   filtered_data <- adata[, filtered_features]
 
   # Print statement
-  cat(sprintf("By variance: counts -> norm factors -> logCPM -> variance threshold (%s percentile) -> filter \n", percentile))
+  cat(sprintf("By variance: Threshold %s percentile. \n", percentile))
 
   # Transform to logCPM
   norm_factors <- calculate_tmm_norm_factors(filtered_data$X)
@@ -282,7 +318,7 @@ normalization        <- setup$normalization
 normalization_method <- normalization_methods[[tech]][[normalization]]$"function"
 values_output_name   <- normalization_methods[[tech]][[normalization]]$"output_name"
 # Print statement
-cat(sprintf("📊 Normalization of features for technology: %s. \n", tech))
+cat(sprintf("Normalizing features (Technology: %s). \n", tech))
 
 # Transpose (rows = Genes, cols = Samples)
 data_t <- t(filtered_data$X)
@@ -316,12 +352,6 @@ cat("Check plot: 'QC_density_normalized_values.pdf' and 'QC_qq_normalized_values
 cat("-------------------------------------------------------------------- \n")
 
 # --- Means model
-# Print statement 
-cat("📊 Means model summary: \n")
-cat(sprintf("Formula: %s\n", deparse(formula)))
-cat("Groups:\n")
-cat(sprintf("  %s\n", paste(groups, collapse = paste0("\n  "))  ))
-
 # Fit the model (means model)
 limma_fit      <- lmFit(data_norm, design = interaction_design)
 limma_fit      <- eBayes(limma_fit)
@@ -330,6 +360,7 @@ mean_model_res <- extract_results(limma_fit)
 # Save
 save_name <- file.path(path_to_save_location, "Limma_means.csv")
 fwrite(mean_model_res, save_name)
+cat("Fit means model. \n")
 cat("Check results: 'Limma_means.csv'. \n")
 cat("-------------------------------------------------------------------- \n")
 
@@ -353,12 +384,16 @@ contrast_calculations <- list(
   interaction     = glue("({cols[1]} - {cols[2]}) - ({cols[3]} - {cols[4]})")
 )
 
+# Dataframe
+contrast_table <- data.frame(
+  Coefficient      = names(contrast_calculations),
+  Calculation      = unlist(contrast_calculations),
+  row.names        = NULL,
+  stringsAsFactors = FALSE
+)
 # Print statement
-cat("📊 Contrast summary: \n")
-cat("Calculations: \n")
-for (i in seq_along(contrast_calculations)) {
-  cat(sprintf("  %-15s %s \n", names(contrast_calculations)[i], contrast_calculations[[i]]))
-}
+cat("Fit contrast. \n")
+print(contrast_table, right = FALSE, row.names = FALSE)
 
 # Create contrast matrix
 contrast_matrix <- makeContrasts(

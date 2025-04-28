@@ -1,5 +1,6 @@
 # Input
 data_type: Input_values
+covariate: NULL
 # Features
 filter_features: True
 percentile: 25
