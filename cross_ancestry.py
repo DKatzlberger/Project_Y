@@ -47,7 +47,7 @@ else:
     # UCEC
     # data/inputs/settings/PanCanAtlas_UCEC_RSEM_CN-high_vs_non-CN-high_EUR_to_ADMIX.yml
 
-    YAML_FILE = "dev_settings.yml"
+    YAML_FILE = "data/downloads/GEO/Population-specific Mutation Patterns in Breast Tumors from African American, European American, and Kenyan Patients/interaction_settings.yaml"
     print("Running interactive mode for development.")
 
 # Here starts the script   
@@ -74,11 +74,11 @@ error_handler = ErrorHandler(log_file=error_file)
 
 # Data loading
 setup.log("Loading data")
-data = anndata.read_h5ad(setup.data_path)
+adata = anndata.read_h5ad(setup.data_path)
 
 # Validate data
 setup.log("Check data")
-data_validator = DataValidator(data=data, setup=setup, error_handler=error_handler)
+data_validator = DataValidator(data=adata, setup=setup, error_handler=error_handler)
 # Check if defined settings are present in the data
 data_validator.data_settings_compatibility()
 # Check for NAs in molecular data
@@ -89,47 +89,63 @@ data_validator.validate_negative_counts()
 
 # Define classification task 
 setup.log("Define classification")
-data = (data[data.obs[setup.output_column].isin(setup.comparison)])
+comparison = [setup.class_0, setup.class_1]
+adata = (adata[adata.obs[setup.output_column].isin(comparison)])
+
+setup.log("Check covariate")
+# Classify covariates
+covariate = [setup.get("covariate", None)]
+if covariate:
+    # Classify the type
+    covariate_types = classify_variables(adata.obs, vars = covariate)
+    categorical     = covariate_types["categorical"]
+    numeric         = covariate_types["numeric"]
+    # Validate covariate type
+    validate_variables(adata.obs, covariate_types)
+    
 
 setup.log("Feature selection")
 # Filtering based on all of the data (consistent with interactions)
-if setup.filter_features and setup.tech == "transcriptomics" and setup.data_type == "RSEM":
+# Strength of filtering
+percentile = setup.percentile
+
+if setup.filter_features and setup.tech == "transcriptomics":
 
     # Transform to logCPM
-    norm_factors = calculate_tmm_norm_factors(data.X)
-    cpm_data = cpm(data.X, norm_factors = norm_factors, log = True)
+    norm_factors = calculate_tmm_norm_factors(adata.X)
+    cpm_data = cpm(adata.X, norm_factors = norm_factors, log = True)
     # Filter by signal/count
-    min_counts = signal_by_percentile(cpm_data, percentile = 25)
+    min_counts = signal_by_percentile(cpm_data, percentile = percentile)
     filtered_features = filter_by_signal(cpm_data, min_counts)
     # Subset
-    filtered_data = data[:, filtered_features]
+    filtered_data = adata[:, filtered_features]
 
     # Variance filtering
     norm_factors = calculate_tmm_norm_factors(filtered_data.X)
     cpm_data = cpm(filtered_data.X, norm_factors = norm_factors, log = True)
     # Filter by variance
-    min_variance = variance_by_percentile(cpm_data, percentile = 25)
+    min_variance = variance_by_percentile(cpm_data, percentile = percentile)
     filtered_features = filter_by_variance(cpm_data, var_threshold = min_variance)
 
     # Subset features
     filtered_data = filtered_data[:, filtered_features]
 
-elif setup.filter_features and setup.tech == "methylation" and setup.data_type == "Beta":
+elif setup.filter_features and setup.tech == "methylation":
 
     # Transform to mvalues
-    mvals = beta_to_mvalue(data.X)
+    mvals = beta_to_mvalue(adata.X)
     
     # Filter by variance
     min_variance = variance_by_percentile(mvals, percentile = 25)
     filtered_features = filter_by_variance(mvals, var_threshold = min_variance)
 
     # Subset features
-    filtered_data = data[:, filtered_features]
+    filtered_data = adata[:, filtered_features]
 
 elif setup.filter_features and setup.data_type == "proteomics":
 
     # No filtering
-    filtered_data = data
+    filtered_data = adata
 
 # Save features (for DGE)
 with open(setup.out("Features.yml"), "w") as f:
@@ -153,16 +169,8 @@ data_validator.check_min_samples_per_class(
     )
 
 
-setup.log("Create subset")
-# Classify covariates
-covariate_list = setup.get("covariate", None)
-if covariate_list:
-    covariate_types = classify_covariates(eur_data.obs, covariates=covariate_list)
-else:
-    covariate_types = {"continuous": [], "discrete": []}
-
-# Stratify based on output column and discrete covariates
-stratification = [setup.output_column] + covariate_types["discrete"]
+setup.log("Creating subset")
+stratification = setup.output_column
 # Create dictionary with frequencies
 strata = inf_data.obs.groupby(stratification, observed=False).size().to_dict()
 
@@ -174,8 +182,8 @@ train_data, test_data = stratified_subset(
     seed=seed
     )
 train_idx = train_data.obs_names
-test_idx = test_data.obs_names
-inf_idx = inf_data.obs_names
+test_idx  = test_data.obs_names
+inf_idx   = inf_data.obs_names
 # Assertion: Check for data leakage
 data_validator.check_data_leakage(train_idx, test_idx)
 

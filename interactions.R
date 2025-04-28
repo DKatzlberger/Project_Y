@@ -62,8 +62,18 @@ print_merge_log(log)
 # Check required settings
 # Required settings
 required_settings <- c(
-  "output_column", "class_0", "class_1", "ancestry_column", 
-  "train_ancestry", "infer_ancestry", "data_path", "tech", 
+  # Classification
+  "output_column", 
+  "class_0", 
+  "class_1", 
+  # Ancestry
+  "ancestry_column", 
+  "train_ancestry", 
+  "infer_ancestry", 
+  # Data
+  "data_path", 
+  "tech", 
+  # Output
   "output_directory"
 )
 check_settings(setup, required_settings)
@@ -154,6 +164,7 @@ if (!is.null(covariate)){
   cat("-------------------------------------------------------------------- \n")
 }
 
+cat("Creating means model design. \n")
 # Define groups to compare
 adata$obs["group"] <- factor(
   paste(
@@ -169,7 +180,6 @@ adata$obs["group"] <- factor(
   )
 )
 # Create formula 
-cat("Creating means model design. \n")
 if (!is.null(covariate)){
   # Matrix with covariate
   safe_covariate <- paste0("`", covariate, "`")
@@ -194,7 +204,6 @@ cat("-------------------------------------------------------------------- \n")
 tech            <- setup$tech
 data_type       <- setup$data_type
 filter_features <- setup$filter_features
-
 # Strength of filter
 percentile <- setup$percentile
 
@@ -321,10 +330,8 @@ values_output_name   <- normalization_methods[[tech]][[normalization]]$"output_n
 cat(sprintf("Normalizing features (Technology: %s). \n", tech))
 
 # Transpose (rows = Genes, cols = Samples)
-data_t <- t(filtered_data$X)
-
+data_t    <- t(filtered_data$X)
 data_norm <- normalization_method(data_t, interaction_design)
-
 # Extract normalized matrix (used for plotting)
 data_norm_matrix <- if (is.list(data_norm) && !is.null(data_norm$E)) data_norm$E else data_norm
 

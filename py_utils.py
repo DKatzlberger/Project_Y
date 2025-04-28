@@ -30,7 +30,7 @@ class Setup(dict):
         
         # Open the default config file
         try:
-            default_config = yaml.safe_load(Path("default_settings.yml").read_text())
+            default_config = yaml.safe_load(Path("default_settings_cross_ancestry.yaml").read_text())
         except yaml.YAMLError as exc:
             print(exc)
 
@@ -57,10 +57,12 @@ class Setup(dict):
         required_settings = [
             # Classification
             "output_column",
-            "comparison",
+            "class_0",
+            "class_1",
+            # Ancestry
+            "ancestry_column",
             "train_ancestry",
             "infer_ancestry",
-            "ancestry_column",
             # Input
             "seed",
             "data_path", 
@@ -72,21 +74,21 @@ class Setup(dict):
         for i in required_settings:
             assert i in final_config, f"No {i} defined but required!"  
         
-        # Check that covariate has to be a list
-        assert "covariate" not in final_config or isinstance(final_config["covariate"], list), \
-            "If covariate exists, it must be a list."
+        # # Check that covariate has to be a list
+        # assert "covariate" not in final_config or isinstance(final_config["covariate"], list), \
+        #     "If covariate exists, it must be a list."
 
-        # Check how many classes
-        if len(final_config["comparison"]) > 2:
-            final_config.update({"multiclass": True})
-            print(f"Multiclass problem comparing: {final_config["comparison"]}.")
+        # # Check how many classes
+        # if len(final_config["comparison"]) > 2:
+        #     final_config.update({"multiclass": True})
+        #     print(f"Multiclass problem comparing: {final_config["comparison"]}.")
 
-        elif len(final_config["comparison"]) == 2:
-            final_config.update({"multiclass": False})
-            print(f"Binaryclass problem comparing: {final_config["comparison"]}.")
+        # elif len(final_config["comparison"]) == 2:
+        #     final_config.update({"multiclass": False})
+        #     print(f"Binaryclass problem comparing: {final_config["comparison"]}.")
         
-        else:
-            print(f"Cant do a classification with one assigned class in comparison: {final_config["classification"]["comparison"]}.")
+        # else:
+        #     print(f"Cant do a classification with one assigned class in comparison: {final_config["classification"]["comparison"]}.")
 
         # Init
         self.final_config = final_config
@@ -560,76 +562,109 @@ ml_normalization_methods = {
 }
 
 # Filtering features
-def calculate_tmm_norm_factors(data):
+def calculate_tmm_norm_factors(counts, logratio_trim=0.3, abs_expr_trim=0.05):
     """
-    Calculates TMM normalization factors for RNA-Seq data.
-    
-    Parameters:
-    - data: A numpy array with samples as rows and genes as columns (samples x genes).
-    
-    Returns:
-    - A numpy array containing the normalization factors for each sample.
+    counts: numpy array (samples x genes)
     """
-    # Step 1: Compute the geometric mean of the counts for each gene (column)
-    geometric_mean = np.exp(np.mean(np.log(data + 1), axis=0))  # Axis 0: Across samples
+    print("[Norm factors] Using custom TMM method (imitating edgeR).")
 
-    # Step 2: Compute M-values (log-ratio) between each sample and the geometric mean
-    M_values = data / geometric_mean  # Element-wise division by geometric mean
-    M_values = np.log2(M_values + 1)  # Add pseudocount for stability
-    
-    # Step 3: Trim the extreme M-values to reduce the influence of highly differentially expressed genes
-    trim_percent = 0.05
-    def trim_m_values(x):
-        lower = np.quantile(x, trim_percent)
-        upper = np.quantile(x, 1 - trim_percent)
-        x = np.clip(x, lower, upper)  # Clip values to the trim range
-        return x
-    
-    # Apply trimming to each sample (row-wise)
-    M_values_trimmed = np.apply_along_axis(trim_m_values, axis=1, arr=M_values)
+    counts = counts.T  # transpose to genes x samples
+    lib_sizes = np.sum(counts, axis=0)
+    ref_index = np.argmin(np.abs(lib_sizes - np.median(lib_sizes)))
+    ref = counts[:, ref_index]
 
-    # Step 4: Calculate the normalization factors
-    norm_factors = np.median(M_values_trimmed, axis=1)  # Median across genes for each sample
+    norm_factors = np.zeros(counts.shape[1])
 
-    # Normalize by the median normalization factor
-    norm_factors = norm_factors / np.median(norm_factors)
-    
+    for i in range(counts.shape[1]):
+        samp = counts[:, i]
+
+        # Only keep genes with non-zero counts in both sample and reference
+        keep = (samp > 0) & (ref > 0)
+        x = samp[keep]
+        y = ref[keep]
+
+        if len(x) < 10:
+            norm_factors[i] = 1  # fallback
+            continue
+
+        # M and A values
+        M = np.log2(x / y)
+        A = 0.5 * np.log2(x * y)
+
+        # Trim extreme M and A values
+        m_lower = np.quantile(M, logratio_trim / 2)
+        m_upper = np.quantile(M, 1 - logratio_trim / 2)
+        a_lower = np.quantile(A, abs_expr_trim / 2)
+        a_upper = np.quantile(A, 1 - abs_expr_trim / 2)
+
+        keep_trimmed = (M > m_lower) & (M < m_upper) & (A > a_lower) & (A < a_upper)
+
+        if np.sum(keep_trimmed) < 10:
+            norm_factors[i] = 1
+        else:
+            # Weighted mean of M (unweighted for now)
+            norm_factors[i] = np.exp(np.mean(M[keep_trimmed]))
+
+    # Normalize factors to geometric mean = 1
+    valid_factors = norm_factors[norm_factors > 0]
+    gm = np.exp(np.mean(np.log(valid_factors)))
+    norm_factors /= gm
+
+    # Check for invalid norm factors
+    if np.any((norm_factors == 0) | np.isnan(norm_factors) | np.isinf(norm_factors)):
+        print("Warning: Some normalization factors are zero, NaN, or Inf. Check input data.")
+
     return norm_factors
 
 # CPM
 def cpm(data, norm_factors=None, log=False):
     """
     Converts raw counts to CPM (Counts Per Million), optionally using normalization factors.
-    Optionally, log-transform the CPM values.
-
-    Parameters:
-    - data: A numpy array with rows as samples and columns as genes (samples x genes).
-    - norm_factors: A numpy array with normalization factors for each sample (length = n_samples). Default is None.
-    - log: Boolean value, whether to log-transform the CPM values. Default is False.
-
+    Optionally log-transform the CPM values.
+    
+    Args:
+      data (np.ndarray): Raw counts (samples x genes).
+      norm_factors (np.ndarray, optional): Normalization factors for each sample.
+      log (bool): Whether to log-transform the CPM values.
+      
     Returns:
-    - A numpy array with CPM or log-transformed CPM values (samples x genes).
+      np.ndarray: CPM or logCPM values (samples x genes).
     """
-    data = np.asarray(data)  # Ensure data is a NumPy array
 
-    # Check that norm_factors matches the number of samples
-    if norm_factors is not None:
-        norm_factors = np.asarray(norm_factors)
-        if norm_factors.shape[0] != data.shape[0]:
-            raise ValueError("The number of samples must match the length of the normalization factors.")
-
-        # Apply normalization factors (element-wise division across rows)
-        data = data / norm_factors[:, np.newaxis]  # Broadcast over columns
-
-    # Calculate total reads per sample (sum of counts for each sample)
-    total_reads_per_sample = np.sum(data, axis=1) + 1e-6  # Prevent division by zero
-
-    # Convert raw counts to CPM
-    cpm_data = (data / total_reads_per_sample[:, np.newaxis]) * 1e6  # Broadcast over columns
-
-    # Apply log transformation if requested
     if log:
-        cpm_data = np.log2(cpm_data + 1)  # Add pseudocount for stability
+        print("[CPM] Transforming input data into logCPM.")
+    else:
+        print("[CPM] Transforming input data into CPM. Specify log=True for log2 transformation.")
+
+    if norm_factors is not None:
+        print("[CPM] Utilizing specified normalization factors.")
+        if data.shape[0] != len(norm_factors):
+            raise ValueError("[CPM] The number of samples must match the length of the normalization factors.")
+        if np.any(norm_factors == 0):
+            raise ValueError("[CPM] Normalization factors contain zero.")
+        data = data / norm_factors[:, np.newaxis]
+    else:
+        print("[CPM] No normalization factors. Specify 'norm_factors' to normalize using normalization factors.")
+
+    if not np.all(np.isfinite(data)):
+        raise ValueError("[CPM] Data contains NA, NaN, or Inf values.")
+
+    total_reads_per_sample = np.sum(data, axis=1)
+
+    if np.any(np.isnan(total_reads_per_sample)):
+        raise ValueError("[CPM] Row sums contain NA values. Check input data.")
+
+    # Handle samples with 0 total reads
+    zero_reads = total_reads_per_sample == 0
+    if np.any(zero_reads):
+        print("[CPM] Warning: Samples with total read count of 0 detected. CPM will be set to 0 for those samples.")
+        total_reads_per_sample[zero_reads] = 1
+        data[zero_reads, :] = 0
+
+    cpm_data = (data / total_reads_per_sample[:, np.newaxis]) * 1e6
+
+    if log:
+        cpm_data = np.log2(cpm_data + 1)
 
     return cpm_data
 
@@ -738,52 +773,81 @@ def filter_by_variance(data, var_threshold=0.01, min_samples_ratio=0.5):
     return filtered_genes
 
 
-
-def encode_y(data, dictionary):
+def classify_variables(data, vars):
     """
-    Creates vector with class labels; additionally returns mapping dictionary.
-    data: The data to encode.
-    dictionary: Dictionary with mappings.
-    """
-    # Map categorical values to integers
-    y = data.map(dictionary)
-    y = np.array(y)
-    return y
-
-def classify_covariates(df, covariates):
-    """
-    Classifies the given covariates into continuous and discrete groups.
+    Classify variables in a dataframe as 'numeric' or 'categorical'.
+    Accepts a single variable name (str) or a list of variable names (list).
     
-    Parameters:
-    - df: The DataFrame containing the data.
-    - covariates: List of covariates (column names) to classify.
+    Args:
+        data (pd.DataFrame): The dataframe containing the variables.
+        vars (str or list): Variable(s) to classify.
     
     Returns:
-    - A dictionary with two keys: 'continuous' and 'discrete', each containing a list of covariates.
+        dict: Dictionary with keys 'numeric' and 'categorical' listing variable names.
     """
-    classified_covariates = {'continuous': [], 'discrete': []}
+
+    # If a single variable is passed as a string, make it a list
+    if isinstance(vars, str):
+        vars = [vars]
     
-    for covariate in covariates:
-        if covariate not in df.columns:
-            continue  # Skip covariates not found in the DataFrame
+    def classify_variable(x):
+        try:
+            x_num = pd.to_numeric(x, errors='coerce')
+        except Exception:
+            x_num = pd.Series([np.nan] * len(x))
         
-        col_data = df[covariate]
-        unique_values = col_data.nunique()
-        
-        # Check for categorical dtype
-        if pd.api.types.is_categorical_dtype(col_data):
-            classified_covariates['discrete'].append(covariate)
-        elif np.issubdtype(col_data.dtype, np.number):
-            # Heuristic: Consider numerical columns with few unique values as discrete
-            if unique_values <= 10:  # You can adjust this threshold
-                classified_covariates['discrete'].append(covariate)
+        na_prop = x_num.isna().mean()
+
+        if pd.api.types.is_numeric_dtype(x):
+            return "numeric"
+        elif not np.isnan(na_prop) and na_prop < 0.1:
+            unique_vals = x_num.dropna().nunique()
+            if unique_vals > 10:
+                return "numeric"
             else:
-                classified_covariates['continuous'].append(covariate)
+                return "categorical"
         else:
-            # Non-numerical columns (e.g., strings) are discrete
-            classified_covariates['discrete'].append(covariate)
-    
-    return classified_covariates
+            return "categorical"
+
+    # Apply classification
+    var_types = {var: classify_variable(data[var]) for var in vars}
+
+    # Gather names by type
+    numeric_vars = [var for var, t in var_types.items() if t == "numeric"]
+    categorical_vars = [var for var, t in var_types.items() if t == "categorical"]
+
+    # Summary print
+    print(f"[Classify variables] Assumes {len(numeric_vars)} numeric "
+          f"{"'" + ', '.join(numeric_vars) + "'" if numeric_vars else ""} and "
+          f"{len(categorical_vars)} categorical "
+          f"{"'" + ', '.join(categorical_vars) + "'" if categorical_vars else ""} variables.")
+
+    return {
+        "numeric": numeric_vars,
+        "categorical": categorical_vars
+    }
+
+def validate_variables(data, classified_types):
+    """
+    Validate if variables in data match their classified types.
+
+    Args:
+        data (pd.DataFrame): The dataframe containing the variables.
+        classified_types (dict): Dictionary with keys 'numeric' and 'categorical', each containing lists of variable names.
+    """
+    for var_type, vars_list in classified_types.items():
+        for var in vars_list:
+            value = data[var]
+
+            # Determine actual type
+            actual_type = "numeric" if pd.api.types.is_numeric_dtype(value) else "categorical"
+            r_class = str(value.dtype)  # similar to R's class()
+
+            if var_type != actual_type:
+                print(f"[Validate variables] Variable '{var}' was classified as '{var_type}' but is '{actual_type}' (dtype: {r_class}).")
+                print("Warning: This can lead to unwanted behaviour.\n")
+
+
 
 def stratified_subset(data, freq_dict, group_columns, seed):
     """
@@ -822,6 +886,17 @@ def stratified_subset(data, freq_dict, group_columns, seed):
     train_data = data[~data.obs_names.isin(idx)]
     test_data = data[data.obs_names.isin(idx)]
     return train_data, test_data
+
+def encode_y(data, dictionary):
+    """
+    Creates vector with class labels; additionally returns mapping dictionary.
+    data: The data to encode.
+    dictionary: Dictionary with mappings.
+    """
+    # Map categorical values to integers
+    y = data.map(dictionary)
+    y = np.array(y)
+    return y
 
 
 # def stratified_subset(data, proportion, output_column, seed): 

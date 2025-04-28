@@ -100,97 +100,69 @@ save_ggplot <- function(plot, save_path, width = 5, height = 5, with_legend = TR
 # QC
 plot_output_column_proportion <- function(data, x, fill) {
   # Plot
-  p <- data |>
-    mutate(
-      custom_x = case_when(
-        !!sym(x) == levels(factor(data[[x]]))[1] ~ paste(!!sym(x), "(train_ancestry)"), 
-        !!sym(x) == levels(factor(data[[x]]))[2] ~ paste(!!sym(x), "(infer_ancestry)"), 
-        TRUE ~ as.character(!!sym(fill))  
-      ),
-      custom_fill = case_when(
-        !!sym(fill) == levels(factor(data[[fill]]))[1] ~ paste(!!sym(fill), "(class_0)"), 
-        !!sym(fill) == levels(factor(data[[fill]]))[2] ~ paste(!!sym(fill), "(class_1)"), 
-        TRUE ~ as.character(!!sym(fill))  
+  p <- ggplot(
+    data = data,
+    aes(
+        x    = !!sym(x), 
+        fill = !!sym(fill)
       )
-    ) |>
-    ggplot(
-      aes(
-          x    = custom_x, 
-          fill = custom_fill
-        )
-    ) +
-    geom_bar(
-      position = "fill"
-    ) +
-    geom_text(
-      aes(
-        label = scales::percent(after_stat(count)/sum(after_stat(count)), accuracy = 0.1)
-      ),
-      stat = "count",
-      position = position_fill(vjust = 0.5),  
-      color = "black",  
-      size = 2
-    ) +
-    labs(
-      x    = paste(x, "(ancestry_column)"),
-      y    = "Proportion",
-      fill = paste(x, "(output_column)")
-    ) +
-    theme_nature_fonts() +
-    theme_white_background() +
-    theme_small_legend() +
-    theme(
-      legend.position = "bottom"
-    )
+  ) +
+  geom_bar(
+    position = "fill"
+  ) +
+  geom_text(
+    aes(
+      label = scales::percent(after_stat(count)/sum(after_stat(count)), accuracy = 0.1)
+    ),
+    stat = "count",
+    position = position_fill(vjust = 0.5),  
+    color = "black",  
+    size = 2
+  ) +
+  labs(
+    y = "Proportion",
+  ) +
+  theme_nature_fonts() +
+  theme_white_background() +
+  theme_small_legend() +
+  theme(
+    legend.position = "bottom"
+  )
   
   return(p)
 }
 
 plot_output_column_count <- function(data, x, fill) {
   # Plot
-  p <- data |>
-    mutate(
-      custom_x = case_when(
-        !!sym(x) == levels(factor(data[[x]]))[1] ~ paste(!!sym(x), "(train_ancestry)"), 
-        !!sym(x) == levels(factor(data[[x]]))[2] ~ paste(!!sym(x), "(infer_ancestry)"), 
-        TRUE ~ as.character(!!sym(fill))  
-      ),
-      custom_fill = case_when(
-        !!sym(fill) == levels(factor(data[[fill]]))[1] ~ paste(!!sym(fill), "(class_0)"), 
-        !!sym(fill) == levels(factor(data[[fill]]))[2] ~ paste(!!sym(fill), "(class_1)"), 
-        TRUE ~ as.character(!!sym(fill))  
+  p <- ggplot(
+    data = data,
+    aes(
+        x    = !!sym(x), 
+        fill = !!sym(fill)
       )
-    ) |>
-    ggplot(
-      aes(
-          x    = custom_x, 
-          fill = custom_fill
-        )
-    ) +
-    geom_bar(
-      position = "dodge"
-    ) +
-    geom_text(
-      aes(
-        label = after_stat(count)
-      ),
-      stat = "count", 
-      position = position_dodge(width = 0.8), 
-      vjust = -0.5,  
-      color = "black", 
-      size = 2     
-    ) +
-    labs(
-      x    = paste(x, "(ancestry_column)"),
-      y    = "Count",
-      fill = paste(x, "(output_column)")
-    ) +
-    theme_nature_fonts() +
-    theme_white_background() +
-    theme_small_legend() +
-    theme(
-      legend.position = "bottom"
-    )
+  ) +
+  geom_bar(
+    position = "dodge"
+  ) +
+  geom_text(
+    aes(
+      label = after_stat(count)
+    ),
+    stat = "count", 
+    position = position_dodge(width = 0.8), 
+    vjust = -0.5,  
+    color = "black", 
+    size = 2     
+  ) +
+  labs(
+    y    = "Count",
+  ) +
+  theme_nature_fonts() +
+  theme_white_background() +
+  theme_small_legend() +
+  theme(
+    legend.position = "bottom"
+  )
   
   return(p)
 }

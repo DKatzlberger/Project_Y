@@ -202,9 +202,6 @@ beta_to_mvalue <- function(betas, epsilon = 0.00001, ...) {
 
 voom_normalization <- function(count_matrix, design_matrix) {
 
-  # Print statement
-  cat("[Voom] Normalization using limma-voom. \n")
-
   # Ensure input is a matrix
   if (!is.matrix(count_matrix)) {
     stop("[Voom] Input count_matrix must be a matrix.")
@@ -485,6 +482,109 @@ filter_by_variance <- function(data, var_threshold = 0.01, min_samples_ratio = 0
   return(filtered_genes)
 }
 
+
+
+# Stratified subset
+stratified_subset <- function(data, strata, output_column, seed){
+    # Set the seed for reproducibility
+    set.seed(seed)
+    cat(sprintf("[Stratified subset] Utilizing seed: %s \n", seed))
+    # Print statement
+    max_name_length <- max(nchar(rownames(strata)), 0)
+    value_indent    <- max_name_length + 2
+
+    stratum_idx <- c()
+    for (stratum in rownames(strata)){
+        # Number of samples to select for this stratum
+        n_stratum <- strata[stratum]
+        
+        # Filter data for the specific class (stratum)
+        stratum_data <- data[data[[output_column]] == stratum, ]
+        
+        # Check if the stratum has enough samples to choose from
+        if (nrow(stratum_data) >= n_stratum) {
+            # Sample row names for the selected number of samples
+            sampled_stratum <- sample(rownames(stratum_data), n_stratum)
+            # Append sampled row names to the index vector
+            stratum_idx <- c(stratum_idx, sampled_stratum)
+            
+            # Print statement
+            padding <- value_indent - nchar(stratum) - 1
+            cat(sprintf("[Stratified subset] %s:%s%s -> %s \n", stratum, strrep(" ", padding), nrow(stratum_data), n_stratum))
+        } else {
+            # Handle case where there are fewer rows than needed in the stratum
+            stop(paste("[Stratified subset] Class", stratum, "has fewer rows than expected. \n"))
+        }
+    }
+    
+    # Subset the original data based on the sampled indices
+    stratified_idx <- stratum_idx
+    remaining_idx  <- rownames(data[!rownames(data) %in% stratum_idx, ])
+    
+    # Return a list of the stratified data and the remaining data
+    return(list(test_idx = stratified_idx, train_idx = remaining_idx))
+}
+
+# Bootstrap
+perform_bootstrap <- function(data, formula, normalization_method, n_iterations = 10) {
+  # Create a vector to store the bootstrap results
+  bootstrap_results_list <- list()
+
+  # Perform the bootstrap procedure
+  for (i in 1:n_iterations) {
+    # Sample with replacement 
+    boot_idx  <- sample(rownames(data), size = nrow(data), replace = TRUE)
+    boot_data <- data[boot_idx, ]
+    
+    # Make rownames unique
+    py_run_string("import warnings")
+    py_run_string("warnings.filterwarnings('ignore', message='Observation names are not unique')")
+    boot_data$obs_names_make_unique()
+
+    # Custom statistical function
+    # 1. Model matrix
+    boot_design <- model.matrix(formula, data = boot_data$obs)
+    colnames(boot_design) <- gsub("group", "", colnames(boot_design))
+    colnames(boot_design) <- gsub("-", "_", colnames(boot_design))
+
+    # 2. Normalization
+    boot_data_t <- t(boot_data$X)
+    boot_norm  <- normalization_method(boot_data_t, boot_design)
+
+    # 3. Means model
+    limma_fit      <- lmFit(boot_norm, design = boot_design)
+    limma_fit      <- eBayes(limma_fit)
+
+    # 4. Contrast calculations
+    cols                  <- colnames(boot_design)
+    contrast_calculations <- glue("{cols[1]} - {cols[2]}")
+    
+    # Create contrast matrix
+    contrast_matrix <- makeContrasts(
+      contrasts = contrast_calculations,
+      levels    = boot_design
+    )
+
+    # 5. Fit contrast
+    limma_fit_contrast <- contrasts.fit(limma_fit, contrast_matrix)
+    limma_fit_contrast <- eBayes(limma_fit_contrast)
+    train_contrast_res <- extract_results(limma_fit_contrast)
+
+    # 6. Results
+    train_contrast_res$bootstrap <- i
+    
+    # Store the results in the list
+    bootstrap_results_list[[i]] <- train_contrast_res
+  }
+
+  # Combine all bootstrap results into a data frame
+  bootstrap_results <- bind_rows(bootstrap_results_list)
+  
+  return(bootstrap_results)
+}
+
+
+
 # Classify variables
 classify_variables <- function(data, vars) {
   classify_variable <- function(x) {
@@ -547,7 +647,6 @@ validate_variables <- function(data, classified_types) {
   }
 }
 
-
 # Count variable values
 check_unique_values <- function(data, variables) {
   # Create a data frame to store the unique value counts for each variable
@@ -571,6 +670,9 @@ check_covariate_levels <- function(covariate_levels) {
     }
   }
 }
+
+
+
 
 # Explain variance
 LM_explain <- function(data, variables, response, feature, n_cores, batch_size) {
