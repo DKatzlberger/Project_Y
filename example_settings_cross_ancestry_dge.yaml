@@ -15,6 +15,6 @@ data_type: RSEM
 output_directory: development_cross_ancestry_dge
 # Features
 filter_features: True
-normalization: limma_voom
+normalization_method: limma_voom
 # Visualization
 visual_val: True

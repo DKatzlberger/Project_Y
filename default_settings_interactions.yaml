@@ -2,8 +2,13 @@
 data_type: Input_values
 covariate: NULL
 # Features
+normalization: True
 filter_features: True
 percentile: 25
+# Clustering
+n_pcs: 20
+perplexity: 50
+save_coordinates: False
 # Visualization
 visual_val: True
 logFC_thr: 1

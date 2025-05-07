@@ -10,6 +10,7 @@ suppressPackageStartupMessages(
     library(fgsea)
     # Parallelization
     library(parallel)
+    library(furrr)
     # Visualization
     library(patchwork)
     library(ggrepel)
@@ -155,7 +156,7 @@ p <- p_count + p_proportions + plot_layout(guides = "collect") & theme(legend.po
 # Save
 save_ggplot(p, save_name, width = 6, height = 4)
 # Print statement
-cat("Check plot: 'QC_sample_sizes.pdf' for visualization. \n")
+cat("Check plot: 'QC_sample_sizes.pdf' \n")
 cat("-------------------------------------------------------------------- \n")
 
 # --- Model formula
@@ -190,7 +191,7 @@ save_name <- file.path(path_to_save_location, "QC_mean_variance_trend.pdf")
 if (filter_features & tech == "transcriptomics"){
 
   # Print statement
-  cat(sprintf("Filtering features (Technology: %s). \n", tech))
+  cat(sprintf("Filtering features (technology: %s). \n", tech))
   cat(sprintf("By count: Threshold '%s' percentile. \n", percentile))
 
   # Transform to logCPM
@@ -272,6 +273,9 @@ if (filter_features & tech == "transcriptomics"){
 
 } else{
 
+  # Print statement
+  cat("No filtering of features. \n")
+
   # No filtering
   filtered_data <- adata
 
@@ -294,7 +298,7 @@ setup$n_features  <- ncol(filtered_data)
 # Message
 if (filter_features){
   cat(sprintf("Number of features after filtering: %s (%s). \n", ncol(filtered_data), ncol(adata)))
-  cat("Check plot: 'QC_mean_variance_trend.pdf' for visualization. \n")
+  cat("Check plot: 'QC_mean_variance_trend.pdf' \n")
   cat("-------------------------------------------------------------------- \n")
 }
 
@@ -330,13 +334,15 @@ p <- p_count + p_proportions + plot_layout(guides = "collect") & theme(legend.po
 # Save
 save_ggplot(p, save_name, width = 6, height = 4)
 # Print statement
-cat("Check plot: 'QC_ancestry_stratification.pdf' for visualization. \n")
+cat("Check plot: 'QC_ancestry_stratification.pdf' \n")
 cat("-------------------------------------------------------------------- \n")
 
-# Workflow: Test 
+
+# Workflow: Train
+
 
 # --- Design matrix
-cat("Train model workflow. \n")
+cat("Train workflow. \n")
 # Matrix
 train_design <- model.matrix(formula, data = train_adata$obs)
 # Human and machine readable terms
@@ -344,12 +350,12 @@ colnames(train_design) <- gsub("group", "", colnames(train_design))
 colnames(train_design) <- gsub("-", "_", colnames(train_design))
 # Print statement
 cat(sprintf("Formula:       %s\n", deparse(formula)))
-cat(sprintf("Coefficients:  %s\n", paste(colnames(train_design), collapse = paste0(" "))))
+cat(sprintf("Groups:        %s\n", paste(colnames(train_design), collapse = paste0(" "))))
 
-# ---- Normalization/Transformation
+# --- Normalization/Transformation
 # Select normalization method
 tech                  <- setup$tech
-normalization         <- setup$normalization
+normalization         <- setup$normalization_method
 normalization_method  <- normalization_methods[[tech]][[normalization]]$"function"
 values_output_name    <- normalization_methods[[tech]][[normalization]]$"output_name"
 # Transpose (rows = Genes, cols = Samples)
@@ -369,17 +375,16 @@ train_mean_res$Status <- "Train"
 train_mean_res$Seed   <- seed
 
 # Save
-save_name <- file.path(path_to_save_location, "Limma_means_train.csv")
-fwrite(train_mean_res, save_name)
-cat("Fit means model. \n")
-cat("Check results: 'Limma_means_train.csv'. \n")
+# save_name <- file.path(path_to_save_location, "Limma_means_train.csv")
+# fwrite(train_mean_res, save_name)
+# cat("Check results: 'Limma_means_train.csv' \n")
 
 # --- Contrast
 # Calculations
 cols                  <- colnames(train_design)
 contrast_calculations <- glue("{cols[1]} - {cols[2]}")
-cat("Fit contrast. \n")
-cat(sprintf("Coefficients: %s \n", contrast_calculations))
+# Print statement
+cat(sprintf("Calculations:  %s \n", contrast_calculations))
 
 # Create contrast matrix
 contrast_matrix <- makeContrasts(
@@ -393,7 +398,7 @@ limma_fit_contrast <- eBayes(limma_fit_contrast)
 train_contrast_res <- extract_results(limma_fit_contrast)
 # Some information
 train_contrast_res$Status <- "Train"
-train_contrast_res$Seed   <- seed
+train_contrast_res$Subset <- seed
 
 # Save
 save_name <- file.path(path_to_save_location, "Limma_contrast_train.csv")
@@ -402,19 +407,83 @@ cat("Check results: 'Limma_contrast_train.csv'. \n")
 cat("-------------------------------------------------------------------- \n")
 
 # Workflow: Bootstrap
-cat("Test model workflow. \n")
-test_contrast_res  <- perform_bootstrap(test_adata, formula, normalization_method, n_iterations = 10)
+cat("Test workflow. \n")
+test_contrast_res <- perform_bootstrap_parallel(
+  expression_matrix        = test_adata$X, 
+  metadata                 = test_adata$obs, 
+  formula                  = formula, 
+  normalization_method     = normalization_method, 
+  n_iterations             = 10
+)
 # Addition information
 test_contrast_res$Status <- "Train"
-test_contrast_res$Seed   <- seed
+test_contrast_res$Subset <- seed
+# Save
+save_name <- file.path(path_to_save_location, "Limma_contrast_test.csv")
+fwrite(test_contrast_res, save_name)
+cat("Check results: 'Limma_contrast_test.csv'. \n")
+cat("-------------------------------------------------------------------- \n")
 
-cat("Infer model workflow. \n")
-infer_contrast_res <- perform_bootstrap(test_adata, formula, normalization_method, n_iterations = 10)
+cat("Infer workflow. \n")
+infer_contrast_res <- perform_bootstrap_parallel(
+  expression_matrix    = infer_adata$X, 
+  metadata             = infer_adata$obs,
+  formula              = formula, 
+  normalization_method = normalization_method, 
+  n_iterations         = 10
+)
 # Addition information
-infer_contrast_res$Status <- "Train"
-infer_contrast_res$Seed   <- seed
-  
+infer_contrast_res$Status <- "Infer"
+infer_contrast_res$Subset <- seed
+# Save
+save_name <- file.path(path_to_save_location, "Limma_contrast_inf.csv")
+fwrite(infer_contrast_res, save_name)
+cat("Check results: 'Limma_contrast_inf.csv'. \n")
+cat("-------------------------------------------------------------------- \n")
 
 # Save the settings
 save_name <- file.path(path_to_save_location, "Settings.yaml")
 write_yaml(setup, save_name)
+
+# --- Integrating summary statistic (logFC)
+# Local (Feature wise)
+train_stats <- select(train_contrast_res, Feature, logFC)
+test_stats  <- select(test_contrast_res, bootstrap, Feature, logFC)
+infer_stats <- select(infer_contrast_res, bootstrap, Feature, logFC)
+
+# Rename for clarity
+train_stats <- rename(train_stats, logFC_train = logFC)
+test_stats  <- rename(test_stats, logFC_boot = logFC)
+infer_stats <- rename(infer_stats, logFC_boot = logFC)
+
+# Compute difference: test_diff
+test_diff <- test_stats |>
+  inner_join(train_stats, by = "Feature") |>
+  mutate(
+    Error     = logFC_boot - logFC_train,
+    AbsError = abs(logFC_boot - logFC_train),
+    Status    = "Test"
+    )
+
+# Compute difference: infer_diff
+infer_diff <- infer_stats |>
+  inner_join(train_stats, by = "Feature") |>
+  mutate(
+    Error    = logFC_boot - logFC_train,
+    AbsError = abs(logFC_boot - logFC_train),
+    Status   = "Infer"
+    )
+
+# Combine the two datasets
+summary_statisitc <- bind_rows(test_diff, infer_diff)
+
+error_diff <- summary_statisitc %>%
+  select(Feature, bootstrap, Status, AbsError) %>%
+  pivot_wider(
+    names_from = Status,
+    values_from = AbsError,
+    names_prefix = "AbsError_"
+  ) %>%
+  mutate(
+    AbsError_Diff = AbsError_Infer - AbsError_Test
+  )

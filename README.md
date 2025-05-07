@@ -95,7 +95,7 @@ infer_ancestry: your_infer_ancestry
 ancestry_column: column_with_ancestry  
 data_path: your/data/path.h5ad         # The script only works with .h5ad files
 tech: omics_type                       
-normalization: method
+normalization_method: method
 output_directory: your/save/location   # The script will create a directory at this place
 ```
 Currently the script supports these omic types and normalization methods:

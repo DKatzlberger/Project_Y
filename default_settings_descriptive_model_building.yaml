@@ -2,9 +2,8 @@
 seed: 42
 data_type: Input_values
 # Clustering
+n_pcs: 20
 perplexity: 50
 save_coordinates: True
-# Variance across PCs
-n_pcs: 20
 # Visualization
 visual_val: True

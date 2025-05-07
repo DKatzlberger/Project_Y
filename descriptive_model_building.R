@@ -39,7 +39,7 @@ if (length(args) > 0) {
 } else {
   # Dev settings if no command-line argument provided
   cat("Running interactive mode for development. \n")
-  YAML_FILE <- "example_settings_descriptive_model_building.yaml"
+  YAML_FILE <- "data/downloads/PhyloFrame/UCEC/settings_descriptive_statistics.yaml"
   is_yaml_file(YAML_FILE)
 }
 
@@ -51,11 +51,17 @@ default_setup <- load_default_settings(DEFAULT_FILE)
 # User
 user_setup <- yaml.load_file(YAML_FILE)
 # Default and user settings (user will overwrite default)
-setup      <- modifyList(default_setup, user_setup)
+merged_setup <- deep_merge(default_setup, user_setup)
+setup        <- merged_setup$result
+log          <- merged_setup$log
+print_merge_log(log)
+
 # Check required settings
 # Required settings
 required_settings <- c(
-  "data_path", "tech", "output_directory",
+  "data_path", 
+  "tech", 
+  "output_directory",
   "meta_variables"
 )
 check_settings(setup, required_settings)
@@ -68,31 +74,28 @@ path_to_save_location <- setup$output_directory
 if (!dir.exists(path_to_save_location)) {
   dir.create(path_to_save_location, recursive = TRUE)
 }
-# Create figure directory
-if (setup$visual_val){
-  path_to_figures <- file.path(setup$output_directory, "Visual_val")
-  if (!dir.exists(path_to_figures)) {
-    dir.create(path_to_figures, recursive = TRUE)
-  }
-}
+
 # Save the settings
 save_name <- file.path(path_to_save_location, "Settings.yaml")
 write_yaml(setup, save_name)
 
-# --- Data
-# Load data
-data_path  <- setup$data_path
-is_h5ad_file(data_path)
-adata      <- read_h5ad(setup$data_path)
-# Check if columns exist
-required_columns <- setup$meta_variables
-check_columns(adata$obs, required_columns)
-
 # Message
-cat("Running: descriptive_statistics.R \n")
 cat(sprintf("New analysis with id: %s; created: %s \n", setup$id, setup$date))
 cat(sprintf("Save location: %s \n", path_to_save_location))
 cat("-------------------------------------------------------------------- \n")
+
+
+# --- Data
+# Load data
+cat("Loading data... \n")
+data_path  <- setup$data_path
+is_h5ad_file(data_path)
+adata      <- read_h5ad(setup$data_path)
+cat("-------------------------------------------------------------------- \n")
+
+# Check if columns exist
+required_columns <- setup$meta_variables
+check_columns(adata$obs, required_columns)
 
 # --- Descriptive statistics
 cat("Generating descriptive figures. \n")
@@ -105,7 +108,6 @@ numeric     <- names(var_types[var_types == "numeric"])
 categorical <- names(var_types[var_types == "categorical"])
 
 # Visualize: Meta variables
-
 # Categorical
 meta_categorical <- select(meta_, all_of(categorical))
 # Plot loop
@@ -130,10 +132,17 @@ p_numeric_list <- lapply(numeric, function(var){
 p_list <- c(p_categorical_list, p_numeric_list)
 
 # Patchwork
-p <- wrap_plots(p_list)
+max_col <- 3
+n_plots <- length(meta_variables)
+n_col   <- min(n_plots, max_col)
+n_row   <- ceiling(n_plots / n_col)
+p <- wrap_plots(p_list, ncol = n_col)
 # Save
 save_name <- file.path(path_to_save_location, "QC_meta_variables.pdf")
+width     <- n_col * 4
+height    <- n_row * 4
 save_ggplot(p, save_name, width = 10, height = 4)
+cat("Check plot: 'QC_meta_variables.pdf' \n")
 cat("-------------------------------------------------------------------- \n")
 
 # --- Normalization/Transformation
@@ -151,8 +160,8 @@ if (tech == "transcriptomics"){
   norm_factors <- calculate_tmm_norm_factors(adata$X)
   trans_data   <- cpm(adata$X, norm_factors = norm_factors, log = TRUE)
   # Plot
-  p_before <- plot_density_of_samples(adata$X, x_axis_label = data_type)
-  p_after  <- plot_density_of_samples(trans_data, x_axis_label = "logCPM")
+  p_before <- plot_density_of_samples(adata$X, x_axis_label = data_type) 
+  p_after  <- plot_density_of_samples(trans_data, x_axis_label = "logCPM") 
   # Combine
   p <- p_before + p_after + plot_layout(guides = "collect") & theme(legend.position = "bottom")
   # Save
@@ -227,104 +236,69 @@ cat("-------------------------------------------------------------------- \n")
 
 # --- Unsupervised clustering 
 cat("Clustering analysis. \n")
-# Settings
-meta_variables <- setup$meta_variables
+# # UMAP
+# cat("Unsuperived clustering: UMAP. \n")
+# library(umap) # Placed here because of error
+# umap_results <- umap(trans_data, n_components = 2, n_neighbors = setup$perplexity, seed = setup$seed)
+# coordinates  <- data.frame(UMAP1 = umap_results$layout[, 1],  UMAP2 = umap_results$layout[, 2])
+# coordinates  <- bind_cols(coordinates, adata$obs)
+# # Save 
+# if (setup$save_coordinates){
+#   save_name <- file.path(path_to_save_location, "UMAP_coordinates.csv")
+#   fwrite(coordinates, save_name)
+# }
 
-# TSNE
-cat("Unsuperived clustering: TSNE. \n")
-set.seed(setup$seed)
-tsne_results <- Rtsne(trans_data, dims = 2, setup$perplexity)
-coordinates  <- data.frame(TSNE1 = tsne_results$Y[, 1], TSNE2 = tsne_results$Y[, 2])
-coordinates  <- bind_cols(coordinates, adata$obs)
-# Save
-if (setup$save_coordinates){
-  save_name <- file.path(path_to_save_location, "TSNE_coordinates.csv")
-  fwrite(coordinates, save_name)
-}
-
-# Visualize: TSNE
-if (setup$visual_val){
-  # Plot loop
-  p_list <- lapply(meta_variables, function(var) plot_clusters(coordinates, "TSNE1", "TSNE2", var, var))
-  # Patchwork
-  p <- wrap_plots(p_list)
-  # Save
-  save_name <- file.path(path_to_figures, "TSNE_cluster.pdf")
-  save_ggplot(p, save_name, width = 5, height = 5)
-}
-
-# UMAP
-cat("Unsuperived clustering: UMAP. \n")
-library(umap) # Placed here because of error
-umap_results <- umap(trans_data, n_components = 2, n_neighbors = setup$perplexity, seed = setup$seed)
-coordinates  <- data.frame(UMAP1 = umap_results$layout[, 1],  UMAP2 = umap_results$layout[, 2])
-coordinates  <- bind_cols(coordinates, adata$obs)
-# Save 
-if (setup$save_coordinates){
-  save_name <- file.path(path_to_save_location, "UMAP_coordinates.csv")
-  fwrite(coordinates, save_name)
-}
-
-# Visualize: UMAP
-if (setup$visual_val){
-  p_list <- lapply(meta_variables, function(var) plot_clusters(coordinates, "UMAP1", "UMAP2", var, var))
-  # Patchwork
-  p <- wrap_plots(p_list)
-  # Save
-  save_name <- file.path(path_to_figures, "UMAP_cluster.pdf")
-  save_ggplot(p, save_name, width = 5, height = 5)
-}
+# # Visualize: UMAP
+# if (setup$visual_val){
+#   p_list <- lapply(meta_variables, function(var) plot_clusters(coordinates, "UMAP1", "UMAP2", var, var))
+#   # Patchwork
+#   p <- wrap_plots(p_list)
+#   # Save
+#   save_name <- file.path(path_to_figures, "UMAP_cluster.pdf")
+#   save_ggplot(p, save_name, width = 5, height = 5)
+# }
 
 # PCA
-cat("Unsuperived clustering: PCA. \n")
-pca_results <- prcomp(trans_data, center = TRUE)
-coordinates <- data.frame(PCA1 = pca_results$x[, 1],  PCA2 = pca_results$x[, 2])
-coordinates <- bind_cols(coordinates, adata$obs)
-# Save 
-if (setup$save_coordinates){
-  save_name <- file.path(path_to_save_location, "PCA_coordinates.csv")
-  fwrite(coordinates, save_name)
-}
-
-# Visualize: PCA
-if (setup$visual_val){
-  p_list <- lapply(meta_variables, function(var) plot_clusters(coordinates, "PCA1", "PCA2", var, var))
-  # Patchwork
-  p <- wrap_plots(p_list)
-  # Save the combined PCA plot
-  save_name <- file.path(path_to_figures, "PCA_cluster.pdf")
-  save_ggplot(p, save_name, width = 5, height = 5)
-}
-cat("-------------------------------------------------------------------- \n")
-
-# --- Variance across PCs
-cat("Variance explained by PCs. \n")
 # Settings
-meta_variables <- setup$meta_variables
-n_pcs          <- setup$n_pcs
+n_pcs    <- setup$n_pcs
+vars_pc  <- setup$meta_variables
+# 
+var_count <- check_unique_values(adata$obs, vars_pc)
+vars_pc   <- var_count[var_count$Count >= 2, ]$Variable
+# PCA
+cat("Unsuperived clustering: PCA. \n")
+pca_results   <- prcomp(trans_data, center = TRUE)
+pc_explained  <- (pca_results$sdev)^2 / sum((pca_results$sdev)^2)
+pc_explained  <- data.frame(
+  pc    = paste0("PC", seq_along(pc_explained)),
+  pc_r2 = pc_explained
+)
+pc_explained <- mutate(
+  pc_explained,
+  pc_numeric = as.numeric(gsub("PC", "", pc)),
+  pc         = fct_reorder(pc, pc_numeric),
+)
+pc_explained <- pc_explained[1:n_pcs, ]
 
-# Remove variable with less than 2 unique values
-var_count    <- check_unique_values(adata$obs, meta_variables)
-filtered_var <- var_count[var_count$Count >= 2, ]$Variable
-# Combine PCs with meta 
-meta_ <- as_tibble(adata$obs, rownames = "Idx")
-meta_ <- select(meta_, Idx, all_of(filtered_var))
-data_ <- as_tibble(pca_results$x[, 1:n_pcs], rownames = "Idx")
-# Join and pivot 
-pc_data <- inner_join(meta_, data_, by = "Idx")
+# Covriate associated with PCs
+meta_ <- as_tibble(adata$obs, rownames = "idx")
+meta_ <- select(meta_, idx, all_of(vars_pc))
+data_ <- as_tibble(pca_results$x[, 1:n_pcs], rownames = "idx")
+# Join
+pc_data <- inner_join(meta_, data_, by = "idx")
 pc_data <- pivot_longer(
   data      = pc_data,
-  cols      = -c(Idx, all_of(filtered_var)),
-  names_to  = "PC",
-  values_to = "Expression"
+  cols      = -c(idx, all_of(vars_pc)),
+  names_to  = "pc",
+  values_to = "value"
 )
-
 # Lm (explain variance)
-n_variables <- length(filtered_var)
-n_features  <- n_pcs
+cat(sprintf("Associating %s with first %s principal components. \n", toString(vars_pc), n_pcs))
+# Settings
+n_variables <- length(vars_pc)
 batch_size  <- 10000
 # Calculate number of cores
-request_cores <- n_variables * ceiling(n_features / batch_size)
+request_cores <- n_variables * ceiling(n_pcs / batch_size)
 # Validate availabe cores
 total_cores <- parallel::detectCores()
 if (total_cores <= request_cores){
@@ -333,48 +307,130 @@ if (total_cores <= request_cores){
 } else {
   available_cores <- request_cores
 }
+
 # Function call
-pcs_explained <- LM_explain(
+covariate_explained <- LM_explain(
   data       = pc_data, 
-  variables  = filtered_var, 
-  feature    = "PC",
-  response   = "Expression",
+  variables  = vars_pc, 
+  feature    = "pc",
+  response   = "value",
   batch_size = batch_size,
   n_cores    = available_cores
 )
-# Add numeric column
-pcs_explained <- mutate(
-  pcs_explained, 
+# Add numeric feature column
+covariate_explained <- mutate(
+  covariate_explained, 
   feature_numeric = as.numeric(gsub("PC", "", feature)),
-  feature_numeric = as.factor(feature_numeric)
+  feature_factor  = as.factor(feature_numeric),
+  feature         = fct_reorder(feature, feature_numeric),
+  sig_feature     = ifelse(p_value < 0.05, "*", "")
 )
-# Save 
-save_name <- file.path(path_to_save_location, "PCA_explained.csv")
-fwrite(pcs_explained, save_name)
 
-# Visualize: Variance across PCs
-if (setup$visual_val){
-  # Pivot
-  pcs_explained <- pivot_longer(
-    data      = pcs_explained,
-    cols      = c(R_squared, p_value),
-    names_to  = "metric",
-    values_to = "values"
-  )
-  # Loop for plots
-  p_list <- lapply(filtered_var, function(var) {
-    # Filter the data
-    data_r2 <- filter(pcs_explained, variable == var, metric == "R_squared")
-    data_p  <- filter(pcs_explained, variable == var, metric == "p_value")
-    # Plot
-    plot_r2_pval(data_r2, data_p, x = "feature_numeric", title = var)
-  })
-  # Patchwork
-  p <- wrap_plots(p_list)
-  # Save the combined PCA plot
-  save_name <- file.path(path_to_figures, "PCA_explained.pdf")
-  save_ggplot(p, save_name, width = 15, height = 10)
+# --- Visualize: Covariates associated with PCs
+title           <- ggtitle("Variables assocaition with principal components")
+p_pc_associated <- plot_pc_associated(covariate_explained, x = "feature_factor") + title
+title           <- ggtitle("Variance explained by principal components")
+p_pc_variance   <- plot_pc_variance(pc_explained) + title
+# Patchwork
+p <- p_pc_associated / p_pc_variance + plot_layout(height = c(2, 1))
+# Save
+save_name <- file.path(path_to_save_location, "QC_pc_associated.pdf")
+width     <- ceiling((n_variables * n_pcs) * 0.1)
+height    <- ceiling((n_variables / 3)) * 3
+save_ggplot(p, save_name, width = width, height = height)
+# Print statement 
+cat("Check plot: 'QC_pc_associated.pdf' \n")
+cat("-------------------------------------------------------------------- \n")
+
+# Coordinates with variance per PC
+cat("Creating scatter plots for PCA. \n")
+# Coordinates
+pc_coords <- as_tibble(pca_results$x[, 1:n_pcs], rownames = "idx")
+pc_coords <- pivot_longer(
+  data      = pc_coords,
+  cols      = starts_with("PC"),
+  names_to  = "pc",
+  values_to = "coordinates"
+)
+pc_coords <- left_join(pc_coords, pc_explained, by = "pc")
+pc_coords <- left_join(pc_coords, meta_, by = "idx")
+
+# Visualise: Scatter plots principle components
+default_comb <- list(c("PC1", "PC2"))
+pc_coords    <- mutate(
+  pc_coords,
+  pc_label = paste0(pc, " (", round((pc_r2 * 100), 2), "%)")
+)
+# Loop over each variable
+p_list <- list()
+for (var in vars_pc){
+  dynamic_comb <- select_top_pc_combinations(covariate_explained, var, top_n = 3)
+  # Combine
+  final_combs <- c(default_comb, dynamic_comb)
+  unique_pcs  <- unique(unlist(final_combs))
+  # Filter coordinates
+  var_pc_coords <- filter(pc_coords, pc %in% unique_pcs)
+  p <- plot_pc_combinations(var_pc_coords, var, pc_pairs = final_combs)
+  # Append
+  p_list[[var]] <- p
 }
+# Patchwork
+max_col <- 3
+n_plots <- length(vars_pc)
+n_col   <- min(n_plots, max_col)
+n_row   <- ceiling(n_plots / n_col)
+p       <- wrap_plots(p_list, ncol = n_col)
+# Save
+save_name <- file.path(path_to_save_location, "QC_pc_scatter_plot.pdf")
+width     <- n_col * 4
+height    <- n_row * 3
+save_ggplot(p, save_name, width = width, height = height)
+cat("Check plot: 'QC_pc_scatter_plot.pdf' \n")
+cat("-------------------------------------------------------------------- \n")
+
+# Save dataframes
+if (setup$save_coordinates){
+  # Coordinates
+  save_name <- file.path(path_to_save_location, "Coordiantes_pca.csv")
+  fwrite(pc_coords, save_name)
+  # PC explained
+  save_name <- file.path(path_to_save_location, "Metavariables_associated.csv")
+  fwrite(covariate_explained, save_name)
+}
+
+# TSNE
+cat("Unsuperived clustering: TSNE. \n")
+set.seed(setup$seed)
+tsne_results <- Rtsne(trans_data, dims = 2, setup$perplexity)
+coordinates  <- data.frame(TSNE1 = tsne_results$Y[, 1], TSNE2 = tsne_results$Y[, 2])
+coordinates  <- bind_cols(coordinates, adata$obs)
+
+# Visualize: TSNE
+cat("Creating scatter plots for TSNE \n")
+# Plot loop
+p_list <- lapply(vars_pc, function(var) plot_clusters(coordinates, "TSNE1", "TSNE2", var, var))
+# Patchwork
+max_col <- 3
+n_plots <- length(vars_pc)
+n_col   <- min(n_plots, max_col)
+n_row   <- ceiling(n_plots / n_col)
+p       <- wrap_plots(p_list, ncol = n_col)
+# Save
+save_name <- file.path(path_to_save_location, "QC_tsne_scatter_plot.pdf")
+width     <- n_col * 3.5
+height    <- n_row * 3
+save_ggplot(p, save_name, width = width, height = height)
+cat("Check plot: 'QC_tsne_scatter_plot.pdf' \n")
+cat("-------------------------------------------------------------------- \n")
+
+
+# Save
+if (setup$save_coordinates){
+  save_name <- file.path(path_to_save_location, "Coordinates_tsne.csv")
+  fwrite(coordinates, save_name)
+}
+
+
 
 # # --- Variance across features
 # # Merge meta with expression

@@ -3,4 +3,6 @@ data_type: "Input_values"
 # Features
 filter_features: True
 percentile: 25
+# Bootstrap
+n_bootstraps: 1000
 

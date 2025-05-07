@@ -1,7 +1,11 @@
 data_type: RSEM
 covariate: age
+normalization: no
 filter_features: yes
 percentile: 25
+n_pcs: 20
+perplexity: 50
+save_coordinates: no
 visual_val: yes
 logFC_thr: 1
 class_0: Basal
@@ -13,6 +17,11 @@ ancestry_column: genetic_ancestry
 data_path: data/inputs/PanCanAtlas_BRCA_raw_RSEM_subtypeNAremoved.h5ad
 tech: transcriptomics
 output_directory: development_interactions
-normalization: limma_voom
-date: 2025-04-25 09:45:01
-id: CFE8F897-E
+normalization_method: limma_voom
+date: 2025-05-05 08:30:13
+id: 6DFF801F-1
+n_class_0_train_ancestry: 107
+n_class_1_train_ancestry: 629
+n_class_0_infer_ancestry: 16
+n_class_1_infer_ancestry: 42
+n_features: 11389

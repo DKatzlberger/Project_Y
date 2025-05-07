@@ -14,7 +14,7 @@ covariate: age
 output_directory: development_interactions
 # Features
 filter_features: True
-normalization: limma_voom
+normalization_method: limma_voom
 # Visualization
 visual_val: True
 

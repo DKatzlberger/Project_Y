@@ -26,9 +26,9 @@ theme_nature_fonts <- function(base_size = 5) {
 theme_small_legend <- function(...) {
   theme(
     legend.key.spacing = unit(0, "cm"),
-    legend.key.height = unit(0.2, "cm"),  
-    legend.key.width = unit(0.2, "cm"),
-    legend.margin = margin(0, 0, 0, 0),
+    legend.key.height  = unit(0.3, "cm"),  
+    legend.key.width   = unit(0.3, "cm"),
+    legend.margin      = margin(0, 0, 0, 0),
     ...
   )
 }
@@ -204,6 +204,7 @@ plot_density_of_samples <- function(data_matrix, n_samples = 12, x_axis_label) {
   theme_white_background() +
   theme_small_legend() +
   theme(
+    legend.position = "bottom",
     legend.title = element_blank()
   )
   
@@ -345,69 +346,69 @@ plot_variable_count <- function(data, var, point_size = 0.5) {
     facet = "Count"
   )
 
+  # Count unique values in the variable
+  n_levels <- n_distinct(data[[var]])
+
+  # Base plot
   p <- ggplot(
     data, 
     aes(
       x    = !!sym(var), 
       fill = !!sym(var)
-      )
-    ) +
-    geom_bar(
-      position = "dodge"
-    ) +
-    facet_grid(
-      cols = vars(facet)
-    ) +
+    )
+  ) +
+    geom_bar(position = "dodge") +
+    facet_grid(cols = vars(facet)) +
     labs(
       title = var,
       x     = NULL,
       y     = NULL,
       fill  = var
     ) +
-    theme_nature_fonts(
-      base_size = (point_size * 10)
-    ) +
+    theme_nature_fonts(base_size = (point_size * 10)) +
     theme_white_background() +
     theme_white_strip() +
     theme_small_legend() +
     theme(
       axis.text.x = element_text(angle = 60, hjust = 1)
     )
+
+  # Add legend columns if more than 8 levels
+  if (n_levels > 8) {
+    p <- p + guides(fill = guide_legend(ncol = 2))
+  }
 
   return(p)
 }
 
 plot_variable_proportion <- function(data, var, point_size = 0.5) {
 
-  # Add facet column
+  # Add facet column and dummy x
   data <- mutate(
     data,
     facet   = "Proportion",
     dummy_X = var
   )
 
+  # Count unique values in the variable
+  n_levels <- n_distinct(data[[var]])
+
+  # Base plot
   p <- ggplot(
     data, 
     aes(
       x    = dummy_X, 
       fill = !!sym(var)
-      )
-    ) +
-    geom_bar(
-      position = "fill"
-    ) +
-    facet_grid(
-      cols = vars(facet)
-    ) +
+    )
+  ) +
+    geom_bar(position = "fill") +
+    facet_grid(cols = vars(facet)) +
     labs(
-      title = var,
-      x     = NULL,
-      y     = NULL, 
-      fill  = var
+      x    = NULL,
+      y    = NULL, 
+      fill = var
     ) +
-    theme_nature_fonts(
-      base_size = (point_size * 10)
-    ) +
+    theme_nature_fonts(base_size = (point_size * 10)) +
     theme_white_background() +
     theme_white_strip() +
     theme_small_legend() +
@@ -415,8 +416,14 @@ plot_variable_proportion <- function(data, var, point_size = 0.5) {
       axis.text.x = element_text(angle = 60, hjust = 1)
     )
 
+  # Add legend columns if more than 8 levels
+  if (n_levels > 8) {
+    p <- p + guides(fill = guide_legend(ncol = 2))
+  }
+
   return(p)
 }
+
 
 plot_variable_hist <- function(data, var, point_size = 0.5){
 
@@ -476,62 +483,135 @@ plot_clusters <- function(data, x, y, color, title, point_size = 0.5){
     base_size = (point_size * 10)
   ) +
   theme_white_background() +
-  theme(
-    legend.position = "none"
-  )
+  theme_small_legend()
 
   return(p)
 }
 
-plot_r2_pval <- function(r2, pval, x, title, point_size = 0.5){
+plot_pc_associated <- function(data, x, point_size = 0.5){
 
-  # Prepare sig p-values
-  sig_p <- pval |>
-    filter(values < 0.05) |>
-    left_join(r2, by = c(x, "variable"), suffix = c("_p", "_r2")) |>
-    mutate(
-      label = "*",
-      y_pos = values_r2 + 0.02
-    )
-  
   p <- ggplot(
-    r2,
-    aes(
-      x = !!sym(x),
-      y = values
-    ) 
+  data = data,
+  aes(
+    x = !!sym(x),
+    y = r2
+    )
   ) +
   geom_col() +
   geom_text(
-    data = sig_p,
     aes(
-      y     = y_pos, 
-      label = label
+      label = sig_feature
     ),
-    size = point_size * 4
+    vjust = -0.1,  
+    size = 3
   ) +
-  geom_text(
-    data = pval,
-    aes(
-      label = signif(values, 2), 
-      y     = r2$values + 0.01
-      ),
-    size = point_size * 2
+  facet_wrap(
+    ~ variable,
+    ncol = 3  
   ) +
-  labs(
-    title = title,
-    x = "Principal Component",
-    y = "R2"
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.1))
   ) + 
+  labs(
+    x = "Principal Component",
+    y = "Variance explained (R2)"
+  ) +
   theme_nature_fonts(
     base_size = (point_size * 10)
   ) +
   theme_white_background() +
   theme_white_strip() +
   theme_small_legend() 
-  
+
   return(p)
 }
+
+plot_pc_variance <- function(data, point_size = 0.5){
+
+  p  <- ggplot(
+  data = data, 
+  aes(
+    x = pc, 
+    y = pc_r2
+    )
+  ) + 
+  geom_col() +
+  labs(
+    x = "Principal Component",
+    y = "Variance explained (R2)"
+  ) +
+  theme_nature_fonts(
+    base_size = (point_size * 10)
+  ) +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() 
+
+  return(p)
+}
+
+plot_pc_combinations <- function(data, color_by, pc_pairs, point_size = 0.5) {
+  # Create a map from PC to label
+  pc_label_map <- data %>%
+    select(pc, pc_label) %>%
+    distinct() %>%
+    deframe()
+
+  # Pivot to wide format
+  coords_wide <- data %>%
+    select(idx, pc, coordinates) %>%
+    pivot_wider(names_from = pc, values_from = coordinates)
+
+  # Add metadata
+  meta <- data %>%
+    select(idx, all_of(color_by)) %>%
+    distinct()
+
+  coords_wide <- left_join(coords_wide, meta, by = "idx")
+
+  # Create individual plots
+  plots <- map(pc_pairs, function(pair) {
+    pc_x <- pair[1]
+    pc_y <- pair[2]
+
+    label_x <- pc_label_map[pc_x]
+    label_y <- pc_label_map[pc_y]
+
+    df <- coords_wide %>%
+      select(x = all_of(pc_x), y = all_of(pc_y), all_of(color_by))
+
+    ggplot(
+      df, 
+      aes(
+        x = x, 
+        y = y, 
+        color = .data[[color_by]]
+        )
+      ) +
+      geom_point(
+        size = point_size
+      ) +
+      labs(
+        title = color_by,
+        x     = label_x,
+        y     = label_y,
+        color = color_by
+      ) +
+      theme_nature_fonts(
+        base_size = (point_size * 10)
+      ) +
+      theme_white_background() +
+      theme_white_strip() +
+      theme_small_legend()
+    }
+  )
+
+  # Combine plots
+  combined_plot <- wrap_plots(plots, ncol = 2) + plot_layout(guides = "collect") & theme(legend.position = "right")
+
+  return(combined_plot)
+}
+
 
 # INTERACTIONS
 # Volcano plot
@@ -797,8 +877,8 @@ interaction_heatmap <- function(expression, output_column, ancestry_column, path
   
   # Expression matrix
   expression_matrix <- expression |>
-    dplyr::select(Feature, patient_id, zscore) |>
-    tidyr::spread(key = patient_id, value = zscore) |>
+    dplyr::select(Feature, idx, zscore) |>
+    tidyr::spread(key = idx, value = zscore) |>
     tibble::column_to_rownames("Feature") |>
     as.matrix()
 
@@ -817,23 +897,12 @@ interaction_heatmap <- function(expression, output_column, ancestry_column, path
   colors        <- c(class_0_color, class_1_color)
   # Vector
   condition_colors <- setNames(colors, comparison)
-
-  
-  # Ancestry colors
-  genetic_ancestry_colors <- c(
-    "admix" = "#ff4d4d", 
-    "afr"   = "#ff9900", 
-    "amr"   = "#33cc33",
-    "eur"   = "#3399ff", 
-    "eas"   = "#6a27a1", 
-    "sas"   = "#ffcc00"
-  )
   
   # Annotation
   annotations <- expression |>
-    dplyr::select(patient_id, dplyr::all_of(c(output_column, ancestry_column))) |>
+    dplyr::select(idx, dplyr::all_of(c(output_column, ancestry_column))) |>
     dplyr::distinct() |>
-    dplyr::arrange(match(patient_id, colnames(expression))) |>
+    dplyr::arrange(match(idx, colnames(expression))) |>
     dplyr::mutate(
       group = paste(.data[[ancestry_column]], .data[[output_column]], sep = "."),
       group = factor(
@@ -871,7 +940,7 @@ interaction_heatmap <- function(expression, output_column, ancestry_column, path
     title = "Ancestry", 
     at = c(toupper(train_ancestry), toupper(infer_ancestry)), 
     legend_gp = grid::gpar(
-      fill = c(genetic_ancestry_colors[train_ancestry], genetic_ancestry_colors[infer_ancestry])
+      fill = c("#3399ff", "#ff9900")
     ),
     labels_gp = grid::gpar(fontsize = 5),
     title_gp = grid::gpar(fontsize = 5, fontface = "plain"),
@@ -951,11 +1020,11 @@ interaction_heatmap <- function(expression, output_column, ancestry_column, path
   # Draw ancestry group background blocks
   group_block_anno(
     1:2, "Ancestry", 
-    gp = grid::gpar(fill = genetic_ancestry_colors[train_ancestry], col = NA)
+    gp = grid::gpar(fill = "#3399ff", col = NA)
   )
   group_block_anno(
     3:4, "Ancestry", 
-    gp = grid::gpar(fill = genetic_ancestry_colors[infer_ancestry], col = NA)
+    gp = grid::gpar(fill = "#ff9900", col = NA)
   )
   
   invisible(grDevices::dev.off())

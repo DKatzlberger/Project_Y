@@ -8,8 +8,10 @@ suppressPackageStartupMessages(
     # DGE workflow and functional analysis
     library(edgeR)
     library(fgsea)
+    library(Rtsne)
     # Parallelization
     library(parallel)
+    library(furrr)
     # Visualization
     library(patchwork)
     library(ggrepel)
@@ -42,7 +44,7 @@ if (length(args) > 0) {
   # Dev settings if no command-line argument provided
   cat("Running interactive mode for development. \n")
   # "example_settings_interactions.yaml"
-  YAML_FILE <- "data/downloads/GEO/Population-specific Mutation Patterns in Breast Tumors from African American, European American, and Kenyan Patients/interaction_settings.yaml"
+  YAML_FILE <- "data/downloads/PhyloFrame/THCA/settings_interactions_M0_MX_Male_Female.yaml"
   is_yaml_file(YAML_FILE)
 }
 
@@ -74,7 +76,9 @@ required_settings <- c(
   "data_path", 
   "tech", 
   # Output
-  "output_directory"
+  "output_directory",
+  # Features
+  "normalization_method"
 )
 check_settings(setup, required_settings)
 # Add info to settings
@@ -90,6 +94,13 @@ if (!dir.exists(path_to_save_location)) {
 save_name <- file.path(path_to_save_location, "Settings.yaml")
 write_yaml(setup, save_name)
 
+# Interactions analysis
+# Message
+cat(sprintf("New analysis with id: %s; created: %s \n", setup$id, setup$date))
+cat(sprintf("Save location: %s \n", path_to_save_location))
+cat("-------------------------------------------------------------------- \n")
+
+# --- Possible function start ---#
 # --- Data
 output_column     <- setup$output_column
 class_0           <- setup$class_0
@@ -100,12 +111,14 @@ infer_ancestry    <- setup$infer_ancestry
 covariate         <- setup$covariate
 
 # Load data
+cat("Loading data... \n")
 data_path  <- setup$data_path
 is_h5ad_file(data_path)
 adata      <- read_h5ad(data_path)
 # Check if columns exist in data
 required_columns <- c(output_column, ancestry_column, covariate)
 check_columns(adata$obs, required_columns)
+cat("-------------------------------------------------------------------- \n")
 
 # Define classification 
 comparison <- c(class_0, class_1)
@@ -120,12 +133,6 @@ check_values(adata$obs, ancestry_column, ancestries)
 adata      <- adata[adata$obs[[ancestry_column]] %in% ancestries]
 # Factorize
 adata$obs[[ancestry_column]] <- factor(adata$obs[[ancestry_column]], levels = ancestries)
-
-# Interactions analysis
-# Message
-cat(sprintf("New analysis with id: %s; created: %s \n", setup$id, setup$date))
-cat(sprintf("Save location: %s \n", path_to_save_location))
-cat("-------------------------------------------------------------------- \n")
 
 # Visualize: Sample sizes
 save_name     <- file.path(path_to_save_location, "QC_sample_sizes.pdf")
@@ -179,6 +186,7 @@ adata$obs["group"] <- factor(
     paste(infer_ancestry, class_1, sep = ".")     
   )
 )
+
 # Create formula 
 if (!is.null(covariate)){
   # Matrix with covariate
@@ -190,13 +198,30 @@ if (!is.null(covariate)){
 }
 
 # Matrix
-interaction_design <- model.matrix(formula, data = adata$obs)
+design <- model.matrix(formula, data = adata$obs)
 # Human and machine readable terms
-colnames(interaction_design) <- gsub("group", "", colnames(interaction_design))
-colnames(interaction_design) <- gsub("-", "_", colnames(interaction_design))
+if (!is.null(covariate)){
+  # Change coefficient names
+  colnames(design)[1:4] <- gsub("group", "", colnames(design)[1:4])
+  colnames(design)[1:4] <- gsub("-", "_", colnames(design)[1:4])
+  # Change covariate names
+  ncol_design <- ncol(design)
+  colnames(design)[5:ncol_design] <- make.names(colnames(design)[5:ncol_design])
+} else{
+  # Change coefficient names
+  colnames(design) <- gsub("group", "", colnames(design))
+  colnames(design) <- gsub("-", "_", colnames(design))
+}
+
 # Print statement
-cat(sprintf("Formula:       %s\n", deparse(formula)))
-cat(sprintf("Coefficients:  %s\n", paste(colnames(interaction_design), collapse = paste0(" "))))
+if (!is.null(covariate)){
+  cat(sprintf("Formula:       %s\n", paste("~0 + group + covariate")))
+  cat(sprintf("Groups:        %s\n", paste(colnames(design)[1:4], collapse = paste0(" "))))
+  cat(sprintf("Covariates:    %s\n", paste(covariate, collapse = paste0(" "))))
+} else{
+  cat(sprintf("Formula:       %s\n", paste("~0 + group")))
+  cat(sprintf("Groups:        %s\n", paste(colnames(design)[1:4], collapse = paste0(" "))))
+}
 cat("-------------------------------------------------------------------- \n")
 
 # --- Filter features 
@@ -204,20 +229,28 @@ cat("-------------------------------------------------------------------- \n")
 tech            <- setup$tech
 data_type       <- setup$data_type
 filter_features <- setup$filter_features
+normalization   <- setup$normalization
 # Strength of filter
 percentile <- setup$percentile
 
 # Name of QC plot
 save_name <- file.path(path_to_save_location, "QC_mean_variance_trend.pdf")
+# Titles
+title_before <- ggtitle("Before feature filtering")
+title_after  <- ggtitle("After feature filtering")
 if (filter_features & tech == "transcriptomics"){
 
   # Print statement
-  cat(sprintf("Filtering features (Technology: %s). \n", tech))
-  cat(sprintf("By count: Threshold %s percentile. \n", percentile))
+  cat(sprintf("Filtering features (technology: %s). \n", tech))
+  cat(sprintf("By count:    Threshold %s percentile. \n", percentile))
 
   # Transform to logCPM
-  norm_factors <- calculate_tmm_norm_factors(adata$X)
-  cpm_data     <- cpm(adata$X, norm_factors = norm_factors, log = TRUE)
+  if (normalization){
+    norm_factors <- calculate_tmm_norm_factors(adata$X)
+    cpm_data     <- cpm(adata$X, norm_factors = norm_factors, log = TRUE)
+  } else{
+    cpm_data       <- adata$X
+  }
 
   # Filter by signal/count
   min_counts        <- signal_by_percentile(cpm_data, percentile)
@@ -229,8 +262,12 @@ if (filter_features & tech == "transcriptomics"){
   cat(sprintf("By variance: Threshold %s percentile. \n", percentile))
 
   # Transform to logCPM
-  norm_factors <- calculate_tmm_norm_factors(filtered_data$X)
-  cpm_data     <- cpm(filtered_data$X, norm_factors = norm_factors, log = TRUE)
+  if (normalization){
+    norm_factors <- calculate_tmm_norm_factors(filtered_data$X)
+    cpm_data     <- cpm(filtered_data$X, norm_factors = norm_factors, log = TRUE)
+  } else{
+    cpm_data     <- filtered_data$X
+  }
 
   # Filter by variance
   min_variance      <- variance_by_percentile(cpm_data, percentile)
@@ -245,8 +282,8 @@ if (filter_features & tech == "transcriptomics"){
   # Axis
   x_axis <- paste0("log2(", data_type, " + 0.5)")
   # Plot
-  p_before <- plot_mean_variance_trend(data_before, x_axis)
-  p_after  <- plot_mean_variance_trend(data_after, x_axis)
+  p_before <- plot_mean_variance_trend(data_before, x_axis) + title_before
+  p_after  <- plot_mean_variance_trend(data_after, x_axis) + title_after
   # Combine
   p <- p_before / p_after
   # Save
@@ -255,8 +292,12 @@ if (filter_features & tech == "transcriptomics"){
 } else if (filter_features & tech == "methylation") {
 
   # Transform to mvalues
-  mvals <- beta_to_mvalue(adata$X)
-  
+  if (normalization){
+    mvals <- beta_to_mvalue(adata$X)
+  } else{
+    mvals <- adata$X
+  }
+
   # Filter by variance
   min_variance       <- variance_by_percentile(mvals, percentile)
   filtered_features  <- filter_by_variance(mvals, var_threshold = min_variance)
@@ -270,8 +311,8 @@ if (filter_features & tech == "transcriptomics"){
   # Axis
   x_axis <- data_type
   # Plot
-  p_before <- plot_mean_variance_trend(data_before, x_axis) 
-  p_after  <- plot_mean_variance_trend(data_after, x_axis)
+  p_before <- plot_mean_variance_trend(data_before, x_axis) + title_before
+  p_after  <- plot_mean_variance_trend(data_after, x_axis) + title_after
   # Combine
   p <- p_before / p_after
   # Save
@@ -288,7 +329,7 @@ if (filter_features & tech == "transcriptomics"){
   # Axis
   x_axis <- data_type
   # Plot
-  p_before <- plot_mean_variance_trend(data_before, x_axis) 
+  p_before <- plot_mean_variance_trend(data_before, x_axis) + title_before
   # Save
   save_ggplot(p_before, save_name, width = 6, height = 4)
 
@@ -306,7 +347,6 @@ if (filter_features & tech == "transcriptomics"){
   p_before <- plot_mean_variance_trend(data_before, x_axis)
   # Save
   save_ggplot(p_before, save_name, width = 6, height = 4)
-
 }
 # Save feature 
 save_name <- file.path(path_to_save_location, "Features.yaml")
@@ -316,51 +356,252 @@ setup$n_features  <- ncol(filtered_data)
 # Message
 if (filter_features){
   cat(sprintf("Number of features after filtering: %s (%s). \n", ncol(filtered_data), ncol(adata)))
-  cat("Check plot: 'QC_mean_variance_trend.pdf' for visualization. \n")
+  cat("Check plot: 'QC_mean_variance_trend.pdf' \n")
   cat("-------------------------------------------------------------------- \n")
 }
 
 # ---- Normalization/Transformation
+if (normalization){
+  # Settings
+  tech                 <- setup$tech
+  normalization_setup  <- setup$normalization_method
+  normalization_method <- normalization_methods[[tech]][[normalization_setup]]$"function"
+  values_output_name   <- normalization_methods[[tech]][[normalization_setup]]$"output_name"
+  # Print statement
+  cat(sprintf("Normalizing features (technology: %s). \n", tech))
+
+  # Transpose (rows = Genes, cols = Samples)
+  data_t    <- t(filtered_data$X)
+  data_norm <- normalization_method(data_t, design)
+  # Extract normalized matrix (used for plotting)
+  data_norm_matrix <- if (is.list(data_norm) && !is.null(data_norm$E)) data_norm$E else data_norm
+
+  # Visualize: Normalization
+  title_before <- ggtitle("Before normaliaztion")
+  title_after  <- ggtitle("After normaliaztion")
+  # Density per sample
+  p_before <- plot_density_of_samples(filtered_data$X, x_axis_label = setup$data_type) + title_before
+  p_after  <- plot_density_of_samples(t(data_norm_matrix), x_axis_label = values_output_name) + title_after
+  # Combine
+  p <- p_before + p_after + plot_layout(guides = "collect") & theme(legend.position = "bottom")
+  # Save
+  p_name <- file.path(path_to_save_location, "QC_density_normalized_values.pdf")
+  save_ggplot(p, p_name, width = 3, height = 3)
+
+  # Q-Q plots per gene
+  p_before <- plot_qq_of_genes(filtered_data$X, n_features = 5) + title_before
+  p_after  <- plot_qq_of_genes(t(data_norm_matrix), n_features = 5) + title_after
+  # Combine
+  p <- p_before / p_after 
+  # Save
+  save_name <- file.path(path_to_save_location, "QC_qq_normalized_values.pdf")
+  save_ggplot(p, save_name, width = 6, height = 4)
+
+  # Print statement 
+  cat("Check plot: 'QC_density_normalized_values.pdf' and 'QC_qq_normalized_values.pdf' \n")
+  cat("-------------------------------------------------------------------- \n")
+} else{
+  cat("No normalization of features. \n")
+  values_output_name <- setup$data_type
+  # Transpose (rows = Genes, cols = Samples)
+  data_t    <- t(filtered_data$X)
+  data_norm <- data_t
+  # Extract normalized matrix (used for plotting)
+  data_norm_matrix <- if (is.list(data_norm) && !is.null(data_norm$E)) data_norm$E else data_norm
+
+  # Density per sample
+  p <- plot_density_of_samples(filtered_data$X, x_axis_label = setup$data_type)
+  # Save
+  p_name <- file.path(path_to_save_location, "QC_density_input_values.pdf")
+  save_ggplot(p, p_name, width = 3, height = 3)
+
+  # Q-Q plots per gene
+  p <- plot_qq_of_genes(filtered_data$X, n_features = 5)
+  # Save
+  save_name <- file.path(path_to_save_location, "QC_qq_input_values.pdf")
+  save_ggplot(p, save_name, width = 6, height = 2)
+
+  # Print statement 
+  cat("Check plot: 'QC_density_input_values.pdf' and 'QC_qq_input_values.pdf' \n")
+  cat("-------------------------------------------------------------------- \n")
+}
+# --- Unsupervised clustering
+# PCA
+cat("Unsuperived clustering: PCA. \n")
 # Settings
-tech                 <- setup$tech
-normalization        <- setup$normalization
-normalization_method <- normalization_methods[[tech]][[normalization]]$"function"
-values_output_name   <- normalization_methods[[tech]][[normalization]]$"output_name"
-# Print statement
-cat(sprintf("Normalizing features (Technology: %s). \n", tech))
+n_pcs    <- setup$n_pcs
+vars_pc  <- c(output_column, ancestry_column, covariate)
 
-# Transpose (rows = Genes, cols = Samples)
-data_t    <- t(filtered_data$X)
-data_norm <- normalization_method(data_t, interaction_design)
-# Extract normalized matrix (used for plotting)
-data_norm_matrix <- if (is.list(data_norm) && !is.null(data_norm$E)) data_norm$E else data_norm
+# Combuting
+pca_results   <- prcomp(t(data_norm_matrix), center = TRUE)
+pc_explained  <- (pca_results$sdev)^2 / sum((pca_results$sdev)^2)
+pc_explained  <- data.frame(
+  pc    = paste0("PC", seq_along(pc_explained)),
+  pc_r2 = pc_explained
+)
+pc_explained <- mutate(
+  pc_explained,
+  pc_numeric = as.numeric(gsub("PC", "", pc)),
+  pc         = fct_reorder(pc, pc_numeric),
+)
+pc_explained <- pc_explained[1:n_pcs, ]
 
-# Visualize: Normalization
-# Density per sample
-p_before <- plot_density_of_samples(filtered_data$X, x_axis_label = setup$data_type) 
-p_after  <- plot_density_of_samples(t(data_norm_matrix), x_axis_label = values_output_name)
-# Combine
-p <- p_before + p_after + plot_layout(guides = "collect") & theme(legend.position = "bottom")
+# Covriate associated with PCs
+meta_ <- as_tibble(adata$obs, rownames = "idx")
+meta_ <- select(meta_, idx, all_of(vars_pc))
+data_ <- as_tibble(pca_results$x[, 1:n_pcs], rownames = "idx")
+# Join
+pc_data <- inner_join(meta_, data_, by = "idx")
+pc_data <- pivot_longer(
+  data      = pc_data,
+  cols      = -c(idx, all_of(vars_pc)),
+  names_to  = "pc",
+  values_to = "value"
+)
+# Lm (explain variance)
+cat(sprintf("Associating %s with %s principal components. \n", toString(vars_pc), n_pcs))
+# Settings
+n_variables <- length(vars_pc)
+batch_size  <- 10000
+# Calculate number of cores
+request_cores <- n_variables * ceiling(n_pcs / batch_size)
+# Validate availabe cores
+total_cores <- parallel::detectCores()
+if (total_cores <= request_cores){
+  # Save one core
+  available_cores <- parallel::detectCores() - 1
+} else {
+  available_cores <- request_cores
+}
+
+# Function call
+covariate_explained <- LM_explain(
+  data       = pc_data, 
+  variables  = vars_pc, 
+  feature    = "pc",
+  response   = "value",
+  batch_size = batch_size,
+  n_cores    = available_cores
+)
+# Add numeric feature column
+covariate_explained <- mutate(
+  covariate_explained, 
+  feature_numeric = as.numeric(gsub("PC", "", feature)),
+  feature_factor  = as.factor(feature_numeric),
+  feature         = fct_reorder(feature, feature_numeric),
+  sig_feature     = ifelse(p_value < 0.05, "*", "")
+)
+
+# --- Visualize: Covariates associated with PCs
+title           <- ggtitle("Variables assocaition with principal components")
+p_pc_associated <- plot_pc_associated(covariate_explained, x = "feature_factor") + title
+title           <- ggtitle("Variance explained by principal components")
+p_pc_variance   <- plot_pc_variance(pc_explained) + title
+# Patchwork
+p <- p_pc_associated / p_pc_variance + plot_layout(height = c(2, 1))
 # Save
-p_name <- file.path(path_to_save_location, "QC_density_normalized_values.pdf")
-save_ggplot(p, p_name, width = 3, height = 3)
-
-# Q-Q plots per gene
-p_before <- plot_qq_of_genes(filtered_data$X, n_features = 5)
-p_after  <- plot_qq_of_genes(t(data_norm_matrix), n_features = 5)
-# Combine
-p <- p_before / p_after 
-# Save
-save_name <- file.path(path_to_save_location, "QC_qq_normalized_values.pdf")
-save_ggplot(p, save_name, width = 6, height = 4)
-
+save_name <- file.path(path_to_save_location, "QC_pc_associated.pdf")
+width     <- ceiling((n_variables * n_pcs) * 0.11)
+height    <- ceiling((n_variables / 3)) * 3
+save_ggplot(p, save_name, width = width, height = height)
 # Print statement 
-cat("Check plot: 'QC_density_normalized_values.pdf' and 'QC_qq_normalized_values.pdf' for visualization. \n")
+cat("Check plot: 'QC_pc_associated.pdf' \n")
+
+
+# Coordinates with variance per PC
+cat("Creating scatter plots. \n")
+# Coordinates
+pc_coords <- as_tibble(pca_results$x[, 1:n_pcs], rownames = "idx")
+pc_coords <- pivot_longer(
+  data      = pc_coords,
+  cols      = starts_with("PC"),
+  names_to  = "pc",
+  values_to = "coordinates"
+)
+pc_coords <- left_join(pc_coords, pc_explained, by = "pc")
+pc_coords <- left_join(pc_coords, meta_, by = "idx")
+
+# Visualise: Scatter plots principle components
+default_comb <- list(c("PC1", "PC2"))
+pc_coords    <- mutate(
+  pc_coords,
+  pc_label = paste0(pc, " (", round((pc_r2 * 100), 2), "%)")
+)
+# Loop over each variable
+p_list <- list()
+for (var in vars_pc){
+  dynamic_comb <- select_top_pc_combinations(covariate_explained, var, top_n = 3)
+  # Combine
+  final_combs <- c(default_comb, dynamic_comb)
+  unique_pcs  <- unique(unlist(final_combs))
+  # Filter coordinates
+  var_pc_coords <- filter(pc_coords, pc %in% unique_pcs)
+  p <- plot_pc_combinations(var_pc_coords, var, pc_pairs = final_combs)
+  # Append
+  p_list[[var]] <- p
+}
+# Patchwork
+max_col <- 3
+n_plots <- length(vars_pc)
+n_col   <- min(n_plots, max_col)
+n_row   <- ceiling(n_plots / n_col)
+p       <- wrap_plots(p_list, ncol = n_col)
+# Save
+save_name <- file.path(path_to_save_location, "QC_pc_scatter_plot.pdf")
+width     <- n_col * 3
+height    <- n_row * 2.5
+save_ggplot(p, save_name, width = width, height = height)
+# Print statement 
+cat("Check plot: 'QC_pc_scatter_plot.pdf' \n")
 cat("-------------------------------------------------------------------- \n")
 
+# Save dataframes
+if (setup$save_coordinates){
+  # Coordinates
+  save_name <- file.path(path_to_save_location, "Coordiantes_pca.csv")
+  fwrite(pc_coords, save_name)
+  # PC explained
+  save_name <- file.path(path_to_save_location, "Metavariables_associated.csv")
+  fwrite(covariate_explained, save_name)
+}
+
+# TSNE
+cat("Unsuperived clustering: TSNE. \n")
+set.seed(setup$seed)
+tsne_results <- Rtsne(t(data_norm_matrix), dims = 2, setup$perplexity)
+coordinates  <- data.frame(TSNE1 = tsne_results$Y[, 1], TSNE2 = tsne_results$Y[, 2])
+coordinates  <- bind_cols(coordinates, adata$obs)
+
+# Visualize: TSNE
+cat("Creating scatter plots for TSNE \n")
+# Plot loop
+p_list <- lapply(vars_pc, function(var) plot_clusters(coordinates, "TSNE1", "TSNE2", var, var))
+# Patchwork
+max_col <- 3
+n_plots <- length(vars_pc)
+n_col   <- min(n_plots, max_col)
+n_row   <- ceiling(n_plots / n_col)
+p       <- wrap_plots(p_list, ncol = n_col)
+# Save
+save_name <- file.path(path_to_save_location, "QC_tsne_scatter_plot.pdf")
+width     <- n_col * 3.5
+height    <- n_row * 3
+save_ggplot(p, save_name, width = width, height = height)
+cat("Check plot: 'QC_tsne_scatter_plot.pdf' \n")
+cat("-------------------------------------------------------------------- \n")
+
+# Save
+if (setup$save_coordinates){
+  save_name <- file.path(path_to_save_location, "Coordinates_tsne.csv")
+  fwrite(coordinates, save_name)
+}
+
+
+# --- Differential gene expression
+cat("Differential gene expression analysis. \n")
 # --- Means model
 # Fit the model (means model)
-limma_fit      <- lmFit(data_norm, design = interaction_design)
+limma_fit      <- lmFit(data_norm, design = design)
 limma_fit      <- eBayes(limma_fit)
 mean_model_res <- extract_results(limma_fit)
 
@@ -369,7 +610,6 @@ save_name <- file.path(path_to_save_location, "Limma_means.csv")
 fwrite(mean_model_res, save_name)
 cat("Fit means model. \n")
 cat("Check results: 'Limma_means.csv'. \n")
-cat("-------------------------------------------------------------------- \n")
 
 # --- Contrast 
 # Terms
@@ -382,7 +622,7 @@ contrast_terms <- list(
 )
 
 # Calculations
-cols <- colnames(interaction_design)
+cols <- colnames(design)
 contrast_calculations <- list(
   baseline_1      = glue("{cols[1]} - {cols[3]}"),
   baseline_2      = glue("{cols[2]} - {cols[4]}"),
@@ -405,7 +645,7 @@ print(contrast_table, right = FALSE, row.names = FALSE)
 # Create contrast matrix
 contrast_matrix <- makeContrasts(
   contrasts = contrast_calculations,
-  levels    = interaction_design
+  levels    = design
 )
 colnames(contrast_matrix) <- contrast_terms
 
@@ -518,7 +758,8 @@ if (setup$visual_val){
     logFC_thr  = setup$logFC_thr,
     facet_cols = c(ancestry_column, output_column),
     point_size = 1
-  )
+  ) + 
+  ggtitle("Interaction")
   # Save
   save_name <- file.path(path_to_save_location, "Interaction_volcano.pdf")
   save_ggplot(p, save_name, width = 6, height = 4)
@@ -543,13 +784,18 @@ if (setup$visual_val){
   if (length(sig_features) != 0){
     
     # Number of features to visualize
-    n_sig_features <- 10
+    if (length(sig_features) > 10){
+      n_sig_features <- 10
+    } else{
+      n_sig_features <- length(sig_features)
+    }
+
     exp_list       <- list()
     for(feature in sig_features[1:n_sig_features]){
       # Meta data for each feature
       exp_list[[feature]] <- adata$obs |>
         mutate(zscore = scale(data_norm_matrix[feature,])) |>
-        rownames_to_column("patient_id") |>
+        rownames_to_column("idx") |>
         remove_rownames()
     }
     # Features with normalised expression

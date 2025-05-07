@@ -114,30 +114,6 @@ print_merge_log <- function(log) {
 }
 
 
-# print_merge_log <- function(log) {
-#   if (length(log$overrides) > 0) {
-#     cat("[Settings] Overriding default:\n")
-#     for (entry in log$overrides) {
-#       cat(sprintf("    %-*s: %-15s -> %-15s \n",
-#                   entry$name,
-#                   deparse(entry$from),
-#                   deparse(entry$to)))
-#     }
-#     cat("\n")
-#   }
-  
-#   if (length(log$additions) > 0) {
-#     cat("[Settings] User specific:\n")
-#     for (entry in log$additions) {
-#       cat(sprintf("    %s: %-15s \n",
-#                   entry$name,
-#                   deparse(entry$value)))
-#     }
-#     cat("\n")
-#   }
-# }
-
-
 # Check if settings file contain the required settings
 check_settings <- function(setup, required_settings) {
   # Check if they're in the setup
@@ -163,7 +139,7 @@ check_values <- function(data, column, values) {
   # Check if the values exist in the specified column
   missing_values <- setdiff(values, data[[column]])
   if (length(missing_values) > 0) {
-    stop(sprintf("Column '%s' is missing the values: %s", column, paste(missing_values, collapse = ", ")))
+    stop(sprintf("[Check values] Column '%s' is missing the values: %s. Maybe you specified wrong 'output_column'.", column, paste(missing_values, collapse = ", ")))
   }
 }
 
@@ -526,60 +502,78 @@ stratified_subset <- function(data, strata, output_column, seed){
 }
 
 # Bootstrap
-perform_bootstrap <- function(data, formula, normalization_method, n_iterations = 10) {
-  # Create a vector to store the bootstrap results
-  bootstrap_results_list <- list()
+perform_bootstrap_parallel <- function(
+  expression_matrix, 
+  metadata, 
+  formula, 
+  normalization_method,
+  n_iterations = 1000,
+  n_cpus       = parallel::detectCores() - 1
+) {
+  stopifnot(all(rownames(metadata) == rownames(expression_matrix)))
 
-  # Perform the bootstrap procedure
-  for (i in 1:n_iterations) {
-    # Sample with replacement 
-    boot_idx  <- sample(rownames(data), size = nrow(data), replace = TRUE)
-    boot_data <- data[boot_idx, ]
-    
-    # Make rownames unique
-    py_run_string("import warnings")
-    py_run_string("warnings.filterwarnings('ignore', message='Observation names are not unique')")
-    boot_data$obs_names_make_unique()
+  # Set parallel plan
+  future::plan(future::multisession, workers = n_cpus)
+  cat(sprintf("[Bootstrapping] Utilizing %s cores, performing %s bootstraps. \n", n_cpus, n_iterations))
 
-    # Custom statistical function
-    # 1. Model matrix
-    boot_design <- model.matrix(formula, data = boot_data$obs)
-    colnames(boot_design) <- gsub("group", "", colnames(boot_design))
-    colnames(boot_design) <- gsub("-", "_", colnames(boot_design))
+  # Timing
+  start_time <- Sys.time()
+  bootstrap_results_list <- furrr::future_map(
+    1:n_iterations,
+    .options = furrr::furrr_options(seed = TRUE),
+    function(i) {
+      set.seed(i)
 
-    # 2. Normalization
-    boot_data_t <- t(boot_data$X)
-    boot_norm  <- normalization_method(boot_data_t, boot_design)
+      result <- tryCatch({
+        # Bootstrap sample
+        sampled_idx <- sample(1:nrow(expression_matrix), size = nrow(expression_matrix), replace = TRUE)
+        boot_expr   <- expression_matrix[sampled_idx, , drop = FALSE]
+        boot_meta   <- metadata[sampled_idx, , drop = FALSE]
 
-    # 3. Means model
-    limma_fit      <- lmFit(boot_norm, design = boot_design)
-    limma_fit      <- eBayes(limma_fit)
+        # Make sample names unique (otherwise limma complains)
+        rownames(boot_expr) <- paste0("Sample_", i, "_", seq_len(nrow(boot_expr)))
+        rownames(boot_meta) <- rownames(boot_expr)
 
-    # 4. Contrast calculations
-    cols                  <- colnames(boot_design)
-    contrast_calculations <- glue("{cols[1]} - {cols[2]}")
-    
-    # Create contrast matrix
-    contrast_matrix <- makeContrasts(
-      contrasts = contrast_calculations,
-      levels    = boot_design
-    )
+        # Design matrix
+        boot_design <- model.matrix(formula, data = boot_meta)
+        colnames(boot_design) <- gsub("group", "", colnames(boot_design))
+        colnames(boot_design) <- gsub("-", "_", colnames(boot_design))
 
-    # 5. Fit contrast
-    limma_fit_contrast <- contrasts.fit(limma_fit, contrast_matrix)
-    limma_fit_contrast <- eBayes(limma_fit_contrast)
-    train_contrast_res <- extract_results(limma_fit_contrast)
+        # Normalize
+        boot_norm <- normalization_method(t(boot_expr), boot_design)
 
-    # 6. Results
-    train_contrast_res$bootstrap <- i
-    
-    # Store the results in the list
-    bootstrap_results_list[[i]] <- train_contrast_res
-  }
+        # Linear model
+        fit <- limma::lmFit(boot_norm, design = boot_design)
+        fit <- limma::eBayes(fit)
 
-  # Combine all bootstrap results into a data frame
-  bootstrap_results <- bind_rows(bootstrap_results_list)
-  
+        # Contrast
+        cols                  <- colnames(boot_design)
+        contrast_calculations <- glue("{cols[1]} - {cols[2]}")
+        contrast_matrix  <- limma::makeContrasts(contrasts = contrast_calculations, levels = boot_design)
+
+        fit2 <- limma::contrasts.fit(fit, contrast_matrix)
+        fit2 <- limma::eBayes(fit2)
+        res  <- extract_results(fit2)
+
+        res$bootstrap <- i
+
+        return(res)
+
+      }, error = function(e) {
+        cat(sprintf("[Bootstrapping] ⚠️ Bootstrap %d failed: %s\n", i, e$message))
+        flush.console()
+        return(NULL)
+      })
+
+      return(result)
+    }
+  )
+
+  duration <- round(difftime(Sys.time(), start_time, units = "secs"), 2)
+  cat(sprintf("[Bootstrapping] Completed in %s seconds.\n", duration))
+  flush.console()
+
+  bootstrap_results <- dplyr::bind_rows(bootstrap_results_list)
   return(bootstrap_results)
 }
 
@@ -649,16 +643,15 @@ validate_variables <- function(data, classified_types) {
 
 # Count variable values
 check_unique_values <- function(data, variables) {
-  # Create a data frame to store the unique value counts for each variable
   counts <- sapply(variables, function(var) {
-    length(unique(data[[var]]))  
+    length(unique(na.omit(data[[var]])))  # exclude NAs before getting unique
   })
   
-  # Convert to a data frame 
   result <- data.frame(Variable = variables, Count = counts)
   rownames(result) <- NULL
   return(result)
 }
+
 # Loop through covariate_levels and check for low-count variables
 check_covariate_levels <- function(covariate_levels) {
   for (i in seq_len(nrow(covariate_levels))) {
@@ -670,9 +663,6 @@ check_covariate_levels <- function(covariate_levels) {
     }
   }
 }
-
-
-
 
 # Explain variance
 LM_explain <- function(data, variables, response, feature, n_cores, batch_size) {
@@ -726,10 +716,10 @@ LM_explain <- function(data, variables, response, feature, n_cores, batch_size) 
         }
         
         data.frame(
-          feature = feat,
-          variable = var,
-          R_squared = r_squared,
-          p_value = p_value,
+          feature          = feat,
+          variable         = var,
+          r2               = r_squared,
+          p_value          = p_value,
           stringsAsFactors = FALSE
         )
       })
@@ -747,6 +737,35 @@ LM_explain <- function(data, variables, response, feature, n_cores, batch_size) 
 
   return(results)
 }
+
+# Selects_top_pc_combinations
+select_top_pc_combinations <- function(data, variable, top_n = 5) {
+  # Ensure 'feature' is character to avoid factor levels
+  data$feature <- as.character(data$feature)
+  
+  # Filter the data based on the given variable
+  filtered_data <- data[data$variable == variable, ]
+  
+  # Sort by p_value ascending (significant first), then r2 descending
+  sorted_data <- filtered_data[order(filtered_data$p_value, -filtered_data$r2), ]
+  
+  # Initialize an empty list to hold the combinations
+  combinations_list <- list()
+  
+  # Generate unique combinations of PCs
+  for (i in 1:(nrow(sorted_data) - 1)) {
+    for (j in (i + 1):nrow(sorted_data)) {
+      combinations_list[[length(combinations_list) + 1]] <- c(sorted_data$feature[i], sorted_data$feature[j])
+    }
+  }
+  
+  # Limit the list to top_n combinations
+  best_combinations <- head(combinations_list, top_n)
+  
+  return(best_combinations)
+}
+
+
 
 
 

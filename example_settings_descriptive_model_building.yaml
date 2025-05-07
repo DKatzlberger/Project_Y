@@ -1,15 +1,11 @@
 # Input
-data_path: data/downloads/GEO/Population-specific Mutation Patterns in Breast Tumors from African American, European American, and Kenyan Patients/GSE225846_raw_RSEM.h5ad
+data_path: data/inputs/PanCanAtlas_BRCA_raw_RSEM_subtypeNAremoved.h5ad
 tech: transcriptomics
 data_type: RSEM
 meta_variables:
-  - type
-  - age_(at_surgery)
-  - race
-  - er_status
-  - pr
-  - her2
-  - stage
+  - subtype
+  - subtype_pooled
+  - age
 # Output
 output_directory: development_descriptive_model_building
 
