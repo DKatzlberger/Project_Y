@@ -1,5 +1,5 @@
 # Reproducibility
-seed: 42
+seed: 1
 # Classification
 class_0: Basal
 class_1: non-Basal
@@ -16,5 +16,7 @@ output_directory: development_cross_ancestry_dge
 # Features
 filter_features: True
 normalization_method: limma_voom
+# Bootstrap
+n_bootstraps: 1000
 # Visualization
 visual_val: True

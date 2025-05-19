@@ -458,7 +458,13 @@ filter_by_variance <- function(data, var_threshold = 0.01, min_samples_ratio = 0
   return(filtered_genes)
 }
 
-
+# Design matrix
+make_clean_design <- function(data, formula) {
+  design <- model.matrix(formula, data = data)
+  colnames(design) <- gsub("group", "", colnames(design))
+  colnames(design) <- gsub("-", "_", colnames(design))
+  return(design)
+}
 
 # Stratified subset
 stratified_subset <- function(data, strata, output_column, seed){
@@ -502,19 +508,30 @@ stratified_subset <- function(data, strata, output_column, seed){
 }
 
 # Bootstrap
-perform_bootstrap_parallel <- function(
-  expression_matrix, 
-  metadata, 
+perform_H1_bootstrap <- function(
+  matrix, 
+  meta, 
   formula, 
-  normalization_method,
+  normalization,
   n_iterations = 1000,
   n_cpus       = parallel::detectCores() - 1
 ) {
-  stopifnot(all(rownames(metadata) == rownames(expression_matrix)))
+  stopifnot(all(rownames(meta) == rownames(matrix)))
+
+  # Connection limit fallback
+  max_connections <- 124  # Conservative default
+  max_safe_cores  <- min(max_connections, n_iterations)
+
+  if (n_cpus > max_safe_cores) {
+    cat(sprintf("[H1 Bootstrapping] ⚠️  Requested %d cores, limiting to %d due to system constraints.\n", n_cpus, max_safe_cores))
+    n_cpus <- max_safe_cores
+  }
+
+  # Inform user of adjusted setup
+  cat(sprintf("[H1 Bootstrapping] Performing %s bootstraps, utilizing %s cores.\n", n_iterations, n_cpus))
 
   # Set parallel plan
   future::plan(future::multisession, workers = n_cpus)
-  cat(sprintf("[Bootstrapping] Utilizing %s cores, performing %s bootstraps. \n", n_cpus, n_iterations))
 
   # Timing
   start_time <- Sys.time()
@@ -526,9 +543,9 @@ perform_bootstrap_parallel <- function(
 
       result <- tryCatch({
         # Bootstrap sample
-        sampled_idx <- sample(1:nrow(expression_matrix), size = nrow(expression_matrix), replace = TRUE)
-        boot_expr   <- expression_matrix[sampled_idx, , drop = FALSE]
-        boot_meta   <- metadata[sampled_idx, , drop = FALSE]
+        sampled_idx <- sample(1:nrow(matrix), size = nrow(matrix), replace = TRUE)
+        boot_expr   <- matrix[sampled_idx, , drop = FALSE]
+        boot_meta   <- meta[sampled_idx, , drop = FALSE]
 
         # Make sample names unique (otherwise limma complains)
         rownames(boot_expr) <- paste0("Sample_", i, "_", seq_len(nrow(boot_expr)))
@@ -540,7 +557,7 @@ perform_bootstrap_parallel <- function(
         colnames(boot_design) <- gsub("-", "_", colnames(boot_design))
 
         # Normalize
-        boot_norm <- normalization_method(t(boot_expr), boot_design)
+        boot_norm <- normalization(t(boot_expr), boot_design)
 
         # Linear model
         fit <- limma::lmFit(boot_norm, design = boot_design)
@@ -548,7 +565,7 @@ perform_bootstrap_parallel <- function(
 
         # Contrast
         cols                  <- colnames(boot_design)
-        contrast_calculations <- glue("{cols[1]} - {cols[2]}")
+        contrast_calculations <- glue::glue("{cols[1]} - {cols[2]}")
         contrast_matrix  <- limma::makeContrasts(contrasts = contrast_calculations, levels = boot_design)
 
         fit2 <- limma::contrasts.fit(fit, contrast_matrix)
@@ -560,7 +577,7 @@ perform_bootstrap_parallel <- function(
         return(res)
 
       }, error = function(e) {
-        cat(sprintf("[Bootstrapping] ⚠️ Bootstrap %d failed: %s\n", i, e$message))
+        cat(sprintf("[H1 Bootstrapping] ⚠️ Bootstrap %d failed: %s\n", i, e$message))
         flush.console()
         return(NULL)
       })
@@ -570,13 +587,259 @@ perform_bootstrap_parallel <- function(
   )
 
   duration <- round(difftime(Sys.time(), start_time, units = "secs"), 2)
-  cat(sprintf("[Bootstrapping] Completed in %s seconds.\n", duration))
+  cat(sprintf("[H1 Bootstrapping] Completed in %s seconds.\n", duration))
   flush.console()
 
   bootstrap_results <- dplyr::bind_rows(bootstrap_results_list)
   return(bootstrap_results)
 }
 
+perform_H0_bootstrap <- function(
+  matrix,
+  meta,
+  size,
+  formula,
+  normalization,
+  n_iterations = 1000,
+  n_cpus       = parallel::detectCores() - 1
+) {
+
+  stopifnot(all(rownames(meta) == rownames(matrix)))
+
+  max_connections <- 124
+  max_safe_cores  <- min(max_connections, n_iterations)
+
+  if (n_cpus > max_safe_cores) {
+    cat(sprintf("[H0 Bootstrapping] ⚠️ Requested %d cores, limiting to %d due to system constraints.\n", n_cpus, max_safe_cores))
+    n_cpus <- max_safe_cores
+  }
+
+  cat(sprintf("[H0 Bootstrapping] Running %s permutations, using %s cores.\n", n_iterations, n_cpus))
+  cat(sprintf("[H0 Bootstrapping] Creating logFC without ancestry awareness from size: %s. \n", size))
+
+  future::plan(future::multisession, workers = n_cpus)
+  start_time <- Sys.time()
+
+  bootstrap_results_list <- furrr::future_map(
+    1:n_iterations,
+    .options = furrr::furrr_options(seed = TRUE),
+    function(i) {
+
+      result <- tryCatch({
+
+        # Sample with replacement 
+        idx         <- sample(1:nrow(matrix), size = size, replace = TRUE)
+        boot_matrix <- matrix[idx, , drop = FALSE]
+        boot_meta   <- meta[idx, , drop = FALSE]
+
+        # Make sample names unique (otherwise limma complains)
+        rownames(boot_matrix) <- paste0("Sample_", i, "_", seq_len(nrow(boot_matrix)))
+        rownames(boot_meta)   <- rownames(boot_matrix)
+
+        # Design matrix
+        boot_design <- model.matrix(formula, data = boot_meta)
+        colnames(boot_design) <- gsub("group", "", colnames(boot_design))
+        colnames(boot_design) <- gsub("-", "_", colnames(boot_design))
+
+        # Normalize
+        boot_norm <- normalization(t(boot_matrix), boot_design)
+
+        # Fit linear model
+        fit <- limma::lmFit(boot_norm, design = boot_design)
+        fit <- limma::eBayes(fit)
+
+        # Build contrast
+        cols <- colnames(boot_design)
+        contrast_formula <- glue::glue("{cols[1]} - {cols[2]}")
+        contrast_matrix  <- limma::makeContrasts(contrasts = contrast_formula, levels = boot_design)
+
+        fit2 <- limma::contrasts.fit(fit, contrast_matrix)
+        fit2 <- limma::eBayes(fit2)
+
+        res <- extract_results(fit2)
+        res$bootstrap <- i
+        return(res)
+
+      }, error = function(e) {
+        cat(sprintf("[H0 Bootstrapping] ⚠️ Iteration %d failed: %s\n", i, e$message))
+        flush.console()
+        return(NULL)
+      })
+
+      return(result)
+    }
+  )
+
+  duration <- round(difftime(Sys.time(), start_time, units = "secs"), 2)
+  cat(sprintf("[H0 Bootstrapping] Completed in %s seconds.\n", duration))
+  flush.console()
+
+  bootstrap_results <- dplyr::bind_rows(bootstrap_results_list)
+  return(bootstrap_results)
+}
+
+
+perform_H0_bootstrap_scratch <- function(
+  matrix,
+  meta,
+  size,
+  group_column,
+  normalization = NULL,
+  n_iterations  = 1000,
+  n_cpus        = NULL
+) {
+  stopifnot(all(rownames(meta) == rownames(matrix)))
+
+  # Determine max allowed by system
+  max_safe_cores <- parallel::detectCores() - 5
+
+  # If user left n_cpus as NULL or NA, auto-calculate
+  if (is.null(n_cpus)) {
+    n_cpus <- min(1, floor(n_iterations / 100))
+  }
+
+  # Cap at safe system limit
+  if (n_cpus > max_safe_cores) {
+    cat(sprintf("[H0 Bootstrapping] ⚠️ Requested %d cores, limiting to %d due to system constraints.\n", n_cpus, max_safe_cores))
+    n_cpus <- max_safe_cores
+  }
+
+  cat(sprintf("[H0 Bootstrapping] Running %s permutations, using %s cores.\n", n_iterations, n_cpus))
+  cat(sprintf("[H0 Bootstrapping] Creating logFC without ancestry awareness from size: %s. \n", size))
+
+  future::plan(future::multisession, workers = n_cpus)
+  start_time <- Sys.time()
+
+  bootstrap_results_list <- furrr::future_map(
+    1:n_iterations,
+    .options = furrr::furrr_options(seed = TRUE),
+    function(i) {
+      tryCatch({
+        idx         <- sample(1:nrow(matrix), size = size, replace = TRUE)
+        boot_matrix <- matrix[idx, , drop = FALSE]
+        boot_meta   <- meta[idx, , drop = FALSE]
+
+        # Get group info and enforce level order
+        groups <- boot_meta[[group_column]]
+        if (!is.factor(groups)) {
+          stop("The group column must be a factor with exactly 2 levels.")
+        }
+        if (length(levels(groups)) != 2) {
+          stop("The group factor must have exactly 2 levels.")
+        }
+
+        g1 <- levels(groups)[1]  
+        g2 <- levels(groups)[2]  
+
+        # Normalize (if provided)
+        if (!is.null(normalization)) {
+          # Renaming so voom does not complain
+          rownames(boot_matrix) <- paste0("Sample_", i, "_", seq_len(nrow(boot_matrix)))
+          rownames(boot_meta)   <- rownames(boot_matrix)
+          # Create design
+          formula     <- as.formula(paste("~0 +", group_column))
+          boot_design <- model.matrix(formula, data = boot_meta)
+          # Normalization
+          boot_norm   <- normalization(t(boot_matrix), boot_design)
+          boot_norm   <- if (is.list(boot_norm) && !is.null(boot_norm$E)) boot_norm$E else boot_norm
+          boot_norm   <- t(boot_norm)
+        } else {
+          boot_norm <- boot_matrix  # Use raw input
+        }
+
+        # Fast group subsetting
+        g1_idx <- groups == g1
+        g2_idx <- groups == g2
+
+        # Fast logFC computation
+        g1_means <- matrixStats::colMeans2(boot_norm[g1_idx, , drop = FALSE])
+        g2_means <- matrixStats::colMeans2(boot_norm[g2_idx, , drop = FALSE])
+        logFC    <- g1_means - g2_means 
+
+        # Return as data.table
+        data.table::data.table(
+          coef      = paste(g1, "-", g2),
+          Feature   = colnames(matrix),
+          logFC     = logFC,
+          bootstrap = i
+        )
+
+      }, error = function(e) {
+        cat(sprintf("[H0 Bootstrapping] ⚠️ Iteration %d failed: %s\n", i, e$message))
+        flush.console()
+        return(NULL)
+      })
+    }
+  )
+
+  duration <- round(difftime(Sys.time(), start_time, units = "secs"), 2)
+  cat(sprintf("[H0 Bootstrapping] Completed in %s seconds.\n", duration))
+  flush.console()
+
+  bootstrap_results <- data.table::rbindlist(bootstrap_results_list, use.names = TRUE, fill = TRUE)
+  return(bootstrap_results)
+}
+
+# Pipeline to pvalue
+compute_null_params <- function(boot_df, metric_col = "Difference", is_global = FALSE) {
+  if (is_global) {
+    boot_df[, .(
+      mean_null = mean(get(metric_col)),
+      var_null  = var(get(metric_col)),
+      sd_null   = sqrt(var(get(metric_col))),
+      n_boot    = .N
+    )][, Feature := "Global"]
+  } else {
+    boot_df[, .(
+      mean_null = mean(get(metric_col)),
+      var_null  = var(get(metric_col)),
+      sd_null   = sqrt(var(get(metric_col))),
+      n_boot    = .N
+    ), by = Feature]
+  }
+}
+
+compute_pvalues <- function(boot_df, obs_df, metric_col = "Difference", is_global = FALSE) {
+  null_params <- compute_null_params(boot_df, metric_col, is_global)
+
+  null_dist <- merge(boot_df, null_params, by = if (is_global) NULL else "Feature")
+
+  if (is_global) {
+    obs_df_renamed <- obs_df[, .(Observed = get(metric_col))]
+    obs_df_renamed[, Feature := "Global"]
+  } else {
+    obs_df_renamed <- obs_df[, .(Feature, Observed = get(metric_col))]
+  }
+
+  null_dist <- merge(null_dist, obs_df_renamed, by = "Feature", all.x = TRUE)
+
+  null_dist[, `:=`(
+    p_parametric = 2 * pnorm(-abs(Observed[1] - mean_null[1]) / sqrt(var_null[1])),
+    p_empirical  = (sum(abs(get(metric_col)) >= abs(Observed[1])) + 1) / (.N + 1)
+  ), by = if (is_global) NULL else "Feature"]
+
+  return(null_dist)
+}
+
+
+
+
+# Get expression with meta
+get_expression <- function(
+  meta,                     # Your main data object with obs data.frame and matrix
+  matrix,                   # Normalized expression matrix, features x samples
+  features                  # Character vector of feature names
+) {
+  exp_list <- list()
+  for(feature in features) {
+    exp_list[[feature]] <- meta |>
+      dplyr::mutate(zscore = scale(matrix[feature, ])) |>
+      tibble::rownames_to_column("idx") |>
+      tibble::remove_rownames()
+  }
+  exp_zscore <- dplyr::bind_rows(exp_list, .id = "Feature")
+  return(exp_zscore)
+}
 
 
 # Classify variables

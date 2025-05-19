@@ -4,5 +4,8 @@ data_type: "Input_values"
 filter_features: True
 percentile: 25
 # Bootstrap
-n_bootstraps: 1000
-
+n_bootstraps: 10000
+# Visualization
+vis_features: NULL
+visual_val: True
+logFC_thr: 1

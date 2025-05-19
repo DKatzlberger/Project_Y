@@ -1,24 +1,15 @@
-# COLORS
-genetic_ancestry_colors <- c(
-  "admix" = "#ff4d4d", 
-  "afr"   = "#ff9900", 
-  "amr"   = "#33cc33",
-  "eur"   = "#3399ff", 
-  "eas"   = "#cc33ff", 
-  "sas"   = "#ffcc00"
-  )
-
 # THEMES
 # Font theme
 theme_nature_fonts <- function(base_size = 5) {
   theme(
-    axis.text = element_text(size = base_size),
-    axis.title = element_text(size = base_size),
-    plot.title = element_text(size = base_size, hjust = 0.5),
+    axis.text     = element_text(size = base_size),
+    axis.title    = element_text(size = base_size),
+    plot.title    = element_text(size = base_size, hjust = 0.5),
     plot.subtitle = element_text(size = base_size, hjust = 0.5),
-    legend.title = element_text(size = base_size),
-    legend.text = element_text(size = base_size),
-    strip.text = element_text(size = base_size)
+    legend.title  = element_text(size = base_size),
+    legend.text   = element_text(size = base_size),
+    strip.text    = element_text(size = base_size),
+    plot.caption  = element_text(size = base_size, hjust = 0)
   )
 }
 
@@ -424,7 +415,6 @@ plot_variable_proportion <- function(data, var, point_size = 0.5) {
   return(p)
 }
 
-
 plot_variable_hist <- function(data, var, point_size = 0.5){
 
   # Convert the column to numeric and overwrite it
@@ -613,10 +603,525 @@ plot_pc_combinations <- function(data, color_by, pc_pairs, point_size = 0.5) {
 }
 
 
+
+# CROSS ANCESTRY DGE
+# Null distributions
+plot_cor_diff_histogram <- function(data, x, point_size = 0.5) {
+  # Ensure x_var is a symbol (unquoted column name)
+  x_sym <- rlang::ensym(x)
+
+  data <- data |>
+  mutate(
+    Legend = dplyr::case_when(
+      Statistic == "H0_bootstrapped" ~ "Bootstrapped differences",
+      Statistic == "Observed"        ~ "Observed difference"
+    )
+  )
+  
+  p <- ggplot(
+    data = data,
+    aes(x = !!x_sym)
+  ) +
+  geom_histogram(
+    data = filter(data, Statistic == "H0_bootstrapped"),
+    bins = 50
+  ) +
+  geom_segment(
+    data = filter(data, Statistic == "Observed"),
+    aes(
+      x     = !!x_sym,
+      xend  = !!x_sym,
+      y     = 0,
+      yend  = Inf,
+      color = Legend  
+    )
+  ) +
+  facet_grid(
+    cols = vars(Metric)
+  ) +
+  scale_color_manual(
+    name   = "Statistic",
+    values = c(
+      "Observed difference"      = "orange"
+    )
+  ) +
+  labs(
+    x     = "Difference of correlation coefficient to train set (Subset - Ancestry)",
+    y     = "Count"
+  ) +
+  theme_nature_fonts(
+    base_size = point_size * 10
+  ) +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
+  coord_cartesian(clip = "off") 
+  
+  # Extract histogram data
+  built     <- ggplot_build(p)
+  hist_data <- built$data[[1]]
+  
+  # Compute range and offsets
+  x_range <- range(hist_data$x, na.rm = TRUE)
+  x_min   <- x_range[1]
+  x_max   <- x_range[2]
+  x_span  <- x_max - x_min
+  
+  arrow_start_neg <- 0 - 0.01 * x_span
+  arrow_end_neg   <- x_min + 0.05 * x_span
+  arrow_start_pos <- 0 + 0.01 * x_span
+  arrow_end_pos   <- x_max - 0.05 * x_span
+  
+  max_count <- max(hist_data$count, na.rm = TRUE)
+  arrow_y_below <- -max_count * 0.05
+  text_y_below  <- arrow_y_below - max_count * 0.05
+
+  # Add arrows and annotations
+  p <- p +
+    annotate(
+      "segment",
+      x          = arrow_start_neg, xend = arrow_end_neg,
+      y          = arrow_y_below, yend = arrow_y_below,
+      arrow      = arrow(length = unit(0.15, "cm")),
+      linewidth  = 0.3
+    ) +
+    annotate(
+      "text",
+      x     = (arrow_start_neg + arrow_end_neg) / 2,
+      y     = text_y_below,
+      label = "Ancestry closer",
+      size  = point_size * 3.5,
+      hjust = 0.5
+    ) +
+    annotate(
+      "segment",
+      x          = arrow_start_pos, xend = arrow_end_pos,
+      y          = arrow_y_below, yend = arrow_y_below,
+      arrow      = arrow(length = unit(0.15, "cm")),
+      linewidth  = 0.3
+    ) +
+    annotate(
+      "text",
+      x     = (arrow_start_pos + arrow_end_pos) / 2,
+      y     = text_y_below,
+      label = "Subset closer",
+      size  = point_size * 3.5,
+      hjust = 0.5
+    ) 
+  
+  return(p)
+}
+
+plot_euclid_diff_histogram <- function(data, x, point_size = 0.5) {
+  # Ensure x_var is a symbol (unquoted column name)
+  x_sym <- rlang::ensym(x)
+
+  data <- data |>
+  mutate(
+    Legend = dplyr::case_when(
+      Statistic == "H0_bootstrapped" ~ "Bootstrapped differences",
+      Statistic == "Observed"        ~ "Observed difference"
+    )
+  )
+  
+  p <- ggplot(
+    data = data,
+    aes(x = !!x_sym)
+  ) +
+  geom_histogram(
+    data = filter(data, Statistic == "H0_bootstrapped"),
+    bins = 50
+  ) +
+  geom_segment(
+    data = filter(data, Statistic == "Observed"),
+    aes(
+      x     = !!x_sym,
+      xend  = !!x_sym,
+      y     = 0,
+      yend  = Inf,
+      color = Legend  
+    )
+  ) +
+  facet_wrap(
+    ~ Feature
+  ) +
+  scale_color_manual(
+    name   = "Statistic",
+    values = c(
+      "Observed difference" = "orange"
+    )
+  ) +
+  labs(
+    x     = "Difference of euclidean distance to train set (Subset - Ancestry)",
+    y     = "Count"
+  ) +
+  theme_nature_fonts(
+    base_size = point_size * 10
+  ) +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
+  coord_cartesian(clip = "off")
+  
+  # Extract histogram data
+  built     <- ggplot_build(p)
+  hist_data <- built$data[[1]]
+  
+  # Compute range and offsets
+  x_range <- range(hist_data$x, na.rm = TRUE)
+  x_min   <- x_range[1]
+  x_max   <- x_range[2]
+  x_span  <- x_max - x_min
+  
+  arrow_start_neg <- 0 - 0.01 * x_span
+  arrow_end_neg   <- x_min + 0.05 * x_span
+  arrow_start_pos <- 0 + 0.01 * x_span
+  arrow_end_pos   <- x_max - 0.05 * x_span
+  
+  max_count <- max(hist_data$count, na.rm = TRUE)
+  arrow_y_below <- -max_count * 0.05
+  text_y_below  <- arrow_y_below - max_count * 0.05
+
+  # Add arrows and annotations
+  p <- p +
+    annotate(
+      "segment",
+      x          = arrow_start_neg, xend = arrow_end_neg,
+      y          = arrow_y_below, yend = arrow_y_below,
+      arrow      = arrow(length = unit(0.15, "cm")),
+      linewidth  = 0.3
+    ) +
+    annotate(
+      "text",
+      x     = (arrow_start_neg + arrow_end_neg) / 2,
+      y     = text_y_below,
+      label = "Subset closer",
+      size  = point_size * 3.5,
+      hjust = 0.5
+    ) +
+    annotate(
+      "segment",
+      x          = arrow_start_pos, xend = arrow_end_pos,
+      y          = arrow_y_below, yend = arrow_y_below,
+      arrow      = arrow(length = unit(0.15, "cm")),
+      linewidth  = 0.3
+    ) +
+    annotate(
+      "text",
+      x     = (arrow_start_pos + arrow_end_pos) / 2,
+      y     = text_y_below,
+      label = "Ancestry closer",
+      size  = point_size * 3.5,
+      hjust = 0.5
+    )
+  
+  return(p)
+}
+
+plot_logFC_diff_histogram <- function(data, x, point_size = 0.5) {
+  # Ensure x_var is a symbol (unquoted column name)
+  x_sym <- rlang::ensym(x)
+
+  data <- data |>
+  mutate(
+    Legend = dplyr::case_when(
+      Statistic == "H0_bootstrapped" ~ "Bootstrapped differences",
+      Statistic == "Observed"        ~ "Observed difference"
+    )
+  )
+  
+  p <- ggplot(
+    data = data,
+    aes(x = !!x_sym)
+  ) +
+  geom_histogram(
+    data = filter(data, Statistic == "H0_bootstrapped"),
+    bins = 50
+  ) +
+  geom_segment(
+    data = filter(data, Statistic == "Observed"),
+    aes(
+      x     = !!x_sym,
+      xend  = !!x_sym,
+      y     = 0,
+      yend  = Inf,
+      color = Legend  
+    )
+  ) +
+  facet_wrap(
+    ~ Feature
+  ) +
+  scale_color_manual(
+    name   = "Statistic",
+    values = c(
+      "Observed difference" = "orange"
+    )
+  ) +
+  labs(
+    x     = "Difference of logFC (Subset - Ancestry)",
+    y     = "Count"
+  ) +
+  theme_nature_fonts(
+    base_size = point_size * 10
+  ) +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
+  coord_cartesian(clip = "off")
+  
+  # Extract histogram data
+  built     <- ggplot_build(p)
+  hist_data <- built$data[[1]]
+  
+  # Compute range and offsets
+  x_range <- range(hist_data$x, na.rm = TRUE)
+  x_min   <- x_range[1]
+  x_max   <- x_range[2]
+  x_span  <- x_max - x_min
+  
+  arrow_start_neg <- 0 - 0.01 * x_span
+  arrow_end_neg   <- x_min + 0.05 * x_span
+  arrow_start_pos <- 0 + 0.01 * x_span
+  arrow_end_pos   <- x_max - 0.05 * x_span
+  
+  max_count <- max(hist_data$count, na.rm = TRUE)
+  arrow_y_below <- -max_count * 0.05
+  text_y_below  <- arrow_y_below - max_count * 0.05
+
+  # Add arrows and annotations
+  p <- p +
+    annotate(
+      "segment",
+      x          = arrow_start_neg, xend = arrow_end_neg,
+      y          = arrow_y_below, yend = arrow_y_below,
+      arrow      = arrow(length = unit(0.15, "cm")),
+      linewidth  = 0.3
+    ) +
+    annotate(
+      "text",
+      x     = (arrow_start_neg + arrow_end_neg) / 2,
+      y     = text_y_below,
+      label = "Ancestry upreg.",
+      size  = point_size * 3.5,
+      hjust = 0.5
+    ) +
+    annotate(
+      "segment",
+      x          = arrow_start_pos, xend = arrow_end_pos,
+      y          = arrow_y_below, yend = arrow_y_below,
+      arrow      = arrow(length = unit(0.15, "cm")),
+      linewidth  = 0.3
+    ) +
+    annotate(
+      "text",
+      x     = (arrow_start_pos + arrow_end_pos) / 2,
+      y     = text_y_below,
+      label = "Subset upreg.",
+      size  = point_size * 3.5,
+      hjust = 0.5
+    )
+  
+  return(p)
+}
+
+# Volcano plots
+plot_euclid_volcano <- function(
+  data,
+  x,
+  y,
+  x_label,
+  arrow_left,
+  arrow_right,
+  log_y      = TRUE,
+  sig        = 0.05,
+  thr        = 1,
+  point_size = 0.5,
+  caption    = "Delta: Subset - Ancestry"
+) {
+  # Extract values
+  x_vals  <- data[[x]]
+  y_vals  <- if (log_y) -log10(data[[y]]) else data[[y]]
+  y_label <- if (log_y) paste0("-log10(", y,")") else y
+
+  # Symbol
+  x_sym <- sym(x)
+  y_sym <- sym(y)
+
+  # Main ggplot object
+  p <- ggplot(
+      data = data,
+      aes(
+        x     = !!x_sym,
+        y     = if (log_y) -log10(!!y_sym) else !!y_sym,
+        color = (.data[[y]] < sig & abs(.data[[x]]) > thr)
+      )
+    ) +
+    geom_point(
+      size = point_size
+    ) +
+    scale_color_manual(
+      values = c(
+        "TRUE" = "red", 
+        "FALSE" = "lightgrey"
+      )
+    ) +
+    labs(
+      x       = x_label,
+      y       = y_label,
+      caption = caption
+    ) +
+    theme_nature_fonts(base_size = point_size * 10) +
+    theme_white_background() +
+    theme_white_strip() +
+    theme(legend.position = "none") +
+    coord_cartesian(clip = "off")
+
+  # Compute span for arrow/text positioning
+  x_range <- range(x_vals, na.rm = TRUE)
+  x_span  <- diff(x_range)
+  x_min   <- x_range[1]
+  x_max   <- x_range[2]
+
+  arrow_start_neg <- 0 - 0.01 * x_span
+  arrow_end_neg   <- x_min + 0.05 * x_span
+  arrow_start_pos <- 0 + 0.01 * x_span
+  arrow_end_pos   <- x_max - 0.05 * x_span
+
+  y_min <- min(y_vals, na.rm = TRUE)
+  arrow_y_below <- y_min - 0.05
+  text_y_below  <- arrow_y_below - 0.05
+
+  # Add directional arrows and labels
+  p <- p +
+    annotate(
+      "segment",
+      x = arrow_start_neg, xend = arrow_end_neg,
+      y = arrow_y_below,   yend = arrow_y_below,
+      arrow = arrow(length = unit(0.15, "cm")),
+      linewidth = 0.3
+    ) +
+    # Left error
+    annotate(
+      "text",
+      x     = (arrow_start_neg + arrow_end_neg) / 2,
+      y     = text_y_below,
+      label = arrow_left,
+      size  = point_size * 3.5,
+      hjust = 0.5
+    ) +
+    annotate(
+      "segment",
+      x = arrow_start_pos, xend = arrow_end_pos,
+      y = arrow_y_below,   yend = arrow_y_below,
+      arrow = arrow(length = unit(0.15, "cm")),
+      linewidth = 0.3
+    ) +
+    # Arrow right
+    annotate(
+      "text",
+      x     = (arrow_start_pos + arrow_end_pos) / 2,
+      y     = text_y_below,
+      label = arrow_right,
+      size  = point_size * 3.5,
+      hjust = 0.5
+    )
+
+  # Calculate y limits for segments (spanning points' range)
+  y_min <- min(y_vals, na.rm = TRUE)
+  y_max <- max(y_vals, na.rm = TRUE)
+
+  p <- p +
+    annotate(
+      "segment",
+      x = -thr, xend = -thr,
+      y = y_min, yend = Inf,
+      color     = "blue",
+      linetype  = "dashed",
+      linewidth = point_size / 2
+    ) +
+    annotate(
+      "segment",
+      x = thr, xend = thr,
+      y = y_min, yend = Inf,
+      color     = "blue",
+      linetype  = "dashed",
+      linewidth = point_size / 2
+    ) +
+    geom_hline(
+      yintercept = if (log_y) -log10(sig) else sig,
+      linetype   = "dashed",
+      color      = "blue",
+      linewidth  = point_size / 2
+    ) 
+
+  return(p)
+}
+
+plot_boxplot <- function(
+  data,
+  x,
+  y,
+  fill,
+  x_label,
+  point_size = 0.5
+) {
+  #
+  x_sym    <- sym(x)
+  y_sym    <- sym(y)
+  fill_sym <- sym(fill)
+
+  p <- ggplot(
+    data = data,
+    aes(
+      x    = !!x_sym,
+      y    = !!y_sym,
+      fill = !!fill_sym
+    )
+  ) +
+  geom_boxplot(
+    width        = point_size,
+    outlier.size = point_size / 10,
+  ) +
+  facet_wrap(
+    ~ Feature,  
+    scales         = "free",  
+    strip.position = "top",
+    ncol           = 5,
+    nrow           = 2
+  ) +
+  labs(
+    x    = x_label,
+    y    = "z-score"
+  ) +
+  theme_nature_fonts(
+    base_size = (point_size * 10)
+  ) +
+  theme_white_background() +
+  theme_white_strip() +
+  theme_small_legend() +
+  theme(
+    legend.position = "bottom",
+    legend.title    = element_blank()
+  )
+
+  return(p)
+}
+
+
 # INTERACTIONS
 # Volcano plot
-volcano_plot <- function(data, logFC_thr = 1, point_size = 0.5, alpha_value = 0.5,
-                         top_features = NULL, facet_rows = NULL, facet_cols = NULL) {
+volcano_plot <- function(
+  data, 
+  x            = "logFC", 
+  y            = "adj.P.Val", 
+  logFC_thr    = 1, 
+  point_size   = 0.5, 
+  alpha_value  = 0.5,
+  top_features = NULL, 
+  facet_rows   = NULL, 
+  facet_cols   = NULL
+  ) {
+
   # Ensure top_features is handled correctly
   if (is.null(top_features)) {
     top_features <- character(0) 
@@ -626,11 +1131,15 @@ volcano_plot <- function(data, logFC_thr = 1, point_size = 0.5, alpha_value = 0.
   row_facet <- if (!is.null(facet_rows)) rlang::syms(facet_rows) else NULL
   col_facet <- if (!is.null(facet_cols)) rlang::syms(facet_cols) else NULL
 
+  x_sym <- sym(x)
+  y_sym <- sym(y)
+
   p <- data |>
-    ggplot(aes(
-      x     = logFC,
-      y     = -log10(adj.P.Val),
-      color = (adj.P.Val < 0.05 & abs(logFC) > logFC_thr)
+    ggplot(
+      aes(
+        x     = !!x_sym,
+        y     = -log10(!!y_sym),
+        color = (!!y_sym < 0.05 & abs(!!x_sym) > logFC_thr)
       )
     ) +
     geom_point(

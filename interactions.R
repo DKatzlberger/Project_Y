@@ -44,7 +44,7 @@ if (length(args) > 0) {
   # Dev settings if no command-line argument provided
   cat("Running interactive mode for development. \n")
   # "example_settings_interactions.yaml"
-  YAML_FILE <- "data/downloads/PhyloFrame/THCA/settings_interactions_M0_MX_Male_Female.yaml"
+  YAML_FILE <- "example_settings_interactions.yaml"
   is_yaml_file(YAML_FILE)
 }
 
@@ -348,7 +348,7 @@ if (filter_features & tech == "transcriptomics"){
   # Save
   save_ggplot(p_before, save_name, width = 6, height = 4)
 }
-# Save feature 
+# Save features 
 save_name <- file.path(path_to_save_location, "Features.yaml")
 write_yaml(filtered_data$var_names, save_name)
 # Number of features
@@ -660,6 +660,15 @@ fwrite(contrast_res, save_name)
 cat("Check results: 'Limma_contrast.csv'. \n")
 cat("-------------------------------------------------------------------- \n")
 
+# Significant features
+interaction_term <- contrast_terms$interaction
+interaction      <- filter(contrast_res, coef %in% interaction_term)
+# Filter
+sig_interaction <- filter(interaction, adj.P.Val < 0.05 & abs(logFC) > setup$logFC_thr)
+sig_features    <- sig_interaction$Feature
+# Save
+save_name <- file.path(path_to_save_location, "Sig_features.yaml")
+write_yaml(sig_features, save_name)
 
 # Save the settings
 save_name <- file.path(path_to_save_location, "Settings.yaml")
@@ -669,7 +678,7 @@ write_yaml(setup, save_name)
 # --- Visualize: Results
 if (setup$visual_val){
 
-  # Message
+  # Print statement
   cat("Visualizing results. \n")
   cat("-------------------------------------------------------------------- \n")
   # Create output directory
