@@ -780,47 +780,6 @@ perform_H0_bootstrap_scratch <- function(
   return(bootstrap_results)
 }
 
-# Pipeline to pvalue
-compute_null_params <- function(boot_df, metric_col = "Difference", is_global = FALSE) {
-  if (is_global) {
-    boot_df[, .(
-      mean_null = mean(get(metric_col)),
-      var_null  = var(get(metric_col)),
-      sd_null   = sqrt(var(get(metric_col))),
-      n_boot    = .N
-    )][, Feature := "Global"]
-  } else {
-    boot_df[, .(
-      mean_null = mean(get(metric_col)),
-      var_null  = var(get(metric_col)),
-      sd_null   = sqrt(var(get(metric_col))),
-      n_boot    = .N
-    ), by = Feature]
-  }
-}
-
-compute_pvalues <- function(boot_df, obs_df, metric_col = "Difference", is_global = FALSE) {
-  null_params <- compute_null_params(boot_df, metric_col, is_global)
-
-  null_dist <- merge(boot_df, null_params, by = if (is_global) NULL else "Feature")
-
-  if (is_global) {
-    obs_df_renamed <- obs_df[, .(Observed = get(metric_col))]
-    obs_df_renamed[, Feature := "Global"]
-  } else {
-    obs_df_renamed <- obs_df[, .(Feature, Observed = get(metric_col))]
-  }
-
-  null_dist <- merge(null_dist, obs_df_renamed, by = "Feature", all.x = TRUE)
-
-  null_dist[, `:=`(
-    p_parametric = 2 * pnorm(-abs(Observed[1] - mean_null[1]) / sqrt(var_null[1])),
-    p_empirical  = (sum(abs(get(metric_col)) >= abs(Observed[1])) + 1) / (.N + 1)
-  ), by = if (is_global) NULL else "Feature"]
-
-  return(null_dist)
-}
-
 
 
 

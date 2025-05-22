@@ -925,7 +925,7 @@ plot_logFC_diff_histogram <- function(data, x, point_size = 0.5) {
 }
 
 # Volcano plots
-plot_euclid_volcano <- function(
+plot_cross_ancestry_volcano <- function(
   data,
   x,
   y,
@@ -936,7 +936,7 @@ plot_euclid_volcano <- function(
   sig        = 0.05,
   thr        = 1,
   point_size = 0.5,
-  caption    = "Delta: Subset - Ancestry"
+  caption    = NULL
 ) {
   # Extract values
   x_vals  <- data[[x]]
