@@ -151,7 +151,6 @@ setup$n_class_1_train_ancestry <- counts[class_1, train_ancestry]
 setup$n_class_0_infer_ancestry <- counts[class_0, infer_ancestry]
 setup$n_class_1_infer_ancestry <- counts[class_1, infer_ancestry]
 
-
 # --- Design matrix 
 # Validate the covariate
 if (!is.null(covariate)){
@@ -425,6 +424,8 @@ if (normalization){
   cat("Check plot: 'QC_density_input_values.pdf' and 'QC_qq_input_values.pdf' \n")
   cat("-------------------------------------------------------------------- \n")
 }
+
+
 # --- Unsupervised clustering
 # PCA
 cat("Unsuperived clustering: PCA. \n")
@@ -566,36 +567,37 @@ if (setup$save_coordinates){
 }
 
 # TSNE
-cat("Unsuperived clustering: TSNE. \n")
-set.seed(setup$seed)
-tsne_results <- Rtsne(t(data_norm_matrix), dims = 2, setup$perplexity)
-coordinates  <- data.frame(TSNE1 = tsne_results$Y[, 1], TSNE2 = tsne_results$Y[, 2])
-coordinates  <- bind_cols(coordinates, adata$obs)
+if (setup$tsne_cluster){
+  cat("Unsuperived clustering: TSNE. \n")
+  set.seed(setup$seed)
+  tsne_results <- Rtsne(t(data_norm_matrix), dims = 2, setup$perplexity)
+  coordinates  <- data.frame(TSNE1 = tsne_results$Y[, 1], TSNE2 = tsne_results$Y[, 2])
+  coordinates  <- bind_cols(coordinates, adata$obs)
 
-# Visualize: TSNE
-cat("Creating scatter plots for TSNE \n")
-# Plot loop
-p_list <- lapply(vars_pc, function(var) plot_clusters(coordinates, "TSNE1", "TSNE2", var, var))
-# Patchwork
-max_col <- 3
-n_plots <- length(vars_pc)
-n_col   <- min(n_plots, max_col)
-n_row   <- ceiling(n_plots / n_col)
-p       <- wrap_plots(p_list, ncol = n_col)
-# Save
-save_name <- file.path(path_to_save_location, "QC_tsne_scatter_plot.pdf")
-width     <- n_col * 3.5
-height    <- n_row * 3
-save_ggplot(p, save_name, width = width, height = height)
-cat("Check plot: 'QC_tsne_scatter_plot.pdf' \n")
-cat("-------------------------------------------------------------------- \n")
+  # Visualize: TSNE
+  cat("Creating scatter plots for TSNE \n")
+  # Plot loop
+  p_list <- lapply(vars_pc, function(var) plot_clusters(coordinates, "TSNE1", "TSNE2", var, var))
+  # Patchwork
+  max_col <- 3
+  n_plots <- length(vars_pc)
+  n_col   <- min(n_plots, max_col)
+  n_row   <- ceiling(n_plots / n_col)
+  p       <- wrap_plots(p_list, ncol = n_col)
+  # Save
+  save_name <- file.path(path_to_save_location, "QC_tsne_scatter_plot.pdf")
+  width     <- n_col * 3.5
+  height    <- n_row * 3
+  save_ggplot(p, save_name, width = width, height = height)
+  cat("Check plot: 'QC_tsne_scatter_plot.pdf' \n")
+  cat("-------------------------------------------------------------------- \n")
 
-# Save
-if (setup$save_coordinates){
-  save_name <- file.path(path_to_save_location, "Coordinates_tsne.csv")
-  fwrite(coordinates, save_name)
+  # Save
+  if (setup$save_coordinates){
+    save_name <- file.path(path_to_save_location, "Coordinates_tsne.csv")
+    fwrite(coordinates, save_name)
+  }
 }
-
 
 # --- Differential gene expression
 cat("Differential gene expression analysis. \n")

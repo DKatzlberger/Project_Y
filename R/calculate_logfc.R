@@ -11,11 +11,10 @@
 #'   (features x samples) and a design matrix, and return either a matrix or
 #'   a list with an `E` element containing normalized values.
 #'
-#' @return A `data.table` with one row per feature, containing the columns:
+#' @return A list with two elements:
 #'   \describe{
-#'     \item{coef}{A string representing the group contrast (e.g., "A - B")}
-#'     \item{feature}{The feature (e.g., gene) name}
-#'     \item{logFC}{The estimated log fold change between groups}
+#'     \item{logfc}{A `data.table` with columns: coef, feature, logFC}
+#'     \item{normalized}{The normalized (or original) expression matrix, same shape as input}
 #'   }
 #'
 #' @importFrom matrixStats colMeans2
@@ -50,13 +49,9 @@ calculate_logfc <- function(
   if (!is.null(normalization)) {
     design_formula <- stats::as.formula(paste("~0 +", group_column))
     design_matrix <- stats::model.matrix(design_formula, data = meta)
-
     rownames(design_matrix) <- rownames(meta)
 
-    normalized <- normalization(
-      t(matrix),
-      design_matrix
-    )
+    normalized <- normalization(t(matrix), design_matrix)
 
     expression_matrix <- if (is.list(normalized) && !is.null(normalized$E)) {
       t(normalized$E)
@@ -67,19 +62,20 @@ calculate_logfc <- function(
     expression_matrix <- matrix
   }
 
-  mean_1 <- matrixStats::colMeans2(
-    expression_matrix[group_1_idx, , drop = FALSE]
-  )
+  mean_1 <- matrixStats::colMeans2(expression_matrix[group_1_idx, , drop = FALSE])
+  mean_2 <- matrixStats::colMeans2(expression_matrix[group_2_idx, , drop = FALSE])
+  logfc  <- mean_1 - mean_2
 
-  mean_2 <- matrixStats::colMeans2(
-    expression_matrix[group_2_idx, , drop = FALSE]
-  )
-
-  logfc <- mean_1 - mean_2
-
-  data.table::data.table(
+  logfc_dt <- data.table::data.table(
     coef    = paste(group_1, "-", group_2),
     feature = colnames(matrix),
     logFC   = logfc
   )
+
+  # Retunts logFCs and normalized matrix
+  list(
+    logfc       = logfc_dt,
+    norm_matrix = expression_matrix
+  )
 }
+

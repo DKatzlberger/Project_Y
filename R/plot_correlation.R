@@ -1,82 +1,89 @@
-#' Plot Correlation Bar Plots with Facets and Annotations
+#' Plot Correlation Bar Plot with Error Bars, Annotations, and Facets
 #'
-#' @param data A data.frame with columns: method, train_test, train_infer, difference, p_param
-#' @param test_label Character. Label for test column (default = "Test").
-#' @param infer_label Character. Label for inference column (default = "Inference").
-#' @param point_size Numeric. Controls annotation text and base font size (default = 0.5).
+#' @param data A data.frame with correlations and metadata
+#' @param x_col Character. Column name for x-axis (e.g. "phase" or "method")
+#' @param y_col Character. Column name for y-axis (e.g. "correlation")
+#' @param facet_col Character. Column to facet by (e.g. "method")
+#' @param pval_col Character. Column name of p-value to annotate (e.g. "p_param")
+#' @param ci_lower_col Character. Column name for lower bound of CI
+#' @param ci_upper_col Character. Column name for upper bound of CI
+#' @param point_size Numeric. Controls text and bar width (default = 0.5)
+#' @param title Character. Optional plot title
 #'
-#' @return A ggplot2 object.
+#' @return A ggplot2 object
 #' @export
 plot_correlation <- function(
   data,
-  test_label   = "Test",
-  infer_label  = "Inference",
-  point_size   = 0.5,
-  title        = NULL
+  x_col,
+  y_col,
+  facet_col,
+  pval_col,
+  ci_lower_col = NULL,
+  ci_upper_col = NULL,
+  point_size = 0.5,
+  title = NULL
 ) {
+  library(ggplot2)
+  library(rlang)
 
-  # Reshape to long format for ggplot
-  long_data <- reshape2::melt(
+  facet_formula <- stats::as.formula(paste("~", facet_col))
+
+  # Annotation data (one row per facet level)
+  annotation_data <- aggregate(
+    data[[pval_col]],
+    by = list(data[[facet_col]]),
+    FUN = function(p) signif(min(p), 3)
+  )
+  names(annotation_data) <- c(facet_col, "p_value")
+
+  # Base plot
+  p <- ggplot(
     data,
-    id.vars       = "method",
-    measure.vars  = c("train_test", "train_infer"),
-    variable.name = "phase",
-    value.name    = "correlation"
-  )
-
-  # Relabel phases for x-axis
-  long_data$phase <- factor(
-    long_data$phase,
-    levels = c("train_test", "train_infer"),
-    labels = c(test_label, infer_label)
-  )
-
-  # Merge annotations per method
-  annotation_data <- unique(data[, c("method", "difference", "p_param")])
-
-  # Create the plot
-  ggplot2::ggplot(
-    data    = long_data,
-    mapping = ggplot2::aes(
-      x     = phase,
-      y     = correlation
+    aes(
+      x = !!sym(x_col),
+      y = !!sym(y_col)
     )
   ) +
-    ggplot2::geom_col(
-      width    = point_size
-    ) +
-    ggplot2::facet_grid(
-      cols = ggplot2::vars(method)
-    ) +
-    ggplot2::geom_text(
-      data    = annotation_data,
-      mapping = ggplot2::aes(
-        x     = -Inf,
-        y     = Inf,
-        label = paste0(
-          "Delta = ", signif(difference, 3), ", ",
-          "p = ", signif(p_param, 3)
-        )
+    geom_col(width = point_size) +
+    facet_grid(facet_formula)
+
+  # Annotations
+  p <- p + geom_text(
+    data = annotation_data,
+    mapping = aes(
+      x = 1,
+      y = Inf,
+      label = paste0("p = ", p_value)
+    ),
+    hjust = -0.1,
+    vjust = 1.1,
+    size = point_size * 3,
+    inherit.aes = FALSE
+  )
+
+  # Optionally add CI error bars
+  if (!is.null(ci_lower_col) && !is.null(ci_upper_col)) {
+    p <- p + geom_errorbar(
+      aes(
+        ymin = !!sym(ci_lower_col),
+        ymax = !!sym(ci_upper_col)
       ),
-      hjust        = -0.05,
-      vjust        = 1.1,
-      size         = point_size * 3,
-      inherit.aes  = FALSE
-    ) +
-    ggplot2::labs(
+      width = 0.2
+    )
+  }
+
+  # Final styling
+  p <- p +
+    labs(
       title = title,
-      x     = NULL,
-      y     = "Correlation"
+      x = NULL,
+      y = y_col
     ) +
-    theme_nature_fonts(
-      base_size = point_size * 10
-    ) +
+    theme_nature_fonts(base_size = point_size * 10) +
     theme_white_background() +
     theme_white_strip() +
-    theme_small_legend(
-      base_size = point_size * 10
-    ) +
-    ggplot2::theme(
-      legend.position = "none"
-    )
+    theme_small_legend(base_size = point_size * 10) +
+    theme(legend.position = "none")
+
+  return(p)
 }

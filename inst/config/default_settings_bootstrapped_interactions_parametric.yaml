@@ -1,0 +1,5 @@
+data_type: "Input values"
+filter_features: True
+percentile: 25
+n_bootstraps: 1000
+sanity_check: True
