@@ -102,7 +102,7 @@ Currently the script supports these omic types and normalization methods:
 | Omics type (tech)    | Supported normalization/transformation methods (normalization)                      |
 |----------------------|-------------------------------------------------------------------------------------|
 | transcriptomics      | `"limma_voom"` `"normalize_log"` `"normalize_zscore"` `"raw"`                       |
-| methylation          | `"beta_to_mvals"` `"normalize_log"` `"normalize_zscore"` `"raw"`                    |
+| methylation          | `"beta_to_mvalue"` `"normalize_log"` `"normalize_zscore"` `"raw"`                    |
 | proteomics           | `"raw"`                                                                             |
 
 The script will substitute not specified settings with default settings. Default settings are specified in [default_settings_interactions.yaml](https://github.com/DKatzlberger/Project_Y/blob/main/default_settings_interactions.yaml) and can be modified within the user settings (no need to change default settings file).
